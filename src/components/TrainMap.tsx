@@ -72,6 +72,17 @@ const TrainMap: React.FC<TrainMapProps> = ({ apiKey }) => {
     []
   );
 
+  const getMarkerIconUrl = useCallback(
+    (cityId: string): string => {
+      const isCityHighlighted = highlightedRoutes.length > 0 &&
+        getCityRoutes(cityId).some(r => highlightedRoutes.includes(r.id));
+      return isCityHighlighted
+        ? 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png'
+        : 'https://maps.google.com/mapfiles/ms/icons/red-dot.png';
+    },
+    [highlightedRoutes, getCityRoutes]
+  );
+
   const handleCityClick = useCallback(
     (city: City) => {
       setSelectedCity(city);
@@ -165,10 +176,7 @@ const TrainMap: React.FC<TrainMapProps> = ({ apiKey }) => {
             title={city.name}
             onClick={() => handleCityClick(city)}
             icon={{
-              url: highlightedRoutes.length > 0 && 
-                   getCityRoutes(city.id).some(r => highlightedRoutes.includes(r.id))
-                ? 'https://maps.google.com/mapfiles/ms/icons/blue-dot.png'
-                : 'https://maps.google.com/mapfiles/ms/icons/red-dot.png',
+              url: getMarkerIconUrl(city.id),
             }}
           />
         ))}
