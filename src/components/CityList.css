@@ -1,0 +1,176 @@
+.city-list {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #fff;
+}
+
+.search-box {
+  padding: 15px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 10px 15px;
+  border: 1px solid #ddd;
+  border-radius: 25px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-box input:focus {
+  border-color: #1976d2;
+}
+
+.cities {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.city-item {
+  border-bottom: 1px solid #eee;
+  transition: background-color 0.2s;
+}
+
+.city-item:hover {
+  background-color: #f5f5f5;
+}
+
+.city-item.selected {
+  background-color: #e3f2fd;
+}
+
+.city-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px;
+  cursor: pointer;
+}
+
+.city-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.city-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: #333;
+}
+
+.city-country {
+  font-size: 12px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.connections-count {
+  font-size: 12px;
+  color: #1976d2;
+  background: #e3f2fd;
+  padding: 4px 10px;
+  border-radius: 15px;
+}
+
+.city-routes {
+  padding: 0 15px 15px 15px;
+  background: #fafafa;
+  border-top: 1px solid #eee;
+}
+
+.station-name {
+  font-size: 13px;
+  color: #666;
+  margin: 10px 0;
+}
+
+.routes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.route-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid #eee;
+}
+
+.route-item:hover {
+  background: #e3f2fd;
+  border-color: #1976d2;
+}
+
+.destination {
+  font-weight: 500;
+  font-size: 14px;
+  color: #333;
+  flex: 1;
+}
+
+.train-type {
+  font-size: 11px;
+  color: #fff;
+  background: #1976d2;
+  padding: 3px 8px;
+  border-radius: 4px;
+  margin: 0 10px;
+}
+
+.duration {
+  font-size: 12px;
+  color: #666;
+  min-width: 70px;
+  text-align: right;
+}
+
+/* Scrollbar styling */
+.cities::-webkit-scrollbar {
+  width: 8px;
+}
+
+.cities::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.cities::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
+}
+
+.cities::-webkit-scrollbar-thumb:hover {
+  background: #a1a1a1;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .city-header {
+    padding: 12px;
+  }
+
+  .city-name {
+    font-size: 14px;
+  }
+
+  .route-item {
+    flex-wrap: wrap;
+  }
+
+  .destination {
+    width: 100%;
+    margin-bottom: 5px;
+  }
+
+  .train-type {
+    margin-left: 0;
+  }
+}
