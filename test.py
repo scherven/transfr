@@ -161,7 +161,6 @@ def find_path_optimized(db_config: Dict[str, str], s1: str, e1: int, s2: str, e2
     
     return None
 
-
 # Utility function to refresh materialized views
 def refresh_views(db_config: Dict[str, str]):
     """
@@ -206,8 +205,9 @@ if __name__ == "__main__":
 
     s = "München Hauptbahnhof"
     e1 = 20
-    e2 = 21
+    e2 = 22
     
-    print(find_optimized(db_config, s, e1))
-    print(find_optimized(db_config, s, e2))
-    print(find_path_optimized(db_config, s, e1, s, e2))
+    edge1 = find_optimized(db_config, s, e1)
+    edge2 = find_optimized(db_config, s, e2)
+    print(find_buffer_stop_for_edge(db_config, edge1))
+    print(find_buffer_stop_for_edge(db_config, edge2))

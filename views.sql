@@ -1,4 +1,9 @@
--- create_views.sql
+-- Drop all materialized views in reverse order of dependencies
+DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS platform_edges_indexed CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS station_platform_nodes CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS station_platform_ways CASCADE;
+
 -- View 1: Flatten station relations with their platform ways
 CREATE MATERIALIZED VIEW station_platform_ways AS
 SELECT 
