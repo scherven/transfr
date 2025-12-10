@@ -1,5 +1,6 @@
 import psycopg2
 import json
+import tqdm
 from typing import List, Dict, Any
 
 def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Dict[str, Any]]:
@@ -31,7 +32,7 @@ def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Di
             print(f"No relations found for station: {station_name}")
             return []
         
-        print(f"Found {len(relations)} relation(s) for station: {station_name}")
+        # print(f"Found {len(relations)} relation(s) for station: {station_name}")
         
         all_platform_edges = []
         
@@ -68,10 +69,10 @@ def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Di
             platform_nodes = result[0] if result and result[0] else []
             
             if not platform_nodes:
-                print(f"  No nodes found in platform ways")
+                # print(f"  No nodes found in platform ways")
                 continue
             
-            print(f"  Found {len(platform_nodes)} unique node(s) in platforms")
+            # print(f"  Found {len(platform_nodes)} unique node(s) in platforms")
             
             # Step 4: Find ways with railway=platform_edge that share nodes with platforms
             cur.execute("""
@@ -98,8 +99,8 @@ def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Di
                 }
                 all_platform_edges.append(platform_edge_info)
                 
-                print(f"    Found platform_edge way: {way_id} with {len(nodes)} nodes "
-                      f"({len(shared_nodes)} shared)")
+                # print(f"    Found platform_edge way: {way_id} with {len(nodes)} nodes "
+                    #   f"({len(shared_nodes)} shared)")
         
         return all_platform_edges
         
@@ -107,9 +108,32 @@ def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Di
         cur.close()
         conn.close()
 
+def find(db_config, station_name, edge_number):
+    platform_edges = find_platform_edges(station_name, db_config)
 
-def main():
-    # Database configuration
+    if not platform_edges:
+        return None
+
+    for edge in platform_edges:
+        try:
+            if edge['tags']['ref'] == str(edge_number):
+                return edge
+        except KeyError:
+            continue
+        
+def find_path(db, s1, e1, s2, e2):
+    edge_1 = find(db, s1, e1)
+    edge_2 = find(db, s2, e2)
+    if not edge_1 or not edge_2:
+        return None
+
+    # Case 1: Opposite side of platform
+    # Case 2: Buffer stops
+    # Case 3: Crossings
+    # Case 4: Stairs (hardest)
+
+
+if __name__ == "__main__":
     db_config = {
         'host': 'localhost',
         'database': 'openrailwaymap',
@@ -117,25 +141,11 @@ def main():
         'password': '',
         'port': 5432
     }
-    
-    # Example usage
-    station_name = "München Hauptbahnhof"  # Change this to your station name
-    
-    print(f"Searching for platform edges at: {station_name}\n")
-    print("=" * 60)
-    
-    platform_edges = find_platform_edges(station_name, db_config)
-    
-    print("\n" + "=" * 60)
-    print(f"\nTotal platform edges found: {len(platform_edges)}")
-    
-    # Print summary
-    if platform_edges:
-        print("\nSummary:")
-        for edge in platform_edges:
-            print(edge)
 
-
-
-if __name__ == "__main__":
-    main()
+    # print(find(db_config, "München Hauptbahnhof", 11))
+    s = "München Hauptbahnhof"
+    e1 = 20
+    e2 = 21
+    print(find(db_config, s, e1))
+    print(find(db_config, s, e2))
+    print(find_path(db_config, s, e1, s, e2))
