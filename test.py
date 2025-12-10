@@ -1,106 +1,48 @@
 import psycopg2
 import json
-import tqdm
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
-def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Dict[str, Any]]:
+def find_platform_edges_optimized(station_name: str, db_config: Dict[str, str]) -> List[Dict[str, Any]]:
     """
-    Find all platform edges for a given railway station.
-    
-    Args:
-        station_name: The name of the railway station
-        db_config: Dictionary with database connection parameters
-                   (host, database, user, password, port)
-    
-    Returns:
-        List of dictionaries containing platform edge information
+    Find all platform edges for a given railway station using materialized views.
+    Much faster than the original implementation.
     """
     conn = psycopg2.connect(**db_config)
     cur = conn.cursor()
     
     try:
-        # Step 1: Find all relations with the given station name
+        # Single query using the materialized view
         cur.execute("""
-            SELECT id, members
-            FROM planet_osm_rels
-            WHERE tags->>'name' = %s
+            SELECT 
+                relation_id,
+                way_id,
+                nodes,
+                tags,
+                edge_ref
+            FROM platform_edges_indexed
+            WHERE station_name = %s
         """, (station_name,))
         
-        relations = cur.fetchall()
+        results = cur.fetchall()
         
-        if not relations:
-            print(f"No relations found for station: {station_name}")
+        if not results:
+            print(f"No platform edges found for station: {station_name}")
             return []
         
-        # print(f"Found {len(relations)} relation(s) for station: {station_name}")
+        print(f"Found {len(results)} platform edge(s) for station: {station_name}")
         
         all_platform_edges = []
-        
-        # Step 2: Process each relation
-        for rel_id, members in relations:
-            print(f"\nProcessing relation ID: {rel_id}")
+        for rel_id, way_id, nodes, tags, edge_ref in results:
+            tags_data = json.loads(tags) if isinstance(tags, str) else tags
             
-            # Parse members JSON and extract platform ways
-            members_data = json.loads(members) if isinstance(members, str) else members
-            
-            platform_way_refs = [
-                member['ref'] 
-                for member in members_data 
-                if member.get('role') == 'platform' and member.get('type') == 'W'
-            ]
-            
-            if not platform_way_refs:
-                print(f"  No platform ways found in relation {rel_id}")
-                continue
-            
-            print(f"  Found {len(platform_way_refs)} platform way(s)")
-            
-            # Step 3: Get all nodes from platform ways
-            cur.execute("""
-                SELECT ARRAY_AGG(DISTINCT unnest_nodes) as all_nodes
-                FROM (
-                    SELECT unnest(nodes) as unnest_nodes
-                    FROM planet_osm_ways
-                    WHERE id = ANY(%s)
-                ) subq
-            """, (platform_way_refs,))
-            
-            result = cur.fetchone()
-            platform_nodes = result[0] if result and result[0] else []
-            
-            if not platform_nodes:
-                # print(f"  No nodes found in platform ways")
-                continue
-            
-            # print(f"  Found {len(platform_nodes)} unique node(s) in platforms")
-            
-            # Step 4: Find ways with railway=platform_edge that share nodes with platforms
-            cur.execute("""
-                SELECT id, nodes, tags
-                FROM planet_osm_ways
-                WHERE tags->>'railway' = 'platform_edge'
-                AND nodes && %s::bigint[]
-            """, (platform_nodes,))
-            
-            platform_edges = cur.fetchall()
-            
-            for way_id, nodes, tags in platform_edges:
-                tags_data = json.loads(tags) if isinstance(tags, str) else tags
-                
-                # Find which nodes are shared
-                shared_nodes = list(set(nodes) & set(platform_nodes))
-                
-                platform_edge_info = {
-                    'relation_id': rel_id,
-                    'way_id': way_id,
-                    'nodes': nodes,
-                    'shared_nodes': shared_nodes,
-                    'tags': tags_data
-                }
-                all_platform_edges.append(platform_edge_info)
-                
-                # print(f"    Found platform_edge way: {way_id} with {len(nodes)} nodes "
-                    #   f"({len(shared_nodes)} shared)")
+            platform_edge_info = {
+                'relation_id': rel_id,
+                'way_id': way_id,
+                'nodes': nodes,
+                'tags': tags_data,
+                'edge_ref': edge_ref
+            }
+            all_platform_edges.append(platform_edge_info)
         
         return all_platform_edges
         
@@ -108,98 +50,147 @@ def find_platform_edges(station_name: str, db_config: Dict[str, str]) -> List[Di
         cur.close()
         conn.close()
 
-def find(db_config, station_name, edge_number):
-    platform_edges = find_platform_edges(station_name, db_config)
 
-    if not platform_edges:
-        return None
-
-    for edge in platform_edges:
-        try:
-            if edge['tags']['ref'] == str(edge_number):
-                return edge
-        except KeyError:
-            continue
+def find_optimized(db_config: Dict[str, str], station_name: str, edge_number: int) -> Optional[Dict[str, Any]]:
+    """
+    Find a specific platform edge by station name and edge reference number.
+    Uses materialized view for fast lookup.
+    """
+    conn = psycopg2.connect(**db_config)
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            SELECT 
+                relation_id,
+                way_id,
+                nodes,
+                tags
+            FROM platform_edges_indexed
+            WHERE station_name = %s
+                AND edge_ref = %s
+            LIMIT 1
+        """, (station_name, str(edge_number)))
         
-def find_path(db, s1, e1, s2, e2):
-    edge_1 = find(db, s1, e1)
-    edge_2 = find(db, s2, e2)
-    if not edge_1 or not edge_2:
-        return None
-
-    # Case 1: Opposite side of platform
-    if check_opposite_platform(db, edge_1, edge_2):
+        result = cur.fetchone()
+        
+        if not result:
+            return None
+        
+        rel_id, way_id, nodes, tags = result
+        tags_data = json.loads(tags) if isinstance(tags, str) else tags
+        
         return {
-            'type': 'opposite_platform',
-            'edge_1': edge_1,
-            'edge_2': edge_2,
-            'description': f"Platform edges {e1} and {e2} are on opposite sides of the same platform"
+            'relation_id': rel_id,
+            'way_id': way_id,
+            'nodes': nodes,
+            'tags': tags_data
         }
-    # Case 2: Buffer stops
-    # Case 3: Crossings
-    # Case 4: Stairs (hardest)
+        
+    finally:
+        cur.close()
+        conn.close()
 
-def check_opposite_platform(db_config: Dict[str, str], edge_1: Dict[str, Any], edge_2: Dict[str, Any]) -> bool:
-    # Only check if both edges belong to the same relation
-    # if edge_1['relation_id'] != edge_2['relation_id']:
-        # return False
+
+def check_opposite_platform_optimized(
+    db_config: Dict[str, str], 
+    edge_1: Dict[str, Any], 
+    edge_2: Dict[str, Any]
+) -> bool:
+    """
+    Optimized check for opposite platform sides using materialized view.
+    """
+    if edge_1['relation_id'] != edge_2['relation_id']:
+        return False
     
     conn = psycopg2.connect(**db_config)
     cur = conn.cursor()
     
     try:
         relation_id = edge_1['relation_id']
-        edge_1_nodes = set(edge_1['nodes'])
-        edge_2_nodes = set(edge_2['nodes'])
+        edge_1_nodes = edge_1['nodes']
+        edge_2_nodes = edge_2['nodes']
         
-        # Get all way members from the relation
+        # Use the materialized view to find connecting ways
+        # This is much faster than the original query
         cur.execute("""
-            SELECT members
-            FROM planet_osm_rels
-            WHERE id = %s
-        """, (relation_id,))
+            SELECT way_id, nodes
+            FROM station_ways_with_nodes
+            WHERE relation_id = %s
+                AND nodes && %s::bigint[]
+                AND nodes && %s::bigint[]
+            LIMIT 1
+        """, (relation_id, edge_1_nodes, edge_2_nodes))
         
         result = cur.fetchone()
-        if not result:
-            return False
         
-        members_data = json.loads(result[0]) if isinstance(result[0], str) else result[0]
-        
-        # Extract all way references from the relation
-        way_refs = [
-            member['ref'] 
-            for member in members_data 
-            if member.get('type') == 'W'
-        ]
-        
-        if not way_refs:
-            return False
-        
-        # Check each way to see if it contains nodes from both edges
-        cur.execute("""
-            SELECT id, nodes
-            FROM planet_osm_ways
-            WHERE id = ANY(%s)
-        """, (way_refs,))
-        
-        ways = cur.fetchall()
-        
-        for way_id, nodes in ways:
-            way_nodes = set(nodes)
-            
-            # Check if this way contains at least one node from each edge
-            has_edge_1_node = bool(way_nodes & edge_1_nodes)
-            has_edge_2_node = bool(way_nodes & edge_2_nodes)
-            
-            if has_edge_1_node and has_edge_2_node:
-                print(f"  Found connecting way {way_id} with nodes from both edges")
-                return True
+        if result:
+            way_id, _ = result
+            print(f"  Found connecting way {way_id} with nodes from both edges")
+            return True
         
         return False
         
     finally:
         cur.close()
         conn.close()
+
+
+def find_path_optimized(db_config: Dict[str, str], s1: str, e1: int, s2: str, e2: int) -> Optional[Dict[str, Any]]:
+    """
+    Find path between two platform edges using optimized queries.
+    """
+    edge_1 = find_optimized(db_config, s1, e1)
+    edge_2 = find_optimized(db_config, s2, e2)
+    
+    if not edge_1 or not edge_2:
+        return None
+
+    # Case 1: Opposite side of platform
+    if check_opposite_platform_optimized(db_config, edge_1, edge_2):
+        return {
+            'type': 'opposite_platform',
+            'edge_1': edge_1,
+            'edge_2': edge_2,
+            'description': f"Platform edges {e1} and {e2} are on opposite sides of the same platform"
+        }
+
+    # Case 2: Buffer stops
+    # Case 3: Crossings
+    # Case 4: Stairs (hardest)
+    
+    return None
+
+
+# Utility function to refresh materialized views
+def refresh_views(db_config: Dict[str, str]):
+    """
+    Refresh all materialized views. Run this periodically or after database updates.
+    """
+    conn = psycopg2.connect(**db_config)
+    cur = conn.cursor()
+    
+    try:
+        print("Refreshing materialized views...")
+        
+        views = [
+            'station_platform_ways',
+            'station_platform_nodes',
+            'platform_edges_indexed',
+            'station_ways_with_nodes'
+        ]
+        
+        for view in views:
+            print(f"  Refreshing {view}...")
+            cur.execute(f"REFRESH MATERIALIZED VIEW {view}")
+        
+        conn.commit()
+        print("All views refreshed successfully!")
+        
+    finally:
+        cur.close()
+        conn.close()
+
 
 if __name__ == "__main__":
     db_config = {
@@ -210,10 +201,13 @@ if __name__ == "__main__":
         'port': 5432
     }
 
-    # print(find(db_config, "München Hauptbahnhof", 11))
+    # Uncomment to refresh views after database updates
+    # refresh_views(db_config)
+
     s = "München Hauptbahnhof"
     e1 = 20
-    e2 = 22
-    print(find(db_config, s, e1))
-    print(find(db_config, s, e2))
-    print(find_path(db_config, s, e1, s, e2))
+    e2 = 21
+    
+    print(find_optimized(db_config, s, e1))
+    print(find_optimized(db_config, s, e2))
+    print(find_path_optimized(db_config, s, e1, s, e2))
