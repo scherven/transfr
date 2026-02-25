@@ -1,5 +1,7 @@
 -- Drop all materialized views in reverse order of dependencies
 DROP VIEW IF EXISTS station_way_segments CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes_plus_pedestrian CASCADE;
+DROP VIEW IF EXISTS station_pedestrian_ways_with_nodes CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS platform_edges_indexed CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_platform_nodes CASCADE;
@@ -77,9 +79,35 @@ CREATE INDEX idx_station_ways_rel ON station_ways_with_nodes(relation_id);
 CREATE INDEX idx_station_ways_station ON station_ways_with_nodes(station_name);
 CREATE INDEX idx_station_ways_nodes ON station_ways_with_nodes USING GIN(nodes);
 
--- View 5: Way segments for pathfinding (consecutive node pairs along each way)
--- Each row is one directed segment: (node_from, node_to) on way_id.
--- Pathfinding uses this to build a graph and run A* between platform edge nodes.
+-- View 4b: Pedestrian ways that share a node with a station (footpaths, steps, etc.)
+-- These are included in pathfinding even if not explicit stop_area members.
+CREATE VIEW station_pedestrian_ways_with_nodes AS
+SELECT DISTINCT
+    s.relation_id,
+    s.station_name,
+    w.id AS way_id,
+    w.nodes,
+    w.tags
+FROM planet_osm_ways w
+JOIN station_ways_with_nodes s ON w.nodes && s.nodes
+WHERE w.tags->>'highway' IN (
+    'footway', 'steps', 'corridor', 'pedestrian', 'path',
+    'cycleway', 'crossing'
+);
+
+-- View 4c: Union of relation-member ways and pedestrian ways for pathfinding.
+-- Materialized so get_way_segments_for_relation is fast (indexed by relation_id).
+-- Refresh after DB updates: REFRESH MATERIALIZED VIEW station_ways_with_nodes_plus_pedestrian;
+CREATE MATERIALIZED VIEW station_ways_with_nodes_plus_pedestrian AS
+SELECT relation_id, station_name, way_id, nodes, tags FROM station_ways_with_nodes
+UNION
+SELECT relation_id, station_name, way_id, nodes, tags FROM station_pedestrian_ways_with_nodes;
+
+CREATE INDEX idx_station_ways_plus_pedestrian_rel
+    ON station_ways_with_nodes_plus_pedestrian (relation_id);
+
+-- View 5: Way segments for pathfinding (consecutive node pairs along each way).
+-- Reads from materialized view so per-relation_id queries are fast.
 CREATE VIEW station_way_segments AS
 WITH ordered AS (
     SELECT
@@ -88,7 +116,7 @@ WITH ordered AS (
         s.way_id,
         t.node_id,
         t.ord
-    FROM station_ways_with_nodes s,
+    FROM station_ways_with_nodes_plus_pedestrian s,
          unnest(s.nodes) WITH ORDINALITY AS t(node_id, ord)
 ),
 with_next AS (

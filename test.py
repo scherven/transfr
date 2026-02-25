@@ -159,24 +159,30 @@ def find_path_optimized(
     on opposite sides of the same platform.
     Set debug=True to print pathfinding diagnostics.
     """
+    if debug:
+        print("[find_path_optimized] Looking up edge_1 ...", flush=True)
     edge_1 = find_optimized(db_config, s1, e1)
+    if debug:
+        print("[find_path_optimized] Looking up edge_2 ...", flush=True)
     edge_2 = find_optimized(db_config, s2, e2)
 
     if debug:
-        print("[find_path_optimized] edge_1:", "found" if edge_1 else "NOT FOUND", f"(station={s1!r}, edge_ref={e1})")
-        print("[find_path_optimized] edge_2:", "found" if edge_2 else "NOT FOUND", f"(station={s2!r}, edge_ref={e2})")
+        print("[find_path_optimized] edge_1:", "found" if edge_1 else "NOT FOUND", f"(station={s1!r}, edge_ref={e1})", flush=True)
+        print("[find_path_optimized] edge_2:", "found" if edge_2 else "NOT FOUND", f"(station={s2!r}, edge_ref={e2})", flush=True)
         if edge_1:
-            print("  edge_1 relation_id:", edge_1.get("relation_id"), "way_id:", edge_1.get("way_id"), "nodes:", len(edge_1.get("nodes", [])))
+            print("  edge_1 relation_id:", edge_1.get("relation_id"), "way_id:", edge_1.get("way_id"), "nodes:", len(edge_1.get("nodes", [])), flush=True)
         if edge_2:
-            print("  edge_2 relation_id:", edge_2.get("relation_id"), "way_id:", edge_2.get("way_id"), "nodes:", len(edge_2.get("nodes", [])))
+            print("  edge_2 relation_id:", edge_2.get("relation_id"), "way_id:", edge_2.get("way_id"), "nodes:", len(edge_2.get("nodes", [])), flush=True)
 
     if not edge_1 or not edge_2:
         return None
 
     # Case 1: Opposite side of platform (direct connection via one way)
+    if debug:
+        print("[find_path_optimized] Checking opposite_platform (DB query) ...", flush=True)
     connecting = get_opposite_platform_connecting_way(db_config, edge_1, edge_2)
     if debug:
-        print("[find_path_optimized] opposite_platform check:", "yes" if connecting else "no", "(connecting way_id:" + str(connecting["way_id"]) + ")" if connecting else "")
+        print("[find_path_optimized] opposite_platform check:", "yes" if connecting else "no", "(connecting way_id:" + str(connecting["way_id"]) + ")" if connecting else "", flush=True)
     if connecting:
         result = {
             "type": "opposite_platform",
@@ -207,6 +213,8 @@ def find_path_optimized(
 
     # Case 2: Same station – A* path over station ways
     if edge_1["relation_id"] == edge_2["relation_id"]:
+        if debug:
+            print("[find_path_optimized] Same station: running A* pathfinding ...", flush=True)
         path_result = find_path_between_platform_edges(db_config, edge_1, edge_2, debug=debug)
         if path_result:
             return path_result

@@ -13,10 +13,11 @@ otherwise falls back to Dijkstra (A* with zero heuristic).
 
 import math
 import heapq
-from typing import Dict, List, Any, Optional, Set, Tuple
+from typing import Dict, List, Any, Optional, Set, Tuple, Callable
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from tqdm import tqdm
 
 
 # Approximate meters per degree at mid-latitudes for heuristic
@@ -178,11 +179,15 @@ def a_star(
     goal_nodes: Set[int],
     graph: Dict[int, List[Tuple[int, int, float]]],
     coords: Optional[Dict[int, Tuple[float, float]]] = None,
+    progress_interval: int = 0,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> Optional[Tuple[List[int], List[Tuple[int, int, int]]]]:
     """
     A* from any of start_nodes to any of goal_nodes.
     Returns (node_path, way_segments) or None if no path.
     way_segments: list of (node_from, node_to, way_id) used along the path.
+    If progress_interval > 0, shows a tqdm progress bar for nodes expanded.
+    progress_callback(closed_count, open_count) is called when progress_interval is set.
     """
     if not start_nodes or not goal_nodes:
         return None
@@ -202,18 +207,30 @@ def a_star(
         counter += 1
     closed: Set[int] = set()
 
+    pbar = tqdm(desc="A* nodes expanded", unit=" nodes")# if progress_interval else None
+    iterations = 0
+    print()
     while open_heap:
         f, _, node, g, path_nodes, path_ways = heapq.heappop(open_heap)
         if node in closed:
             continue
         closed.add(node)
+        print("trying", node)
+        iterations += 1
+        if True:
+            pbar.update(1)
+        if progress_interval and progress_callback:
+            progress_callback(len(closed), len(open_heap))
 
         if node in goal_nodes:
+            if True:
+                pbar.close()
             return (path_nodes, path_ways)
 
         for neighbor, way_id, cost in graph.get(node, []):
             if neighbor in closed:
                 continue
+            print("\tadding", neighbor)
             g_new = g + cost
             h_new = heuristic(neighbor, goal_nodes, coords)
             f_new = g_new + h_new
@@ -225,7 +242,10 @@ def a_star(
             )
             counter += 1
 
+    if True:
+        pbar.close()
     return None
+
 
 
 def find_path_between_platform_edges(
@@ -251,10 +271,12 @@ def find_path_between_platform_edges(
 
     conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
     try:
+        if debug:
+            print("[pathfind] Querying station_way_segments for relation_id=%s ..." % relation_id, flush=True)
         segments = get_way_segments_for_relation(conn, relation_id)
         if debug:
             print("[pathfind] relation_id:", relation_id)
-            print("[pathfind] segments from DB:", len(segments))
+            print("[pathfind] segments from DB:", len(segments), flush=True)
             print("[pathfind] edge_1 way_id:", edge_1.get("way_id"), "nodes:", len(start_nodes), "sample:", list(start_nodes)[:5])
             print("[pathfind] edge_2 way_id:", edge_2.get("way_id"), "nodes:", len(goal_nodes), "sample:", list(goal_nodes)[:5])
 
@@ -263,6 +285,8 @@ def find_path_between_platform_edges(
                 print("[pathfind] No segments for this relation (station_way_segments has no rows for relation_id).")
             return None
 
+        if debug:
+            print("[pathfind] Building graph from %s segments ..." % len(segments), flush=True)
         all_node_ids = set()
         for a, b, _ in segments:
             all_node_ids.add(a)
@@ -280,11 +304,18 @@ def find_path_between_platform_edges(
             if not goal_in_graph:
                 print("[pathfind] No goal node is in the graph — platform edge 2 nodes are not on any relation-member way.")
 
+        if debug:
+            print("[pathfind] Loading node coordinates ...", flush=True)
         coords = get_node_coordinates(conn, list(all_node_ids))
         if debug:
             print("[pathfind] node coordinates available:", len(coords) if coords else 0, "nodes")
 
-        result = a_star(start_nodes, goal_nodes, graph, coords)
+        if debug:
+            print("[pathfind] Running A* (progress every 5000 nodes) ...", flush=True)
+        result = a_star(
+            start_nodes, goal_nodes, graph, coords,
+            progress_interval=5000 if debug else 0,
+        )
         if result is None:
             if debug:
                 print("[pathfind] A* returned no path (graph may be disconnected between the two edges).")
