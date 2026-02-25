@@ -1,4 +1,5 @@
 -- Drop all materialized views in reverse order of dependencies
+DROP VIEW IF EXISTS station_way_segments CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS platform_edges_indexed CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_platform_nodes CASCADE;
@@ -75,6 +76,37 @@ WHERE spw.member_type = 'W';
 CREATE INDEX idx_station_ways_rel ON station_ways_with_nodes(relation_id);
 CREATE INDEX idx_station_ways_station ON station_ways_with_nodes(station_name);
 CREATE INDEX idx_station_ways_nodes ON station_ways_with_nodes USING GIN(nodes);
+
+-- View 5: Way segments for pathfinding (consecutive node pairs along each way)
+-- Each row is one directed segment: (node_from, node_to) on way_id.
+-- Pathfinding uses this to build a graph and run A* between platform edge nodes.
+CREATE VIEW station_way_segments AS
+WITH ordered AS (
+    SELECT
+        s.relation_id,
+        s.station_name,
+        s.way_id,
+        t.node_id,
+        t.ord
+    FROM station_ways_with_nodes s,
+         unnest(s.nodes) WITH ORDINALITY AS t(node_id, ord)
+),
+with_next AS (
+    SELECT
+        relation_id,
+        station_name,
+        way_id,
+        node_id AS node_from,
+        lead(node_id) OVER (PARTITION BY way_id ORDER BY ord) AS node_to
+    FROM ordered
+)
+SELECT relation_id, station_name, way_id, node_from, node_to
+FROM with_next
+WHERE node_to IS NOT NULL;
+
+-- Optional: if your DB has planet_osm_nodes(id, lat, lon), create this for A* heuristic
+-- CREATE VIEW node_coordinates AS
+--   SELECT id AS node_id, lat, lon FROM planet_osm_nodes;
 
 -- -- View: Platform polygons that touch/intersect pedestrian lines (using PostGIS)
 -- CREATE MATERIALIZED VIEW platform_polygon_to_pedestrian_line AS
