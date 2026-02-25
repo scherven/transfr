@@ -150,20 +150,33 @@ def get_opposite_platform_connecting_way(
         conn.close()
 
 
-def find_path_optimized(db_config: Dict[str, str], s1: str, e1: int, s2: str, e2: int) -> Optional[Dict[str, Any]]:
+def find_path_optimized(
+    db_config: Dict[str, str], s1: str, e1: int, s2: str, e2: int, debug: bool = False
+) -> Optional[Dict[str, Any]]:
     """
     Find path between two platform edges using optimized queries.
     Uses A* over station ways to connect the two edges when they are not
     on opposite sides of the same platform.
+    Set debug=True to print pathfinding diagnostics.
     """
     edge_1 = find_optimized(db_config, s1, e1)
     edge_2 = find_optimized(db_config, s2, e2)
+
+    if debug:
+        print("[find_path_optimized] edge_1:", "found" if edge_1 else "NOT FOUND", f"(station={s1!r}, edge_ref={e1})")
+        print("[find_path_optimized] edge_2:", "found" if edge_2 else "NOT FOUND", f"(station={s2!r}, edge_ref={e2})")
+        if edge_1:
+            print("  edge_1 relation_id:", edge_1.get("relation_id"), "way_id:", edge_1.get("way_id"), "nodes:", len(edge_1.get("nodes", [])))
+        if edge_2:
+            print("  edge_2 relation_id:", edge_2.get("relation_id"), "way_id:", edge_2.get("way_id"), "nodes:", len(edge_2.get("nodes", [])))
 
     if not edge_1 or not edge_2:
         return None
 
     # Case 1: Opposite side of platform (direct connection via one way)
     connecting = get_opposite_platform_connecting_way(db_config, edge_1, edge_2)
+    if debug:
+        print("[find_path_optimized] opposite_platform check:", "yes" if connecting else "no", "(connecting way_id:" + str(connecting["way_id"]) + ")" if connecting else "")
     if connecting:
         result = {
             "type": "opposite_platform",
@@ -194,11 +207,13 @@ def find_path_optimized(db_config: Dict[str, str], s1: str, e1: int, s2: str, e2
 
     # Case 2: Same station – A* path over station ways
     if edge_1["relation_id"] == edge_2["relation_id"]:
-        path_result = find_path_between_platform_edges(db_config, edge_1, edge_2)
+        path_result = find_path_between_platform_edges(db_config, edge_1, edge_2, debug=debug)
         if path_result:
             return path_result
 
     # Case 3: Buffer stops / different stations / no path
+    if debug:
+        print("[find_path_optimized] No path returned (tried opposite_platform and A*).")
     return None
 
 def get_station_pedestrian_ways(
@@ -287,18 +302,18 @@ if __name__ == "__main__":
     e1 = 20
     e2 = 22
 
-    edge1 = find_optimized(db_config, s, e1)
-    edge2 = find_optimized(db_config, s, e2)
-    print("Edge 1:", edge1)
-    print("Edge 2:", edge2)
-
-    # Path between the two platform edges (A* over station ways)
-    path = find_path_between_platform_edges(db_config, edge1, edge2)
+    # Use find_path_optimized for full flow: opposite_platform first, then A*
+    path = find_path_optimized(db_config, s, e1, s, e2, debug=True)
     if path:
-        print("\nPath result:", path.get("type"))
+        print("\n--- Result ---")
+        print("Type:", path.get("type"))
         if path.get("path_nodes"):
-            print("  Nodes:", len(path["path_nodes"]))
+            print("Path nodes:", len(path["path_nodes"]))
         if path.get("way_ids"):
-            print("  Ways:", path["way_ids"])
+            print("Way IDs:", path["way_ids"])
+        if path.get("crossing_length_meters") is not None:
+            print("Crossing length (m):", path["crossing_length_meters"])
+        if path.get("platform_width_meters") is not None:
+            print("Platform width (m):", path["platform_width_meters"])
     else:
-        print("\nNo path found.")
+        print("\nNo path found. See [pathfind] / [find_path_optimized] debug output above.")

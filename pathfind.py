@@ -232,13 +232,17 @@ def find_path_between_platform_edges(
     db_config: Dict[str, Any],
     edge_1: Dict[str, Any],
     edge_2: Dict[str, Any],
+    debug: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Find a path between two platform edges (from platform_edges_indexed) using
     station ways. Both edges must belong to the same station (relation_id).
     Returns a result dict with path details or None if no path.
+    Set debug=True to print diagnostics to stderr.
     """
     if edge_1["relation_id"] != edge_2["relation_id"]:
+        if debug:
+            print("[pathfind] Skipping: different relation_id", edge_1["relation_id"], "vs", edge_2["relation_id"])
         return None
 
     relation_id = edge_1["relation_id"]
@@ -248,18 +252,42 @@ def find_path_between_platform_edges(
     conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
     try:
         segments = get_way_segments_for_relation(conn, relation_id)
+        if debug:
+            print("[pathfind] relation_id:", relation_id)
+            print("[pathfind] segments from DB:", len(segments))
+            print("[pathfind] edge_1 way_id:", edge_1.get("way_id"), "nodes:", len(start_nodes), "sample:", list(start_nodes)[:5])
+            print("[pathfind] edge_2 way_id:", edge_2.get("way_id"), "nodes:", len(goal_nodes), "sample:", list(goal_nodes)[:5])
+
         if not segments:
+            if debug:
+                print("[pathfind] No segments for this relation (station_way_segments has no rows for relation_id).")
             return None
 
         all_node_ids = set()
         for a, b, _ in segments:
             all_node_ids.add(a)
             all_node_ids.add(b)
-        coords = get_node_coordinates(conn, list(all_node_ids))
-
         graph = build_graph(segments)
+        start_in_graph = start_nodes & set(graph.keys())
+        goal_in_graph = goal_nodes & set(graph.keys())
+
+        if debug:
+            print("[pathfind] graph vertices:", len(graph))
+            print("[pathfind] start_nodes that appear in graph:", len(start_in_graph), "of", len(start_nodes))
+            print("[pathfind] goal_nodes that appear in graph:", len(goal_in_graph), "of", len(goal_nodes))
+            if not start_in_graph:
+                print("[pathfind] No start node is in the graph — platform edge 1 nodes are not on any relation-member way.")
+            if not goal_in_graph:
+                print("[pathfind] No goal node is in the graph — platform edge 2 nodes are not on any relation-member way.")
+
+        coords = get_node_coordinates(conn, list(all_node_ids))
+        if debug:
+            print("[pathfind] node coordinates available:", len(coords) if coords else 0, "nodes")
+
         result = a_star(start_nodes, goal_nodes, graph, coords)
         if result is None:
+            if debug:
+                print("[pathfind] A* returned no path (graph may be disconnected between the two edges).")
             return None
 
         path_nodes, path_ways = result
