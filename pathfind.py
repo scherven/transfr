@@ -1,14 +1,11 @@
 """
-A* pathfinding between railway platform edges using station ways.
+Pathfinding between railway platform edges (ways) using station ways.
 
-Graph model:
-- Vertices: OSM node IDs (junctions where ways meet).
-- Edges: segments from station_way_segments (consecutive node pairs along each way).
-- Start: any node belonging to platform edge 1.
-- Goal: any node belonging to platform edge 2.
-
-Uses A* with Euclidean heuristic when node coordinates are available,
-otherwise falls back to Dijkstra (A* with zero heuristic).
+Bipartite search: we alternate between ways and nodes.
+- Current state is a way -> add all nodes on that way to the search space.
+- Current state is a node -> add all ways that contain that node (not yet visited).
+Start at platform edge 1 (way), goal is platform edge 2 (way).
+Path is thus: way_1 -> node -> way_2 -> node -> ... -> way_k.
 """
 
 import math
@@ -69,23 +66,21 @@ def get_node_coordinates(
             return None
 
 
-def build_graph(
+def build_bipartite_index(
     segments: List[Tuple[int, int, int]],
-    cost_per_segment: float = 1.0,
-) -> Dict[int, List[Tuple[int, int, float]]]:
+) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
     """
-    Build bidirectional adjacency list from directed segments.
-    graph[node_id] = [(neighbor_id, way_id, cost), ...]
+    From way segments (node_from, node_to, way_id), build:
+    - way_to_nodes: way_id -> set of node_ids on that way
+    - node_to_ways: node_id -> set of way_ids that contain that node
     """
-    graph: Dict[int, List[Tuple[int, int, float]]] = {}
+    way_to_nodes: Dict[int, Set[int]] = {}
+    node_to_ways: Dict[int, Set[int]] = {}
     for node_from, node_to, way_id in segments:
-        if node_from not in graph:
-            graph[node_from] = []
-        graph[node_from].append((node_to, way_id, cost_per_segment))
-        if node_to not in graph:
-            graph[node_to] = []
-        graph[node_to].append((node_from, way_id, cost_per_segment))
-    return graph
+        way_to_nodes.setdefault(way_id, set()).update([node_from, node_to])
+        node_to_ways.setdefault(node_from, set()).add(way_id)
+        node_to_ways.setdefault(node_to, set()).add(way_id)
+    return way_to_nodes, node_to_ways
 
 
 def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -147,103 +142,83 @@ def min_distance_between_node_sets_meters(
     return best if best != float("inf") else None
 
 
-def heuristic(
-    node: int,
-    goal_nodes: Set[int],
-    coords: Optional[Dict[int, Tuple[float, float]]],
-) -> float:
-    """
-    Admissible heuristic: 0 if no coords; else minimum straight-line distance
-    from node to any goal node (in same cost units as graph: 1 per segment).
-    We use meters and then treat graph cost as ~1 per segment (so scale heuristic
-    to be comparable: e.g. 1 unit per 10m so heuristic is in "segment equivalents").
-    """
-    if not coords or node not in coords:
-        return 0.0
-    if node in goal_nodes:
-        return 0.0
-    lat1, lon1 = coords[node]
-    best = float("inf")
-    for n in goal_nodes:
-        if n not in coords:
-            continue
-        lat2, lon2 = coords[n]
-        d = haversine_meters(lat1, lon1, lat2, lon2)
-        # Scale to rough "segment" units (~10m per segment) so heuristic is admissible
-        best = min(best, d / 10.0)
-    return best if best != float("inf") else 0.0
+# State in bipartite search: ('way', way_id) or ('node', node_id)
+BipartiteState = Tuple[str, int]
 
 
-def a_star(
-    start_nodes: Set[int],
-    goal_nodes: Set[int],
-    graph: Dict[int, List[Tuple[int, int, float]]],
-    coords: Optional[Dict[int, Tuple[float, float]]] = None,
+def bipartite_a_star(
+    start_way_id: int,
+    goal_way_id: int,
+    way_to_nodes: Dict[int, Set[int]],
+    node_to_ways: Dict[int, Set[int]],
     progress_interval: int = 0,
     progress_callback: Optional[Callable[[int, int], None]] = None,
-) -> Optional[Tuple[List[int], List[Tuple[int, int, int]]]]:
+) -> Optional[List[BipartiteState]]:
     """
-    A* from any of start_nodes to any of goal_nodes.
-    Returns (node_path, way_segments) or None if no path.
-    way_segments: list of (node_from, node_to, way_id) used along the path.
-    If progress_interval > 0, shows a tqdm progress bar for nodes expanded.
-    progress_callback(closed_count, open_count) is called when progress_interval is set.
+    Search alternating way -> nodes on that way -> ways through that node -> ...
+    - From a way: add all its nodes to the search space.
+    - From a node: add all ways that contain that node (that we haven't looked at yet).
+    Returns path as list of (kind, id), e.g. [('way', w1), ('node', n1), ('way', w2), ...],
+    or None if no path. Path starts at start_way_id and ends at goal_way_id.
     """
-    if not start_nodes or not goal_nodes:
-        return None
-    if start_nodes & goal_nodes:
-        n = next(iter(start_nodes & goal_nodes))
-        return ([n], [])
+    start_state: BipartiteState = ("way", start_way_id)
+    goal_state: BipartiteState = ("way", goal_way_id)
+    if start_state == goal_state:
+        return [start_state]
 
-    # (f, counter, node, g, path_nodes, path_ways)
+    # (f, counter, state, g, path); heuristic 0 so effectively Dijkstra
     counter = 0
-    open_heap: List[Tuple[float, int, int, float, List[int], List[Tuple[int, int, int]]]] = []
-    for s in start_nodes:
-        h = heuristic(s, goal_nodes, coords)
-        heapq.heappush(
-            open_heap,
-            (h, counter, s, 0.0, [s], []),
-        )
-        counter += 1
-    closed: Set[int] = set()
+    open_heap: List[Tuple[float, int, BipartiteState, float, List[BipartiteState]]] = [
+        (0.0, counter, start_state, 0.0, [start_state])
+    ]
+    counter += 1
+    closed: Set[BipartiteState] = set()
+    cost_per_step = 1.0
 
-    pbar = tqdm(desc="A* nodes expanded", unit=" nodes")# if progress_interval else None
+    # pbar = tqdm(desc="A* way/node expanded", unit=" steps") if progress_interval else None
     iterations = 0
-    print()
+
     while open_heap:
-        f, _, node, g, path_nodes, path_ways = heapq.heappop(open_heap)
-        if node in closed:
+        f, _, state, g, path = heapq.heappop(open_heap)
+        print("reading state", state)
+        if state in closed:
+            print("\tclosed")
             continue
-        closed.add(node)
-        print("trying", node)
+        closed.add(state)
         iterations += 1
-        if True:
-            pbar.update(1)
+        # pbar.update(1)
         if progress_interval and progress_callback:
             progress_callback(len(closed), len(open_heap))
 
-        if node in goal_nodes:
-            if True:
-                pbar.close()
-            return (path_nodes, path_ways)
+        kind, id_ = state
+        if state == goal_state:
+            # pbar.close()
+            return path
 
-        for neighbor, way_id, cost in graph.get(node, []):
-            if neighbor in closed:
-                continue
-            print("\tadding", neighbor)
-            g_new = g + cost
-            h_new = heuristic(neighbor, goal_nodes, coords)
-            f_new = g_new + h_new
-            new_path_nodes = path_nodes + [neighbor]
-            new_path_ways = path_ways + [(node, neighbor, way_id)]
-            heapq.heappush(
-                open_heap,
-                (f_new, counter, neighbor, g_new, new_path_nodes, new_path_ways),
-            )
-            counter += 1
+        if kind == "way":
+            # From a way: add all nodes on this way
+            for node_id in way_to_nodes.get(id_, set()):
+                new_state: BipartiteState = ("node", node_id)
+                if new_state in closed:
+                    continue
+                print("\tfrom", id_, "adding node", node_id)
+                g_new = g + cost_per_step
+                new_path = path + [new_state]
+                heapq.heappush(open_heap, (g_new, counter, new_state, g_new, new_path))
+                counter += 1
+        else:
+            # From a node: add all ways that contain this node
+            for way_id in node_to_ways.get(id_, set()):
+                new_state = ("way", way_id)
+                if new_state in closed:
+                    continue
+                print("\tfrom", id_, "adding way", way_id)
+                g_new = g + cost_per_step
+                new_path = path + [new_state]
+                heapq.heappush(open_heap, (g_new, counter, new_state, g_new, new_path))
+                counter += 1
 
-    if True:
-        pbar.close()
+    # pbar.close()
     return None
 
 
@@ -266,8 +241,8 @@ def find_path_between_platform_edges(
         return None
 
     relation_id = edge_1["relation_id"]
-    start_nodes = set(edge_1["nodes"])
-    goal_nodes = set(edge_2["nodes"])
+    start_way_id = edge_1["way_id"]
+    goal_way_id = edge_2["way_id"]
 
     conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
     try:
@@ -277,8 +252,7 @@ def find_path_between_platform_edges(
         if debug:
             print("[pathfind] relation_id:", relation_id)
             print("[pathfind] segments from DB:", len(segments), flush=True)
-            print("[pathfind] edge_1 way_id:", edge_1.get("way_id"), "nodes:", len(start_nodes), "sample:", list(start_nodes)[:5])
-            print("[pathfind] edge_2 way_id:", edge_2.get("way_id"), "nodes:", len(goal_nodes), "sample:", list(goal_nodes)[:5])
+            print("[pathfind] edge_1 way_id:", start_way_id, "edge_2 way_id:", goal_way_id)
 
         if not segments:
             if debug:
@@ -286,50 +260,57 @@ def find_path_between_platform_edges(
             return None
 
         if debug:
-            print("[pathfind] Building graph from %s segments ..." % len(segments), flush=True)
-        all_node_ids = set()
-        for a, b, _ in segments:
-            all_node_ids.add(a)
-            all_node_ids.add(b)
-        graph = build_graph(segments)
-        start_in_graph = start_nodes & set(graph.keys())
-        goal_in_graph = goal_nodes & set(graph.keys())
-
-        if debug:
-            print("[pathfind] graph vertices:", len(graph))
-            print("[pathfind] start_nodes that appear in graph:", len(start_in_graph), "of", len(start_nodes))
-            print("[pathfind] goal_nodes that appear in graph:", len(goal_in_graph), "of", len(goal_nodes))
-            if not start_in_graph:
-                print("[pathfind] No start node is in the graph — platform edge 1 nodes are not on any relation-member way.")
-            if not goal_in_graph:
-                print("[pathfind] No goal node is in the graph — platform edge 2 nodes are not on any relation-member way.")
-
-        if debug:
-            print("[pathfind] Loading node coordinates ...", flush=True)
-        coords = get_node_coordinates(conn, list(all_node_ids))
-        if debug:
-            print("[pathfind] node coordinates available:", len(coords) if coords else 0, "nodes")
-
-        if debug:
-            print("[pathfind] Running A* (progress every 5000 nodes) ...", flush=True)
-        result = a_star(
-            start_nodes, goal_nodes, graph, coords,
-            progress_interval=5000 if debug else 0,
-        )
-        if result is None:
+            print("[pathfind] Building way<->node index from %s segments ..." % len(segments), flush=True)
+        way_to_nodes, node_to_ways = build_bipartite_index(segments)
+        # Include platform edge ways (they may not be in station_ways); they connect via shared nodes
+        for edge in (edge_1, edge_2):
+            wid = edge["way_id"]
+            nodes = set(edge["nodes"])
+            way_to_nodes.setdefault(wid, set()).update(nodes)
+            for n in nodes:
+                node_to_ways.setdefault(n, set()).add(wid)
+        if start_way_id not in way_to_nodes:
             if debug:
-                print("[pathfind] A* returned no path (graph may be disconnected between the two edges).")
+                print("[pathfind] Start way_id %s has no nodes." % start_way_id)
+            return None
+        if goal_way_id not in way_to_nodes:
+            if debug:
+                print("[pathfind] Goal way_id %s has no nodes." % goal_way_id)
             return None
 
-        path_nodes, path_ways = result
+        if debug:
+            print("[pathfind] Running bipartite A* (way -> nodes -> ways) ...", flush=True)
+        path = bipartite_a_star(
+            start_way_id,
+            goal_way_id,
+            way_to_nodes,
+            node_to_ways,
+            progress_interval=5000 if debug else 0,
+        )
+        if path is None:
+            if debug:
+                print("[pathfind] No path (ways are not connected via shared nodes).")
+            return None
+
+        # path = [('way', w1), ('node', n1), ('way', w2), ...]
+        path_way_ids = [id_ for (k, id_) in path if k == "way"]
+        path_node_ids = [id_ for (k, id_) in path if k == "node"]
+        # way->node steps for compatibility: (way_id, node_id) for each step from a way to a node
+        path_ways = []
+        for i in range(len(path) - 1):
+            (k1, id1), (k2, id2) = path[i], path[i + 1]
+            if k1 == "way" and k2 == "node":
+                path_ways.append((id1, id2))
+
         return {
             "type": "way_path",
             "edge_1": edge_1,
             "edge_2": edge_2,
             "relation_id": relation_id,
-            "path_nodes": path_nodes,
+            "path_sequence": path,
+            "path_nodes": path_node_ids,
             "path_ways": path_ways,
-            "way_ids": list(dict.fromkeys(w for _, _, w in path_ways)),
+            "way_ids": path_way_ids,
         }
     finally:
         conn.close()
