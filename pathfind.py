@@ -1,42 +1,53 @@
 """
-Pathfinding between railway platform edges (ways) using station ways.
+Pathfinding between railway platform edges using a bipartite way/node graph.
 
-Bipartite search: we alternate between ways and nodes.
-- Current state is a way -> add all nodes on that way to the search space.
-- Current state is a node -> add all ways that contain that node (not yet visited).
-Start at platform edge 1 (way), goal is platform edge 2 (way).
-Path is thus: way_1 -> node -> way_2 -> node -> ... -> way_k.
+The graph alternates between two kinds of state:
+  way  -> expands to all nodes on that way
+  node -> expands to all ways that pass through that node
+
+A platform edge is itself a way, so pathfinding goes:
+  edge_1 (way) -> node -> way -> node -> ... -> edge_2 (way)
+
+Because every edge cost is uniform, plain BFS is optimal and faster than
+Dijkstra/A*. When the initial station-member ways don't connect the two
+edges, additional pedestrian ways (footway, steps, corridor, etc.) are
+discovered in batch from the DB and the search is re-run.
 """
 
 import math
-import heapq
-from typing import Dict, List, Any, Optional, Set, Tuple, Callable
+from collections import deque
+from typing import Dict, List, Any, Optional, Set, Tuple
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from tqdm import tqdm
+
+# OSM highway values treated as walkable connections between platforms.
+PEDESTRIAN_HIGHWAY_TYPES = (
+    "footway", "steps", "corridor", "pedestrian",
+    "path", "cycleway", "crossing",
+)
+
+# ---------------------------------------------------------------------------
+# Graph state type used by the bipartite search.
+# Each state is ('way', way_id) or ('node', node_id).
+# ---------------------------------------------------------------------------
+BipartiteState = Tuple[str, int]
 
 
-# Approximate meters per degree at mid-latitudes for heuristic
-METERS_PER_DEG_LAT = 111320
-METERS_PER_DEG_LON_AT_45 = 78847
-
+# ---------------------------------------------------------------------------
+# Database helpers
+# ---------------------------------------------------------------------------
 
 def get_way_segments_for_relation(
     conn, relation_id: int
 ) -> List[Tuple[int, int, int]]:
-    """
-    Load all way segments for a station relation from station_way_segments.
-    Returns list of (node_from, node_to, way_id). Segments are directed;
-    we'll build bidirectional edges when constructing the graph.
-    """
+    """Fetch every consecutive (node_from, node_to, way_id) segment for a
+    station relation from the station_way_segments view.  These segments
+    form the initial graph for pathfinding."""
     with conn.cursor() as cur:
         cur.execute(
-            """
-            SELECT node_from, node_to, way_id
-            FROM station_way_segments
-            WHERE relation_id = %s
-            """,
+            "SELECT node_from, node_to, way_id "
+            "FROM station_way_segments WHERE relation_id = %s",
             (relation_id,),
         )
         return [(r["node_from"], r["node_to"], r["way_id"]) for r in cur.fetchall()]
@@ -45,20 +56,14 @@ def get_way_segments_for_relation(
 def get_node_coordinates(
     conn, node_ids: List[int]
 ) -> Optional[Dict[int, Tuple[float, float]]]:
-    """
-    Load lat/lon for nodes if planet_osm_nodes exists.
-    Returns {node_id: (lat, lon)} or None if table unavailable.
-    """
+    """Load (lat, lon) for the given node IDs from planet_osm_nodes.
+    Returns None if the table does not exist."""
     if not node_ids:
         return {}
     with conn.cursor() as cur:
         try:
             cur.execute(
-                """
-                SELECT id, lat, lon
-                FROM planet_osm_nodes
-                WHERE id = ANY(%s)
-                """,
+                "SELECT id, lat, lon FROM planet_osm_nodes WHERE id = ANY(%s)",
                 (node_ids,),
             )
             return {r["id"]: (float(r["lat"]), float(r["lon"])) for r in cur.fetchall()}
@@ -66,24 +71,43 @@ def get_node_coordinates(
             return None
 
 
-PEDESTRIAN_HIGHWAY_TYPES = (
-    'footway', 'steps', 'corridor', 'pedestrian', 'path',
-    'cycleway', 'crossing',
-)
+def query_pedestrian_ways_by_nodes(
+    conn,
+    frontier_node_ids: List[int],
+    exclude_way_ids: Set[int],
+) -> List[Tuple[int, List[int]]]:
+    """Find pedestrian ways in planet_osm_ways that share at least one node
+    with *frontier_node_ids*, excluding ways already in *exclude_way_ids*.
+    Used to iteratively expand the search graph beyond the initial station
+    relation members."""
+    if not frontier_node_ids:
+        return []
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, nodes FROM planet_osm_ways "
+            "WHERE nodes && %s::bigint[] "
+            "  AND tags->>'highway' = ANY(%s) "
+            "  AND NOT (id = ANY(%s::bigint[]))",
+            (frontier_node_ids, list(PEDESTRIAN_HIGHWAY_TYPES), list(exclude_way_ids)),
+        )
+        return [(r["id"], list(r["nodes"])) for r in cur.fetchall()]
 
+
+# ---------------------------------------------------------------------------
+# Bipartite index (in-memory graph representation)
+# ---------------------------------------------------------------------------
 
 def build_bipartite_index(
     segments: List[Tuple[int, int, int]],
 ) -> Tuple[Dict[int, Set[int]], Dict[int, Set[int]]]:
-    """
-    From way segments (node_from, node_to, way_id), build:
-    - way_to_nodes: way_id -> set of node_ids on that way
-    - node_to_ways: node_id -> set of way_ids that contain that node
+    """Build two lookup dicts from way-segment rows:
+      way_to_nodes[way_id]  -> {node_id, ...}  (all nodes on that way)
+      node_to_ways[node_id] -> {way_id, ...}    (all ways through that node)
     """
     way_to_nodes: Dict[int, Set[int]] = {}
     node_to_ways: Dict[int, Set[int]] = {}
     for node_from, node_to, way_id in segments:
-        way_to_nodes.setdefault(way_id, set()).update([node_from, node_to])
+        way_to_nodes.setdefault(way_id, set()).update((node_from, node_to))
         node_to_ways.setdefault(node_from, set()).add(way_id)
         node_to_ways.setdefault(node_to, set()).add(way_id)
     return way_to_nodes, node_to_ways
@@ -95,88 +119,139 @@ def _add_way_to_index(
     way_to_nodes: Dict[int, Set[int]],
     node_to_ways: Dict[int, Set[int]],
 ) -> None:
+    """Insert a single way (with its node list) into the bipartite index."""
     node_set = set(nodes)
     way_to_nodes.setdefault(way_id, set()).update(node_set)
     for n in node_set:
         node_to_ways.setdefault(n, set()).add(way_id)
 
 
-def query_pedestrian_ways_by_nodes(
-    conn,
-    frontier_node_ids: List[int],
-    exclude_way_ids: Set[int],
-) -> List[Tuple[int, List[int]]]:
-    """
-    Find pedestrian ways in planet_osm_ways whose nodes overlap with
-    frontier_node_ids, excluding ways already in exclude_way_ids.
-    Returns list of (way_id, nodes).
-    """
-    if not frontier_node_ids:
-        return []
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, nodes
-            FROM planet_osm_ways
-            WHERE nodes && %s::bigint[]
-              AND tags->>'highway' = ANY(%s)
-              AND NOT (id = ANY(%s::bigint[]))
-            """,
-            (frontier_node_ids, list(PEDESTRIAN_HIGHWAY_TYPES), list(exclude_way_ids)),
-        )
-        return [(r["id"], list(r["nodes"])) for r in cur.fetchall()]
+# ---------------------------------------------------------------------------
+# BFS search over the bipartite graph
+# ---------------------------------------------------------------------------
 
-
-def expand_pedestrian_ways(
-    conn,
+def _bipartite_bfs(
+    start_way_id: int,
+    goal_way_id: int,
     way_to_nodes: Dict[int, Set[int]],
     node_to_ways: Dict[int, Set[int]],
+) -> Optional[List[BipartiteState]]:
+    """BFS from (way, start_way_id) to (way, goal_way_id) over the bipartite
+    index.  All transitions have equal cost so BFS guarantees the shortest
+    path (fewest way/node hops).  Uses a came_from dict for O(1) memory per
+    visited state instead of storing full paths on the queue."""
+    start: BipartiteState = ("way", start_way_id)
+    goal: BipartiteState = ("way", goal_way_id)
+    if start == goal:
+        return [start]
+
+    came_from: Dict[BipartiteState, Optional[BipartiteState]] = {start: None}
+    queue: deque[BipartiteState] = deque([start])
+
+    while queue:
+        state = queue.popleft()
+        kind, id_ = state
+
+        if kind == "way":
+            for node_id in way_to_nodes.get(id_, ()):
+                neighbor: BipartiteState = ("node", node_id)
+                if neighbor not in came_from:
+                    came_from[neighbor] = state
+                    if neighbor == goal:
+                        return _reconstruct(came_from, neighbor)
+                    queue.append(neighbor)
+        else:
+            for way_id in node_to_ways.get(id_, ()):
+                neighbor = ("way", way_id)
+                if neighbor not in came_from:
+                    came_from[neighbor] = state
+                    if neighbor == goal:
+                        return _reconstruct(came_from, neighbor)
+                    queue.append(neighbor)
+
+    return None
+
+
+def _reconstruct(
+    came_from: Dict[BipartiteState, Optional[BipartiteState]],
+    target: BipartiteState,
+) -> List[BipartiteState]:
+    """Walk the came_from chain backwards to build the full path."""
+    path: List[BipartiteState] = []
+    cur: Optional[BipartiteState] = target
+    while cur is not None:
+        path.append(cur)
+        cur = came_from[cur]
+    path.reverse()
+    return path
+
+
+def bipartite_search(
+    start_way_id: int,
+    goal_way_id: int,
+    way_to_nodes: Dict[int, Set[int]],
+    node_to_ways: Dict[int, Set[int]],
+    conn=None,
+    max_expansions: int = 10,
     debug: bool = False,
-    max_iterations: int = 10,
-) -> None:
-    """
-    Iteratively discover pedestrian ways that share nodes with the current
-    known set. Mutates way_to_nodes and node_to_ways in place.
-    Stops when no new ways/nodes are found or max_iterations is reached.
-    """
-    known_way_ids = set(way_to_nodes.keys())
-    all_known_nodes: Set[int] = set()
-    for nodes in way_to_nodes.values():
-        all_known_nodes.update(nodes)
+) -> Optional[List[BipartiteState]]:
+    """Run BFS with iterative batch expansion of pedestrian ways.
 
-    frontier_nodes = set(all_known_nodes)
+    1. Run BFS over the current in-memory index.
+    2. If no path is found and *conn* is provided, collect every known node
+       that has not yet been used as an expansion frontier, query the DB for
+       pedestrian ways through those nodes in one batch, and merge them into
+       the index.
+    3. Re-run BFS on the now-larger graph.
+    4. Repeat until a path is found, no new ways are discovered, or
+       *max_expansions* rounds have been performed.
+    """
+    expanded_node_ids: Set[int] = set()
 
-    for iteration in range(1, max_iterations + 1):
-        new_ways = query_pedestrian_ways_by_nodes(conn, list(frontier_nodes), known_way_ids)
-        if not new_ways:
-            if debug:
-                print(f"[pathfind] Pedestrian expansion: iteration {iteration}, no new ways found. Done.", flush=True)
+    for iteration in range(max_expansions + 1):
+        result = _bipartite_bfs(start_way_id, goal_way_id, way_to_nodes, node_to_ways)
+        if result is not None:
+            return result
+
+        if conn is None:
             break
 
-        new_nodes: Set[int] = set()
+        frontier: Set[int] = set()
+        for nodes in way_to_nodes.values():
+            frontier.update(nodes)
+        frontier -= expanded_node_ids
+        if not frontier:
+            break
+
+        new_ways = query_pedestrian_ways_by_nodes(
+            conn, list(frontier), set(way_to_nodes.keys()),
+        )
+        expanded_node_ids.update(frontier)
+
+        if not new_ways:
+            if debug:
+                print(f"[pathfind] Expansion {iteration + 1}: no new ways. Done.", flush=True)
+            break
+
         for way_id, nodes in new_ways:
             _add_way_to_index(way_id, nodes, way_to_nodes, node_to_ways)
-            known_way_ids.add(way_id)
-            for n in nodes:
-                if n not in all_known_nodes:
-                    new_nodes.add(n)
-
-        all_known_nodes.update(new_nodes)
 
         if debug:
             print(
-                f"[pathfind] Pedestrian expansion: iteration {iteration}, "
-                f"+{len(new_ways)} ways, +{len(new_nodes)} new nodes",
+                f"[pathfind] Expansion {iteration + 1}: +{len(new_ways)} ways, "
+                f"index now {len(way_to_nodes)} ways / {len(node_to_ways)} nodes",
                 flush=True,
             )
 
-        if not new_nodes:
-            break
-        frontier_nodes = new_nodes
+    return None
 
+
+# ---------------------------------------------------------------------------
+# Distance / geometry helpers (used for platform-width calculations)
+# ---------------------------------------------------------------------------
 
 def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Approximate distance in meters between two WGS84 points."""
+    """Great-circle distance in metres between two WGS-84 points."""
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
     a = (
@@ -185,214 +260,104 @@ def haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> floa
         * math.cos(math.radians(lat2))
         * math.sin(dlon / 2) ** 2
     )
-    c = 2 * math.asin(math.sqrt(min(1.0, a)))
-    return 6371000 * c  # Earth radius in meters
+    return 6_371_000 * 2 * math.asin(math.sqrt(min(1.0, a)))
 
 
 def way_length_meters(
-    node_ids: List[int], coords: Optional[Dict[int, Tuple[float, float]]]
+    node_ids: List[int],
+    coords: Dict[int, Tuple[float, float]],
 ) -> Optional[float]:
-    """
-    Total length of a way in meters (sum of segment lengths between consecutive nodes).
-    Returns None if coords is None or any node is missing.
-    """
-    if not coords or len(node_ids) < 2:
+    """Sum of haversine distances along consecutive nodes of a way.
+    Returns None if any node is missing from *coords*."""
+    if len(node_ids) < 2:
         return None
     total = 0.0
     for i in range(len(node_ids) - 1):
         a, b = node_ids[i], node_ids[i + 1]
         if a not in coords or b not in coords:
             return None
-        lat1, lon1 = coords[a]
-        lat2, lon2 = coords[b]
-        total += haversine_meters(lat1, lon1, lat2, lon2)
+        total += haversine_meters(*coords[a], *coords[b])
     return total
 
 
-def min_distance_between_node_sets_meters(
+def min_distance_between_node_sets(
     nodes_a: List[int],
     nodes_b: List[int],
-    coords: Optional[Dict[int, Tuple[float, float]]],
+    coords: Dict[int, Tuple[float, float]],
 ) -> Optional[float]:
-    """
-    Minimum distance in meters between any node in set A and any node in set B.
-    Useful for "platform width" (shortest gap between the two edges).
-    Returns None if coords is None or any node is missing.
-    """
-    if not coords or not nodes_a or not nodes_b:
+    """Minimum haversine distance (metres) between any node in A and any
+    node in B.  Useful for estimating platform width.
+    Returns None if any node is missing from *coords*."""
+    if not nodes_a or not nodes_b:
         return None
-    best = float("inf")
+    best = math.inf
     for a in nodes_a:
         if a not in coords:
             return None
-        lat1, lon1 = coords[a]
         for b in nodes_b:
             if b not in coords:
                 return None
-            lat2, lon2 = coords[b]
-            best = min(best, haversine_meters(lat1, lon1, lat2, lon2))
-    return best if best != float("inf") else None
+            best = min(best, haversine_meters(*coords[a], *coords[b]))
+    return best if best != math.inf else None
 
 
-# State in bipartite search: ('way', way_id) or ('node', node_id)
-BipartiteState = Tuple[str, int]
+# ---------------------------------------------------------------------------
+# Top-level entry point
+# ---------------------------------------------------------------------------
 
-
-def bipartite_a_star(
-    start_way_id: int,
-    goal_way_id: int,
-    way_to_nodes: Dict[int, Set[int]],
-    node_to_ways: Dict[int, Set[int]],
-    progress_interval: int = 0,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
-) -> Optional[List[BipartiteState]]:
-    """
-    Search alternating way -> nodes on that way -> ways through that node -> ...
-    - From a way: add all its nodes to the search space.
-    - From a node: add all ways that contain that node (that we haven't looked at yet).
-    Returns path as list of (kind, id), e.g. [('way', w1), ('node', n1), ('way', w2), ...],
-    or None if no path. Path starts at start_way_id and ends at goal_way_id.
-    """
-    start_state: BipartiteState = ("way", start_way_id)
-    goal_state: BipartiteState = ("way", goal_way_id)
-    if start_state == goal_state:
-        return [start_state]
-
-    counter = 0
-    open_heap: List[Tuple[float, int, BipartiteState, float, List[BipartiteState]]] = [
-        (0.0, counter, start_state, 0.0, [start_state])
-    ]
-    counter += 1
-    closed: Set[BipartiteState] = set()
-    cost_per_step = 1.0
-
-    pbar = tqdm(desc="A* way/node expanded", unit=" steps") if progress_interval else None
-    iterations = 0
-
-    while open_heap:
-        f, _, state, g, path = heapq.heappop(open_heap)
-        if state in closed:
-            continue
-        closed.add(state)
-        iterations += 1
-        # if pbar:
-        pbar.update(1)
-        if progress_interval and progress_callback:
-            progress_callback(len(closed), len(open_heap))
-
-        kind, id_ = state
-        if state == goal_state:
-            # if pbar:
-            pbar.close()
-            return path
-
-        if kind == "way":
-            for node_id in way_to_nodes.get(id_, set()):
-                new_state: BipartiteState = ("node", node_id)
-                if new_state in closed:
-                    continue
-                g_new = g + cost_per_step
-                new_path = path + [new_state]
-                heapq.heappush(open_heap, (g_new, counter, new_state, g_new, new_path))
-                counter += 1
-        else:
-            for way_id in node_to_ways.get(id_, set()):
-                new_state = ("way", way_id)
-                if new_state in closed:
-                    continue
-                g_new = g + cost_per_step
-                new_path = path + [new_state]
-                heapq.heappush(open_heap, (g_new, counter, new_state, g_new, new_path))
-                counter += 1
-
-    # if pbar:
-    pbar.close()
-    return None
-
-
-
-def find_path_between_platform_edges(
+def find_path_between_edges(
     db_config: Dict[str, Any],
     edge_1: Dict[str, Any],
     edge_2: Dict[str, Any],
     debug: bool = False,
 ) -> Optional[Dict[str, Any]]:
-    """
-    Find a path between two platform edges (from platform_edges_indexed) using
-    station ways. Both edges must belong to the same station (relation_id).
-    Returns a result dict with path details or None if no path.
-    Set debug=True to print diagnostics to stderr.
+    """Find a walkable path between two platform edges within the same
+    station (same relation_id).
+
+    Steps:
+      1. Load the station's way segments from the materialized view.
+      2. Build the bipartite index and seed it with the two platform edges.
+      3. Run BFS with iterative batch expansion of pedestrian ways.
+      4. Return a result dict describing the path, or None.
     """
     if edge_1["relation_id"] != edge_2["relation_id"]:
         if debug:
-            print("[pathfind] Skipping: different relation_id", edge_1["relation_id"], "vs", edge_2["relation_id"])
+            print("[pathfind] Different relation_ids — cannot connect.", flush=True)
         return None
 
     relation_id = edge_1["relation_id"]
-    start_way_id = edge_1["way_id"]
-    goal_way_id = edge_2["way_id"]
+    start_way = edge_1["way_id"]
+    goal_way = edge_2["way_id"]
 
     conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
     try:
         if debug:
-            print("[pathfind] Querying station_way_segments for relation_id=%s ..." % relation_id, flush=True)
+            print(f"[pathfind] Loading segments for relation {relation_id} ...", flush=True)
         segments = get_way_segments_for_relation(conn, relation_id)
         if debug:
-            print("[pathfind] relation_id:", relation_id)
-            print("[pathfind] segments from DB:", len(segments), flush=True)
-            print("[pathfind] edge_1 way_id:", start_way_id, "edge_2 way_id:", goal_way_id)
-
+            print(f"[pathfind] {len(segments)} segments, edge ways: {start_way} -> {goal_way}", flush=True)
         if not segments:
-            if debug:
-                print("[pathfind] No segments for this relation (station_way_segments has no rows for relation_id).")
             return None
 
-        if debug:
-            print("[pathfind] Building way<->node index from %s segments ..." % len(segments), flush=True)
         way_to_nodes, node_to_ways = build_bipartite_index(segments)
 
-        # Include platform edge ways (they may not be in station_way_segments)
+        # Seed the index with the platform-edge ways themselves (they may not
+        # be formal members of the station relation).
         for edge in (edge_1, edge_2):
             _add_way_to_index(edge["way_id"], edge["nodes"], way_to_nodes, node_to_ways)
 
         if debug:
-            print("[pathfind] Index: %d ways, %d nodes. Expanding pedestrian ways ..." % (len(way_to_nodes), len(node_to_ways)), flush=True)
-        expand_pedestrian_ways(conn, way_to_nodes, node_to_ways, debug=debug)
-        if debug:
-            print("[pathfind] After expansion: %d ways, %d nodes" % (len(way_to_nodes), len(node_to_ways)), flush=True)
+            print(f"[pathfind] Initial index: {len(way_to_nodes)} ways, {len(node_to_ways)} nodes", flush=True)
 
-        if start_way_id not in way_to_nodes:
-            if debug:
-                print("[pathfind] Start way_id %s has no nodes." % start_way_id)
-            return None
-        if goal_way_id not in way_to_nodes:
-            if debug:
-                print("[pathfind] Goal way_id %s has no nodes." % goal_way_id)
-            return None
-
-        if debug:
-            print("[pathfind] Running bipartite A* (way -> nodes -> ways) ...", flush=True)
-        path = bipartite_a_star(
-            start_way_id,
-            goal_way_id,
-            way_to_nodes,
-            node_to_ways,
-            progress_interval=5000 if debug else 0,
+        path = bipartite_search(
+            start_way, goal_way,
+            way_to_nodes, node_to_ways,
+            conn=conn, debug=debug,
         )
         if path is None:
             if debug:
-                print("[pathfind] No path (ways are not connected via shared nodes).")
+                print("[pathfind] No path found.", flush=True)
             return None
-
-        # path = [('way', w1), ('node', n1), ('way', w2), ...]
-        path_way_ids = [id_ for (k, id_) in path if k == "way"]
-        path_node_ids = [id_ for (k, id_) in path if k == "node"]
-        # way->node steps for compatibility: (way_id, node_id) for each step from a way to a node
-        path_ways = []
-        for i in range(len(path) - 1):
-            (k1, id1), (k2, id2) = path[i], path[i + 1]
-            if k1 == "way" and k2 == "node":
-                path_ways.append((id1, id2))
 
         return {
             "type": "way_path",
@@ -400,9 +365,8 @@ def find_path_between_platform_edges(
             "edge_2": edge_2,
             "relation_id": relation_id,
             "path_sequence": path,
-            "path_nodes": path_node_ids,
-            "path_ways": path_ways,
-            "way_ids": path_way_ids,
+            "path_nodes": [id_ for k, id_ in path if k == "node"],
+            "way_ids": [id_ for k, id_ in path if k == "way"],
         }
     finally:
         conn.close()
