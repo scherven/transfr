@@ -161,36 +161,76 @@ def find_path_optimized(db_config: Dict[str, str], s1: str, e1: int, s2: str, e2
     
     return None
 
-# Utility function to refresh materialized views
-def refresh_views(db_config: Dict[str, str]):
+def get_station_pedestrian_ways(
+    db_config: Dict[str, str],
+    station_name: str
+) -> List[Dict[str, Any]]:
     """
-    Refresh all materialized views. Run this periodically or after database updates.
+    Get all pedestrian ways (footpaths, steps, corridors, elevators) in a station.
+    
+    Returns list of dicts with way info including nodes and tags.
     """
     conn = psycopg2.connect(**db_config)
     cur = conn.cursor()
     
     try:
-        print("Refreshing materialized views...")
+        # Get pedestrian ways from the station
+        # Try formal relation members first
+        cur.execute("""
+            SELECT 
+                way_id,
+                nodes,
+                tags,
+                highway_type,
+                way_name,
+                indoor,
+                level
+            FROM station_pedestrian_ways
+            WHERE station_name = %s
+        """, (station_name,))
         
-        views = [
-            'station_platform_ways',
-            'station_platform_nodes',
-            'platform_edges_indexed',
-            'station_ways_with_nodes'
-        ]
+        formal_ways = cur.fetchall()
         
-        for view in views:
-            print(f"  Refreshing {view}...")
-            cur.execute(f"REFRESH MATERIALIZED VIEW {view}")
+        # Also get ways that share nodes with station but aren't formally in relation
+        cur.execute("""
+            SELECT 
+                way_id,
+                nodes,
+                tags,
+                highway_type,
+                way_name,
+                indoor,
+                level
+            FROM station_area_pedestrian_ways
+            WHERE station_name = %s
+        """, (station_name,))
         
-        conn.commit()
-        print("All views refreshed successfully!")
+        area_ways = cur.fetchall()
+        
+        # Combine and deduplicate
+        all_ways = {}
+        for way_id, nodes, tags, highway_type, way_name, indoor, level in formal_ways + area_ways:
+            if way_id not in all_ways:
+                tags_data = json.loads(tags) if isinstance(tags, str) else tags
+                all_ways[way_id] = {
+                    'way_id': way_id,
+                    'nodes': nodes,
+                    'tags': tags_data,
+                    'highway_type': highway_type,
+                    'name': way_name,
+                    'indoor': indoor,
+                    'level': level
+                }
+        
+        result = list(all_ways.values())
+        print(f"Found {len(result)} pedestrian ways for station: {station_name}")
+        return result
         
     finally:
         cur.close()
         conn.close()
 
-
+# psql -h localhost -d openrailwaymap -U simonchervenak -f views.sql 
 if __name__ == "__main__":
     db_config = {
         'host': 'localhost',
@@ -209,5 +249,7 @@ if __name__ == "__main__":
     
     edge1 = find_optimized(db_config, s, e1)
     edge2 = find_optimized(db_config, s, e2)
-    print(find_buffer_stop_for_edge(db_config, edge1))
-    print(find_buffer_stop_for_edge(db_config, edge2))
+    print(edge1)
+    print(edge2)
+    # print(find_buffer_stop_for_edge(db_config, edge1))
+    # print(find_buffer_stop_for_edge(db_config, edge2))
