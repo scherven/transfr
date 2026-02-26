@@ -6,9 +6,10 @@
 --     -> station_platform_nodes
 --       -> platform_edges_indexed
 --     -> station_ways_with_nodes
---       -> station_pedestrian_ways_with_nodes  (regular view)
---       -> station_ways_with_nodes_plus_pedestrian
---         -> station_way_segments              (regular view)
+--       -> station_walkable_ways               (regular view, walkable filter)
+--         -> station_pedestrian_ways_with_nodes (regular view)
+--         -> station_ways_with_nodes_plus_pedestrian
+--           -> station_way_segments             (regular view)
 --
 -- After importing new OSM data, refresh materialized views:
 --   REFRESH MATERIALIZED VIEW station_platform_ways;
@@ -18,10 +19,26 @@
 --   REFRESH MATERIALIZED VIEW station_ways_with_nodes_plus_pedestrian;
 -- ==========================================================================
 
+-- One-time index on the base planet_osm_ways table.  Speeds up
+-- query_walkable_ways_by_nodes() which does:
+--   WHERE nodes && <array> AND tags->>'highway' IN (...)
+-- The partial index restricts to walkable highway types so it is small
+-- and the GIN lookup on the nodes array is fast.
+CREATE INDEX IF NOT EXISTS idx_ways_walkable_nodes_gin
+    ON planet_osm_ways USING GIN (nodes)
+    WHERE tags->>'highway' IN (
+        'footway', 'steps', 'corridor', 'pedestrian',
+        'path', 'cycleway', 'crossing',
+        'elevator', 'escalator', 'platform', 'service'
+    )
+    OR tags->>'railway' IN ('platform', 'platform_edge')
+    OR tags ? 'conveying';
+
 -- Drop in reverse dependency order
 DROP VIEW IF EXISTS station_way_segments CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes_plus_pedestrian CASCADE;
 DROP VIEW IF EXISTS station_pedestrian_ways_with_nodes CASCADE;
+DROP VIEW IF EXISTS station_walkable_ways CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS platform_edges_indexed CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_platform_nodes CASCADE;
@@ -124,12 +141,31 @@ CREATE INDEX idx_swn_station ON station_ways_with_nodes (station_name);
 CREATE INDEX idx_swn_nodes   ON station_ways_with_nodes USING GIN (nodes);
 
 -- ---------------------------------------------------------------------------
--- 5. station_pedestrian_ways_with_nodes  (regular view — not materialized)
+-- 5. station_walkable_ways  (regular view)
 --
--- Pedestrian ways that are NOT members of a stop_area relation but DO share
--- at least one node with a station-member way.  This gives us the first
--- "hop" of footpaths connecting to the station.  Further hops are discovered
--- at query time by the Python batch-expansion logic.
+-- Filters station_ways_with_nodes to only ways people actually walk on.
+-- Excludes rail tracks, roads, signals, etc.  Kept as a separate view so
+-- station_ways_with_nodes remains unfiltered for the opposite-platform
+-- check (which needs to see ALL relation-member ways).
+-- ---------------------------------------------------------------------------
+CREATE VIEW station_walkable_ways AS
+SELECT relation_id, station_name, way_id, nodes, tags
+FROM station_ways_with_nodes
+WHERE tags->>'highway' IN (
+        'footway', 'steps', 'corridor', 'pedestrian',
+        'path', 'cycleway', 'crossing',
+        'elevator', 'escalator', 'platform', 'service'
+    )
+   OR tags->>'railway' IN ('platform', 'platform_edge')
+   OR tags ? 'conveying';
+
+-- ---------------------------------------------------------------------------
+-- 6. station_pedestrian_ways_with_nodes  (regular view)
+--
+-- Walkable ways that are NOT members of a stop_area relation but DO share
+-- at least one node with a station-member walkable way.  This gives us the
+-- first "hop" of footpaths connecting to the station.  Further hops are
+-- discovered at query time by the Python batch-expansion logic.
 -- ---------------------------------------------------------------------------
 CREATE VIEW station_pedestrian_ways_with_nodes AS
 SELECT DISTINCT
@@ -139,22 +175,26 @@ SELECT DISTINCT
     w.nodes,
     w.tags
 FROM planet_osm_ways w
-JOIN station_ways_with_nodes s ON w.nodes && s.nodes
+JOIN station_walkable_ways s ON w.nodes && s.nodes
 WHERE w.tags->>'highway' IN (
-    'footway', 'steps', 'corridor', 'pedestrian',
-    'path', 'cycleway', 'crossing'
-);
+        'footway', 'steps', 'corridor', 'pedestrian',
+        'path', 'cycleway', 'crossing',
+        'elevator', 'escalator', 'platform', 'service'
+    )
+   OR w.tags->>'railway' IN ('platform', 'platform_edge')
+   OR w.tags ? 'conveying';
 
 -- ---------------------------------------------------------------------------
--- 6. station_ways_with_nodes_plus_pedestrian  (materialized)
+-- 7. station_ways_with_nodes_plus_pedestrian  (materialized)
 --
--- Union of relation-member ways and the first-hop pedestrian ways above.
+-- Union of walkable relation-member ways and the first-hop walkable ways.
 -- Materialized with an index on relation_id so that loading segments for a
--- single station is a fast index scan.
+-- single station is a fast index scan.  Only contains physically walkable
+-- ways — no rail tracks, no roads.
 -- ---------------------------------------------------------------------------
 CREATE MATERIALIZED VIEW station_ways_with_nodes_plus_pedestrian AS
 SELECT relation_id, station_name, way_id, nodes, tags
-FROM station_ways_with_nodes
+FROM station_walkable_ways
 UNION
 SELECT relation_id, station_name, way_id, nodes, tags
 FROM station_pedestrian_ways_with_nodes;
@@ -162,7 +202,7 @@ FROM station_pedestrian_ways_with_nodes;
 CREATE INDEX idx_swpp_rel ON station_ways_with_nodes_plus_pedestrian (relation_id);
 
 -- ---------------------------------------------------------------------------
--- 7. station_way_segments  (regular view)
+-- 8. station_way_segments  (regular view)
 --
 -- Expands every way in the union above into consecutive (node_from, node_to)
 -- pairs.  This is what pathfind.py queries to build the in-memory bipartite
