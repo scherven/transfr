@@ -45,6 +45,24 @@ export default function JourneyResults({ data, loading }) {
     return m > 0 ? `+${m}` : `${m}`;
   }
 
+  function PlatformBadge({ actual, planned }) {
+    const display = actual || planned;
+    if (!display) return null;
+
+    const changed = planned && actual && planned !== actual;
+    return (
+      <span className={`platform ${changed ? "platform-changed" : ""}`}>
+        Pl. {display}
+        {changed && (
+          <span className="platform-was" title={`Was Pl. ${planned}`}>
+            {" "}
+            (was {planned})
+          </span>
+        )}
+      </span>
+    );
+  }
+
   return (
     <div className="results-container">
       <h2 className="results-heading">
@@ -94,11 +112,10 @@ export default function JourneyResults({ data, loading }) {
                         )}
                       </span>
                       <span className="stop-name">{leg.origin?.name}</span>
-                      {leg.departure_platform && (
-                        <span className="platform">
-                          Pl. {leg.departure_platform}
-                        </span>
-                      )}
+                      <PlatformBadge
+                        actual={leg.departure_platform}
+                        planned={leg.planned_departure_platform}
+                      />
                     </div>
                     <div className="leg-arrow">↓</div>
                     <div className="leg-stop">
@@ -113,11 +130,10 @@ export default function JourneyResults({ data, loading }) {
                       <span className="stop-name">
                         {leg.destination?.name}
                       </span>
-                      {leg.arrival_platform && (
-                        <span className="platform">
-                          Pl. {leg.arrival_platform}
-                        </span>
-                      )}
+                      <PlatformBadge
+                        actual={leg.arrival_platform}
+                        planned={leg.planned_arrival_platform}
+                      />
                     </div>
                   </div>
                 </div>

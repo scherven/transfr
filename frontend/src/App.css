@@ -311,6 +311,22 @@
   letter-spacing: 0.02em;
 }
 
+.platform-changed {
+  background: linear-gradient(135deg, #d32f2f, #ee6c4d);
+  animation: platform-pulse 1.5s ease-in-out infinite;
+}
+
+.platform-was {
+  font-weight: 400;
+  font-size: 0.7rem;
+  opacity: 0.85;
+}
+
+@keyframes platform-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
+}
+
 .leg-arrow {
   margin-left: 18px;
   font-size: 0.75rem;

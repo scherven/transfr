@@ -2,3 +2,7 @@
 server-admin
 *.pbf
 *.pyc
+*.crt
+secrets
+server.csr
+server.pem

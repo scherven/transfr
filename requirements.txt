@@ -1,4 +1,4 @@
 psycopg2-binary
-pyhafas
+requests
 flask
 flask-cors

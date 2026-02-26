@@ -1,11 +1,16 @@
-"""Flask API wrapping hafas.py for the React frontend."""
+"""Flask API for the React frontend.
+
+Station autocomplete is backed by a local CSV (trainline-eu/stations).
+Journey routing is powered by the Transitous (MOTIS 2) API.
+"""
 
 from datetime import datetime
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-from hafas import autocomplete_station, search_journeys
+from stations import autocomplete_station
+from journeys import search_journeys
 
 app = Flask(__name__)
 CORS(app)
