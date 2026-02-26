@@ -1,0 +1,347 @@
+/* ---- layout ---- */
+.app {
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+}
+
+#background-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.overlay {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6vh 1rem 3rem;
+  min-height: 100vh;
+}
+
+/* ---- hero ---- */
+.hero {
+  text-align: center;
+  margin-bottom: 2.5rem;
+}
+
+.title {
+  font-size: 3.5rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: #fff;
+  text-shadow: 0 2px 20px rgba(10, 95, 208, 0.4);
+}
+
+.subtitle {
+  margin-top: 0.4rem;
+  font-size: 1.1rem;
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* ---- search panel ---- */
+.search-panel {
+  width: 100%;
+  max-width: 760px;
+  background: rgba(20, 20, 35, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  padding: 1.5rem 1.75rem;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+.search-fields {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.search-bar-wrapper {
+  flex: 1 1 200px;
+  position: relative;
+}
+
+.datetime-wrapper {
+  flex: 0 1 210px;
+}
+
+.search-label {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 0.35rem;
+}
+
+.search-input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.95rem;
+  font-family: inherit;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.search-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.search-input:focus {
+  border-color: #0a5fd0;
+}
+
+.search-input.loading {
+  opacity: 0.6;
+}
+
+.datetime-input {
+  color-scheme: dark;
+}
+
+.search-button {
+  display: block;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0.7rem;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, #0a5fd0, #6f2fe3);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    opacity 0.2s,
+    transform 0.1s;
+}
+
+.search-button:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.search-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ---- dropdown ---- */
+.dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  margin-top: 4px;
+  background: rgba(25, 25, 42, 0.97);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+
+.dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: #d8d8e8;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.dropdown-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* ---- results ---- */
+.results-container {
+  width: 100%;
+  max-width: 760px;
+  margin-top: 2rem;
+}
+
+.results-heading {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.results-loading,
+.results-error,
+.results-empty {
+  text-align: center;
+  padding: 2rem;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 0.95rem;
+}
+
+.results-error {
+  color: #ee6c4d;
+}
+
+.journey-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.journey-card {
+  background: rgba(20, 20, 35, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 1.1rem 1.3rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+}
+
+.journey-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.8rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.journey-duration {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.journey-changes {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.legs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.leg {
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.leg-walk {
+  opacity: 0.7;
+  border-left: 3px dashed rgba(255, 255, 255, 0.15);
+}
+
+.leg-train-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.4rem;
+  color: #7fa7e0;
+}
+
+.cancelled-badge {
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #fff;
+  background: #d32f2f;
+  border-radius: 4px;
+  vertical-align: middle;
+}
+
+.leg-stops {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.leg-stop {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.88rem;
+}
+
+.stop-time {
+  flex: 0 0 50px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.delay {
+  margin-left: 0.2rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #ee6c4d;
+}
+
+.stop-name {
+  flex: 1;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.platform {
+  flex: 0 0 auto;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #0a5fd0, #6f2fe3);
+  border-radius: 5px;
+  letter-spacing: 0.02em;
+}
+
+.leg-arrow {
+  margin-left: 18px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+.walk-icon {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* ---- scrollbar ---- */
+.dropdown-menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dropdown-menu::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+/* ---- responsive ---- */
+@media (max-width: 600px) {
+  .search-fields {
+    flex-direction: column;
+  }
+
+  .title {
+    font-size: 2.5rem;
+  }
+
+  .search-panel {
+    padding: 1.2rem;
+  }
+}

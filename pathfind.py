@@ -135,7 +135,8 @@ def query_walkable_ways_by_nodes(
             "    tags->>'highway' = ANY(%s) "
             "    OR tags->>'railway' = ANY(%s) "
             "    OR tags ? 'conveying'"
-            "  )",
+            "  ) "
+            "  AND tags->>'access' IS DISTINCT FROM 'private'",
             (
                 frontier_node_ids,
                 list(exclude_way_ids),

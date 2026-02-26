@@ -151,13 +151,14 @@ CREATE INDEX idx_swn_nodes   ON station_ways_with_nodes USING GIN (nodes);
 CREATE VIEW station_walkable_ways AS
 SELECT relation_id, station_name, way_id, nodes, tags
 FROM station_ways_with_nodes
-WHERE tags->>'highway' IN (
-        'footway', 'steps', 'corridor', 'pedestrian',
-        'path', 'cycleway', 'crossing',
-        'elevator', 'escalator', 'platform', 'service'
-    )
-   OR tags->>'railway' IN ('platform', 'platform_edge')
-   OR tags ? 'conveying';
+WHERE (  tags->>'highway' IN (
+            'footway', 'steps', 'corridor', 'pedestrian',
+            'path', 'cycleway', 'crossing',
+            'elevator', 'escalator', 'platform', 'service')
+      OR tags->>'railway' IN ('platform', 'platform_edge')
+      OR tags ? 'conveying'
+      )
+  AND tags->>'access' IS DISTINCT FROM 'private';
 
 -- ---------------------------------------------------------------------------
 -- 6. station_pedestrian_ways_with_nodes  (regular view)
@@ -176,13 +177,14 @@ SELECT DISTINCT
     w.tags
 FROM planet_osm_ways w
 JOIN station_walkable_ways s ON w.nodes && s.nodes
-WHERE w.tags->>'highway' IN (
-        'footway', 'steps', 'corridor', 'pedestrian',
-        'path', 'cycleway', 'crossing',
-        'elevator', 'escalator', 'platform', 'service'
-    )
-   OR w.tags->>'railway' IN ('platform', 'platform_edge')
-   OR w.tags ? 'conveying';
+WHERE (  w.tags->>'highway' IN (
+            'footway', 'steps', 'corridor', 'pedestrian',
+            'path', 'cycleway', 'crossing',
+            'elevator', 'escalator', 'platform', 'service')
+      OR w.tags->>'railway' IN ('platform', 'platform_edge')
+      OR w.tags ? 'conveying'
+      )
+  AND w.tags->>'access' IS DISTINCT FROM 'private';
 
 -- ---------------------------------------------------------------------------
 -- 7. station_ways_with_nodes_plus_pedestrian  (materialized)
