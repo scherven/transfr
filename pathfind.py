@@ -20,11 +20,54 @@ from typing import Dict, List, Any, Optional, Set, Tuple
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
+from psycopg2.pool import ThreadedConnectionPool
 
-# OSM highway values treated as walkable connections between platforms.
-PEDESTRIAN_HIGHWAY_TYPES = (
+# ---------------------------------------------------------------------------
+# Connection pool
+# ---------------------------------------------------------------------------
+
+_pool: Optional[ThreadedConnectionPool] = None
+
+
+def init_pool(db_config: Dict[str, Any], minconn: int = 1, maxconn: int = 5) -> None:
+    """Initialise the module-level connection pool.  Call once at startup."""
+    global _pool
+    if _pool is not None:
+        return
+    _pool = ThreadedConnectionPool(minconn, maxconn, cursor_factory=RealDictCursor, **db_config)
+
+
+def get_conn():
+    """Borrow a connection from the pool (caller must call put_conn)."""
+    if _pool is None:
+        raise RuntimeError("Connection pool not initialised — call init_pool() first")
+    return _pool.getconn()
+
+
+def put_conn(conn) -> None:
+    """Return a connection to the pool."""
+    if _pool is not None:
+        _pool.putconn(conn)
+
+
+def close_pool() -> None:
+    """Shut down the pool and close all connections."""
+    global _pool
+    if _pool is not None:
+        _pool.closeall()
+        _pool = None
+
+
+# OSM way tags that represent physical walkable infrastructure.
+# Used to filter expansion queries so the BFS only follows ways people
+# actually walk on (not rail tracks, roads, etc.).
+WALKABLE_HIGHWAY_TYPES = (
     "footway", "steps", "corridor", "pedestrian",
     "path", "cycleway", "crossing",
+    "elevator", "escalator", "platform", "service",
+)
+WALKABLE_RAILWAY_TYPES = (
+    "platform", "platform_edge",
 )
 
 # ---------------------------------------------------------------------------
@@ -71,24 +114,34 @@ def get_node_coordinates(
             return None
 
 
-def query_pedestrian_ways_by_nodes(
+def query_walkable_ways_by_nodes(
     conn,
     frontier_node_ids: List[int],
     exclude_way_ids: Set[int],
 ) -> List[Tuple[int, List[int]]]:
-    """Find pedestrian ways in planet_osm_ways that share at least one node
+    """Find walkable ways in planet_osm_ways that share at least one node
     with *frontier_node_ids*, excluding ways already in *exclude_way_ids*.
-    Used to iteratively expand the search graph beyond the initial station
-    relation members."""
+    Matches highway, railway, and conveying tags that represent physical
+    infrastructure people walk on.  Used to iteratively expand the search
+    graph beyond the initial station relation members."""
     if not frontier_node_ids:
         return []
     with conn.cursor() as cur:
         cur.execute(
             "SELECT id, nodes FROM planet_osm_ways "
             "WHERE nodes && %s::bigint[] "
-            "  AND tags->>'highway' = ANY(%s) "
-            "  AND NOT (id = ANY(%s::bigint[]))",
-            (frontier_node_ids, list(PEDESTRIAN_HIGHWAY_TYPES), list(exclude_way_ids)),
+            "  AND NOT (id = ANY(%s::bigint[])) "
+            "  AND ("
+            "    tags->>'highway' = ANY(%s) "
+            "    OR tags->>'railway' = ANY(%s) "
+            "    OR tags ? 'conveying'"
+            "  )",
+            (
+                frontier_node_ids,
+                list(exclude_way_ids),
+                list(WALKABLE_HIGHWAY_TYPES),
+                list(WALKABLE_RAILWAY_TYPES),
+            ),
         )
         return [(r["id"], list(r["nodes"])) for r in cur.fetchall()]
 
@@ -223,7 +276,7 @@ def bipartite_search(
         if not frontier:
             break
 
-        new_ways = query_pedestrian_ways_by_nodes(
+        new_ways = query_walkable_ways_by_nodes(
             conn, list(frontier), set(way_to_nodes.keys()),
         )
         expanded_node_ids.update(frontier)
@@ -306,7 +359,6 @@ def min_distance_between_node_sets(
 # ---------------------------------------------------------------------------
 
 def find_path_between_edges(
-    db_config: Dict[str, Any],
     edge_1: Dict[str, Any],
     edge_2: Dict[str, Any],
     debug: bool = False,
@@ -319,6 +371,8 @@ def find_path_between_edges(
       2. Build the bipartite index and seed it with the two platform edges.
       3. Run BFS with iterative batch expansion of pedestrian ways.
       4. Return a result dict describing the path, or None.
+
+    Uses the module-level connection pool (call init_pool() first).
     """
     if edge_1["relation_id"] != edge_2["relation_id"]:
         if debug:
@@ -329,7 +383,7 @@ def find_path_between_edges(
     start_way = edge_1["way_id"]
     goal_way = edge_2["way_id"]
 
-    conn = psycopg2.connect(**db_config, cursor_factory=RealDictCursor)
+    conn = get_conn()
     try:
         if debug:
             print(f"[pathfind] Loading segments for relation {relation_id} ...", flush=True)
@@ -369,4 +423,4 @@ def find_path_between_edges(
             "way_ids": [id_ for k, id_ in path if k == "way"],
         }
     finally:
-        conn.close()
+        put_conn(conn)
