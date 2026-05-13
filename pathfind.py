@@ -301,6 +301,117 @@ def bipartite_search(
 
 
 # ---------------------------------------------------------------------------
+# Walking speed model
+# ---------------------------------------------------------------------------
+
+# Base walking speed in m/s (≈5 km/h, standard pedestrian assumption)
+WALKING_SPEED_MS = 1.4
+
+# Per-tag speed overrides
+_WAY_SPEEDS: Dict[Tuple[str, str], float] = {
+    ("highway", "steps"): 0.5,       # stairs — half speed
+    ("highway", "elevator"): 1.4,    # elevator — distance negligible, add fixed wait
+    ("railway", "elevator"): 1.4,
+}
+_ELEVATOR_WAIT_S = 30.0   # seconds of wait time added for any elevator segment
+_ESCALATOR_SPEED_MS = 0.9 # escalator (conveying=yes/forward/backward)
+
+
+def _way_speed(tags: Dict) -> Tuple[float, float]:
+    """Return (speed_m_s, fixed_penalty_s) for a way based on its tags."""
+    if tags.get("conveying") in ("yes", "forward", "backward"):
+        return _ESCALATOR_SPEED_MS, 0.0
+    for (key, val), speed in _WAY_SPEEDS.items():
+        if tags.get(key) == val:
+            penalty = _ELEVATOR_WAIT_S if val == "elevator" else 0.0
+            return speed, penalty
+    return WALKING_SPEED_MS, 0.0
+
+
+# ---------------------------------------------------------------------------
+# Walking time computation
+# ---------------------------------------------------------------------------
+
+def get_ways_info(
+    conn,
+    way_ids: List[int],
+) -> Dict[int, Dict[str, Any]]:
+    """Fetch ordered node list and tags for each way_id from planet_osm_ways."""
+    if not way_ids:
+        return {}
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, nodes, tags FROM planet_osm_ways WHERE id = ANY(%s)",
+            (way_ids,),
+        )
+        result = {}
+        for r in cur.fetchall():
+            tags = r["tags"] if isinstance(r["tags"], dict) else {}
+            result[r["id"]] = {"nodes": list(r["nodes"]), "tags": tags}
+        return result
+
+
+def compute_path_walking_time(
+    conn,
+    path_way_ids: List[int],
+) -> Dict[str, Any]:
+    """Given an ordered list of way_ids forming a path, compute total walking
+    distance and time, plus a per-way breakdown.
+
+    Returns a dict with:
+      walking_distance_meters  — total path length
+      walking_time_seconds     — total estimated walking time
+      path_breakdown           — list of per-way dicts
+    """
+    ways_info = get_ways_info(conn, path_way_ids)
+
+    # Collect all node IDs needed for coordinate lookup
+    all_node_ids: List[int] = []
+    for way_id in path_way_ids:
+        if way_id in ways_info:
+            all_node_ids.extend(ways_info[way_id]["nodes"])
+
+    coords = get_node_coordinates(conn, list(set(all_node_ids))) or {}
+
+    total_distance = 0.0
+    total_time = 0.0
+    breakdown: List[Dict[str, Any]] = []
+
+    for way_id in path_way_ids:
+        info = ways_info.get(way_id)
+        if not info:
+            continue
+        tags = info["tags"]
+        nodes = info["nodes"]
+
+        distance = way_length_meters(nodes, coords) or 0.0
+        speed, fixed_penalty = _way_speed(tags)
+        segment_time = (distance / speed) + fixed_penalty if speed > 0 else fixed_penalty
+
+        # Determine a human-readable type label from tags
+        way_type = (
+            tags.get("highway")
+            or tags.get("railway")
+            or ("escalator" if tags.get("conveying") else "path")
+        )
+
+        total_distance += distance
+        total_time += segment_time
+        breakdown.append({
+            "way_id": way_id,
+            "type": way_type,
+            "distance_m": round(distance, 1),
+            "time_s": round(segment_time, 1),
+        })
+
+    return {
+        "walking_distance_meters": round(total_distance, 1),
+        "walking_time_seconds": round(total_time, 1),
+        "path_breakdown": breakdown,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Distance / geometry helpers (used for platform-width calculations)
 # ---------------------------------------------------------------------------
 
@@ -414,6 +525,9 @@ def find_path_between_edges(
                 print("[pathfind] No path found.", flush=True)
             return None
 
+        way_ids = [id_ for k, id_ in path if k == "way"]
+        timing = compute_path_walking_time(conn, way_ids)
+
         return {
             "type": "way_path",
             "edge_1": edge_1,
@@ -421,7 +535,8 @@ def find_path_between_edges(
             "relation_id": relation_id,
             "path_sequence": path,
             "path_nodes": [id_ for k, id_ in path if k == "node"],
-            "way_ids": [id_ for k, id_ in path if k == "way"],
+            "way_ids": way_ids,
+            **timing,
         }
     finally:
         put_conn(conn)

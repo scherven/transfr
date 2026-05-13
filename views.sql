@@ -5,6 +5,7 @@
 --   station_platform_ways
 --     -> station_platform_nodes
 --       -> platform_edges_indexed
+--       -> platform_edges_track_ref
 --     -> station_ways_with_nodes
 --       -> station_walkable_ways               (regular view, walkable filter)
 --         -> station_pedestrian_ways_with_nodes (regular view)
@@ -15,6 +16,7 @@
 --   REFRESH MATERIALIZED VIEW station_platform_ways;
 --   REFRESH MATERIALIZED VIEW station_platform_nodes;
 --   REFRESH MATERIALIZED VIEW platform_edges_indexed;
+--   REFRESH MATERIALIZED VIEW platform_edges_track_ref;
 --   REFRESH MATERIALIZED VIEW station_ways_with_nodes;
 --   REFRESH MATERIALIZED VIEW station_ways_with_nodes_plus_pedestrian;
 -- ==========================================================================
@@ -40,6 +42,7 @@ DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes_plus_pedestrian CASCADE
 DROP VIEW IF EXISTS station_pedestrian_ways_with_nodes CASCADE;
 DROP VIEW IF EXISTS station_walkable_ways CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_ways_with_nodes CASCADE;
+DROP MATERIALIZED VIEW IF EXISTS platform_edges_track_ref CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS platform_edges_indexed CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_platform_nodes CASCADE;
 DROP MATERIALIZED VIEW IF EXISTS station_platform_ways CASCADE;
@@ -115,6 +118,37 @@ CREATE INDEX idx_pe_station ON platform_edges_indexed (station_name);
 CREATE INDEX idx_pe_ref     ON platform_edges_indexed (edge_ref);
 CREATE INDEX idx_pe_rel     ON platform_edges_indexed (relation_id);
 CREATE INDEX idx_pe_nodes   ON platform_edges_indexed USING GIN (nodes);
+
+-- ---------------------------------------------------------------------------
+-- 3b. platform_edges_track_ref
+--
+-- Same structure as platform_edges_indexed but keyed on the
+-- railway:track_ref tag instead of ref.  Some stations (e.g. Frankfurt)
+-- use composite track refs like '412/422' where the trailing digits encode
+-- the logical track number.  Queried with LIKE '%01%' so that '101' matches
+-- track 1, '412/422' matches track 12, etc.
+-- ---------------------------------------------------------------------------
+CREATE MATERIALIZED VIEW platform_edges_track_ref AS
+SELECT
+    spn.relation_id,
+    spn.station_name,
+    w.id AS way_id,
+    w.nodes,
+    w.tags,
+    w.tags->>'railway:track_ref' AS track_ref
+FROM planet_osm_ways w
+JOIN LATERAL (
+    SELECT DISTINCT relation_id, station_name
+    FROM station_platform_nodes spn
+    WHERE spn.node_id = ANY(w.nodes)
+) spn ON true
+WHERE w.tags->>'railway' = 'platform_edge'
+  AND w.tags->>'railway:track_ref' IS NOT NULL;
+
+CREATE INDEX idx_petr_station ON platform_edges_track_ref (station_name);
+CREATE INDEX idx_petr_ref     ON platform_edges_track_ref (track_ref);
+CREATE INDEX idx_petr_rel     ON platform_edges_track_ref (relation_id);
+CREATE INDEX idx_petr_nodes   ON platform_edges_track_ref USING GIN (nodes);
 
 -- ---------------------------------------------------------------------------
 -- 4. station_ways_with_nodes

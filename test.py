@@ -18,6 +18,7 @@ from pathfind import (
     get_node_coordinates,
     way_length_meters,
     min_distance_between_node_sets,
+    compute_path_walking_time,
 )
 
 DB_CONFIG: Dict[str, Any] = {
@@ -45,11 +46,11 @@ def find_all_edges(station_name: str) -> List[Dict[str, Any]]:
             )
             return [
                 {
-                    "relation_id": r[0],
-                    "way_id": r[1],
-                    "nodes": r[2],
-                    "tags": json.loads(r[3]) if isinstance(r[3], str) else r[3],
-                    "edge_ref": r[4],
+                    "relation_id": r["relation_id"],
+                    "way_id": r["way_id"],
+                    "nodes": r["nodes"],
+                    "tags": json.loads(r["tags"]) if isinstance(r["tags"], str) else r["tags"],
+                    "edge_ref": r["edge_ref"],
                 }
                 for r in cur.fetchall()
             ]
@@ -57,21 +58,27 @@ def find_all_edges(station_name: str) -> List[Dict[str, Any]]:
         put_conn(conn)
 
 
+def _track_ref_pattern(edge_ref: int) -> str:
+    """Build a SQL LIKE pattern that matches any railway:track_ref containing
+    the given track number, zero-padded to two digits if single-digit.
+    e.g. 1 -> '%01%', 12 -> '%12%'"""
+    return f"%{str(edge_ref).zfill(2)}%"
+
+
 def find_edge(station_name: str, edge_ref: int) -> Optional[Dict[str, Any]]:
     """Look up a single platform edge by station name and ref number.
 
-    Fast path: indexed lookup in platform_edges_indexed (edge shares a node
-    directly with a station platform way).
-
-    Fallback: find the edge by ref directly from planet_osm_ways, then
-    associate it with the station by walking through pedestrian ways until
-    we reach a station-member way.  This handles edges that are connected
-    to the station only through intermediate footways/steps/corridors.
+    Lookup order:
+      1. Exact ref match in platform_edges_indexed.
+      2. Exact ref fallback via planet_osm_ways + pedestrian expansion.
+      3. railway:track_ref LIKE match in platform_edges_track_ref.
+      4. railway:track_ref LIKE fallback via planet_osm_ways + pedestrian
+         expansion.
     """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            # --- Fast path: materialized view lookup ---
+            # --- Fast path: exact ref in materialized view ---
             cur.execute(
                 "SELECT relation_id, way_id, nodes, tags, edge_ref "
                 "FROM platform_edges_indexed "
@@ -80,18 +87,27 @@ def find_edge(station_name: str, edge_ref: int) -> Optional[Dict[str, Any]]:
             )
             row = cur.fetchone()
             if row:
-                print("got", row)
-                # return {
-                #     "relation_id": row[0],
-                #     "way_id": row[1],
-                #     "nodes": row[2],
-                #     "tags": json.loads(row[3]) if isinstance(row[3], str) else row[3],
-                #     "edge_ref": row[4],
-                # }
                 return row
 
-            # --- Fallback: find edge by ref, associate with station ---
-            return _find_edge_fallback(conn, cur, station_name, edge_ref)
+            # --- Fallback 1: exact ref from planet_osm_ways ---
+            result = _find_edge_fallback(conn, cur, station_name, edge_ref)
+            if result:
+                return result
+
+            # --- Fallback 2: railway:track_ref LIKE in materialized view ---
+            pattern = _track_ref_pattern(edge_ref)
+            cur.execute(
+                "SELECT relation_id, way_id, nodes, tags, track_ref AS edge_ref "
+                "FROM platform_edges_track_ref "
+                "WHERE station_name = %s AND track_ref LIKE %s LIMIT 1",
+                (station_name, pattern),
+            )
+            row = cur.fetchone()
+            if row:
+                return row
+
+            # --- Fallback 3: railway:track_ref LIKE from planet_osm_ways ---
+            return _find_edge_fallback_track_ref(conn, cur, station_name, edge_ref)
     finally:
         put_conn(conn)
 
@@ -120,7 +136,7 @@ def _find_edge_fallback(
         "WHERE station_name = %s",
         (station_name,),
     )
-    relation_ids = {r[0] for r in cur.fetchall()}
+    relation_ids = {r["relation_id"] for r in cur.fetchall()}
     if not relation_ids:
         return None
 
@@ -131,12 +147,13 @@ def _find_edge_fallback(
         "WHERE relation_id = ANY(%s)",
         (list(relation_ids),),
     )
-    station_nodes = {r[0] for r in cur.fetchall()}
+    station_nodes = {r["node_id"] for r in cur.fetchall()}
 
     # 4. For each candidate edge, check if it connects to the station
     #    (directly or through pedestrian way expansion)
     MAX_HOPS = 10
-    for way_id, nodes, tags in candidates:
+    for r in candidates:
+        way_id, nodes, tags = r["id"], r["nodes"], r["tags"]
         edge_nodes = set(nodes)
 
         # Direct overlap?
@@ -145,6 +162,74 @@ def _find_edge_fallback(
             return _make_edge_dict(rel_id, way_id, nodes, tags, edge_ref)
 
         # Expand through pedestrian ways
+        frontier = set(edge_nodes)
+        seen_nodes = set(edge_nodes)
+        seen_ways: set = {way_id}
+        for _ in range(MAX_HOPS):
+            new_ways = query_walkable_ways_by_nodes(conn, list(frontier), seen_ways)
+            if not new_ways:
+                break
+            new_frontier: set = set()
+            for nw_id, nw_nodes in new_ways:
+                seen_ways.add(nw_id)
+                for n in nw_nodes:
+                    if n not in seen_nodes:
+                        new_frontier.add(n)
+                        seen_nodes.add(n)
+            if new_frontier & station_nodes:
+                rel_id = _pick_relation(cur, relation_ids, station_nodes, seen_nodes)
+                return _make_edge_dict(rel_id, way_id, nodes, tags, edge_ref)
+            if not new_frontier:
+                break
+            frontier = new_frontier
+
+    return None
+
+
+def _find_edge_fallback_track_ref(
+    conn, cur, station_name: str, edge_ref: int
+) -> Optional[Dict[str, Any]]:
+    """Like _find_edge_fallback but matches on railway:track_ref with a
+    substring LIKE pattern instead of an exact ref match."""
+    from pathfind import query_walkable_ways_by_nodes
+
+    pattern = _track_ref_pattern(edge_ref)
+    cur.execute(
+        "SELECT id, nodes, tags FROM planet_osm_ways "
+        "WHERE tags->>'railway' = 'platform_edge' "
+        "  AND tags->>'railway:track_ref' LIKE %s",
+        (pattern,),
+    )
+    candidates = cur.fetchall()
+    if not candidates:
+        return None
+
+    cur.execute(
+        "SELECT DISTINCT relation_id FROM station_platform_ways "
+        "WHERE station_name = %s",
+        (station_name,),
+    )
+    relation_ids = {r["relation_id"] for r in cur.fetchall()}
+    if not relation_ids:
+        return None
+
+    cur.execute(
+        "SELECT DISTINCT unnest(nodes) AS node_id "
+        "FROM station_ways_with_nodes_plus_pedestrian "
+        "WHERE relation_id = ANY(%s)",
+        (list(relation_ids),),
+    )
+    station_nodes = {r["node_id"] for r in cur.fetchall()}
+
+    MAX_HOPS = 10
+    for r in candidates:
+        way_id, nodes, tags = r["id"], r["nodes"], r["tags"]
+        edge_nodes = set(nodes)
+
+        if edge_nodes & station_nodes:
+            rel_id = _pick_relation(cur, relation_ids, station_nodes, edge_nodes)
+            return _make_edge_dict(rel_id, way_id, nodes, tags, edge_ref)
+
         frontier = set(edge_nodes)
         seen_nodes = set(edge_nodes)
         seen_ways: set = {way_id}
@@ -181,7 +266,7 @@ def _pick_relation(cur, relation_ids: set, station_nodes: set, edge_nodes: set) 
             "FROM station_ways_with_nodes WHERE relation_id = %s",
             (rel_id,),
         )
-        rel_nodes = {r[0] for r in cur.fetchall()}
+        rel_nodes = {r["node_id"] for r in cur.fetchall()}
         overlap = len(rel_nodes & edge_nodes)
         if overlap > best_count:
             best_id, best_count = rel_id, overlap
@@ -261,30 +346,34 @@ def find_path(
         print(f"[find_path] edge_2: relation={edge_2['relation_id']} way={edge_2['way_id']} nodes={len(edge_2['nodes'])}", flush=True)
 
     # --- Case 1: opposite platform ---
-    # connecting = get_opposite_platform_connecting_way(edge_1, edge_2)
-    # if connecting:
-    #     result: Dict[str, Any] = {
-    #         "type": "opposite_platform",
-    #         "edge_1": edge_1,
-    #         "edge_2": edge_2,
-    #         "connecting_way_id": connecting["way_id"],
-    #     }
-    #     conn = get_conn()
-    #     try:
-    #         all_node_ids = list(
-    #             set(edge_1["nodes"]) | set(edge_2["nodes"]) | set(connecting["nodes"])
-    #         )
-    #         coords = get_node_coordinates(conn, all_node_ids)
-    #         if coords:
-    #             crossing = way_length_meters(connecting["nodes"], coords)
-    #             if crossing is not None:
-    #                 result["crossing_length_meters"] = round(crossing, 2)
-    #             gap = min_distance_between_node_sets(edge_1["nodes"], edge_2["nodes"], coords)
-    #             if gap is not None:
-    #                 result["platform_width_meters"] = round(gap, 2)
-    #     finally:
-    #         put_conn(conn)
-    #     return result
+    connecting = get_opposite_platform_connecting_way(edge_1, edge_2)
+    if connecting:
+        result: Dict[str, Any] = {
+            "type": "opposite_platform",
+            "edge_1": edge_1,
+            "edge_2": edge_2,
+            "connecting_way_id": connecting["way_id"],
+        }
+        conn = get_conn()
+        try:
+            connecting_nodes = list(connecting["nodes"])
+            all_node_ids = list(
+                set(edge_1["nodes"]) | set(edge_2["nodes"]) | set(connecting_nodes)
+            )
+            coords = get_node_coordinates(conn, all_node_ids)
+            if coords:
+                crossing = way_length_meters(connecting_nodes, coords)
+                if crossing is not None:
+                    result["crossing_length_meters"] = round(crossing, 2)
+                gap = min_distance_between_node_sets(edge_1["nodes"], edge_2["nodes"], coords)
+                if gap is not None:
+                    result["platform_width_meters"] = round(gap, 2)
+            # Compute walking time for the crossing
+            timing = compute_path_walking_time(conn, [connecting["way_id"]])
+            result.update(timing)
+        finally:
+            put_conn(conn)
+        return result
 
     # --- Case 2: BFS path through station / pedestrian ways ---
     if edge_1["relation_id"] == edge_2["relation_id"]:
@@ -324,6 +413,16 @@ if __name__ == "__main__":
                 print("Crossing length (m):", result["crossing_length_meters"])
             if result.get("platform_width_meters") is not None:
                 print("Platform width (m):", result["platform_width_meters"])
+            if result.get("walking_distance_meters") is not None:
+                print("Walking distance (m):", result["walking_distance_meters"])
+            if result.get("walking_time_seconds") is not None:
+                t = result["walking_time_seconds"]
+                mins, secs = divmod(int(t), 60)
+                print(f"Walking time: {mins}m {secs:02d}s ({t:.1f}s)")
+            if result.get("path_breakdown"):
+                print("Path breakdown:")
+                for seg in result["path_breakdown"]:
+                    print(f"  way {seg['way_id']} ({seg['type']}): {seg['distance_m']}m, {seg['time_s']}s")
         else:
             print("\nNo path found.")
     finally:

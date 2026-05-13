@@ -11,6 +11,10 @@ from flask_cors import CORS
 
 from stations import autocomplete_station
 from journeys import search_journeys
+from pathfind import init_pool
+from test import find_path, find_all_edges, DB_CONFIG
+
+init_pool(DB_CONFIG)
 
 app = Flask(__name__)
 CORS(app)
@@ -49,6 +53,57 @@ def api_journeys():
         return jsonify({"error": str(e)}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/platforms")
+def api_platforms():
+    """List all platform edge refs at a station."""
+    station = request.args.get("station", "").strip()
+    if not station:
+        return jsonify({"error": "station is required"}), 400
+    try:
+        edges = find_all_edges(station)
+        refs = sorted({e["edge_ref"] for e in edges if e.get("edge_ref")}, key=lambda x: (len(x), x))
+        return jsonify({"station": station, "platforms": refs})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/transfer")
+def api_transfer():
+    """Compute walking time between two platform edges at the same station."""
+    station = request.args.get("station", "").strip()
+    from_platform = request.args.get("from_platform", "").strip()
+    to_platform = request.args.get("to_platform", "").strip()
+
+    if not station or not from_platform or not to_platform:
+        return jsonify({"error": "station, from_platform, and to_platform are required"}), 400
+
+    try:
+        p1 = int(from_platform)
+        p2 = int(to_platform)
+    except ValueError:
+        return jsonify({"error": "from_platform and to_platform must be integers"}), 400
+
+    try:
+        result = find_path(station, p1, station, p2)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    if result is None:
+        return jsonify({"error": f"No walkable path found between platforms {p1} and {p2} at {station!r}"}), 404
+
+    walking_time = result.get("walking_time_seconds", 0)
+    return jsonify({
+        "station": station,
+        "from_platform": p1,
+        "to_platform": p2,
+        "walking_time_seconds": walking_time,
+        "walking_distance_meters": result.get("walking_distance_meters", 0),
+        "feasible": walking_time <= 600,  # ≤10 minutes considered feasible
+        "path_type": result.get("type"),
+        "path_breakdown": result.get("path_breakdown", []),
+    })
 
 
 if __name__ == "__main__":
