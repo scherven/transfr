@@ -6,3 +6,4 @@ server-admin
 secrets
 server.csr
 server.pem
+.venv

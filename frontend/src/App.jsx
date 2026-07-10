@@ -2,14 +2,15 @@ import { useState } from "react";
 import Background from "./components/Background.jsx";
 import SearchBar from "./components/SearchBar.jsx";
 import JourneyResults from "./components/JourneyResults.jsx";
+import PlatformPath from "./pages/PlatformPath.jsx";
 import "./App.css";
 
 export default function App() {
+  const [page, setPage] = useState("journey");
+
   const [origin, setOrigin] = useState(null);
   const [destination, setDestination] = useState(null);
-  const [departureTime, setDepartureTime] = useState(
-    toLocalISO(new Date()),
-  );
+  const [departureTime, setDepartureTime] = useState(toLocalISO(new Date()));
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -51,38 +52,59 @@ export default function App() {
           <p className="subtitle">can you really make that transfer?</p>
         </header>
 
-        <div className="search-panel">
-          <div className="search-fields">
-            <SearchBar
-              label="From"
-              placeholder="Departure station"
-              onSelect={setOrigin}
-            />
-            <SearchBar
-              label="To"
-              placeholder="Arrival station"
-              onSelect={setDestination}
-            />
-            <div className="datetime-wrapper">
-              <label className="search-label">When</label>
-              <input
-                type="datetime-local"
-                className="search-input datetime-input"
-                value={departureTime}
-                onChange={(e) => setDepartureTime(e.target.value)}
-              />
-            </div>
-          </div>
+        <nav className="nav-tabs">
           <button
-            className="search-button"
-            onClick={handleSearch}
-            disabled={!origin || !destination || loading}
+            className={`nav-tab${page === "journey" ? " active" : ""}`}
+            onClick={() => setPage("journey")}
           >
-            {loading ? "Searching…" : "Find journeys"}
+            Journey Planner
           </button>
-        </div>
+          <button
+            className={`nav-tab${page === "path" ? " active" : ""}`}
+            onClick={() => setPage("path")}
+          >
+            Platform Path
+          </button>
+        </nav>
 
-        <JourneyResults data={results} loading={loading} />
+        {page === "journey" && (
+          <>
+            <div className="search-panel">
+              <div className="search-fields">
+                <SearchBar
+                  label="From"
+                  placeholder="Departure station"
+                  onSelect={setOrigin}
+                />
+                <SearchBar
+                  label="To"
+                  placeholder="Arrival station"
+                  onSelect={setDestination}
+                />
+                <div className="datetime-wrapper">
+                  <label className="search-label">When</label>
+                  <input
+                    type="datetime-local"
+                    className="search-input datetime-input"
+                    value={departureTime}
+                    onChange={(e) => setDepartureTime(e.target.value)}
+                  />
+                </div>
+              </div>
+              <button
+                className="search-button"
+                onClick={handleSearch}
+                disabled={!origin || !destination || loading}
+              >
+                {loading ? "Searching…" : "Find journeys"}
+              </button>
+            </div>
+
+            <JourneyResults data={results} loading={loading} />
+          </>
+        )}
+
+        {page === "path" && <PlatformPath />}
       </div>
     </div>
   );

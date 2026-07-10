@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { useOuterClick } from "../hooks/useOuterClick.js";
 import SearchBarDropDown from "./SearchBarDropDown.jsx";
 
-export default function SearchBar({ label, placeholder, onSelect }) {
+export default function SearchBar({ label, placeholder, onSelect, apiUrl }) {
   const innerRef = useOuterClick(() => setShowDropdown(false));
   const dropdownRef = useRef();
 
@@ -37,6 +37,7 @@ export default function SearchBar({ label, placeholder, onSelect }) {
         setShowDropdown={setShowDropdown}
         onSelect={onSelect}
         setInputVal={setInputVal}
+        apiUrl={apiUrl}
       />
     </div>
   );

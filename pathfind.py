@@ -109,7 +109,8 @@ def get_node_coordinates(
                 "SELECT id, lat, lon FROM planet_osm_nodes WHERE id = ANY(%s)",
                 (node_ids,),
             )
-            return {r["id"]: (float(r["lat"]), float(r["lon"])) for r in cur.fetchall()}
+            # osm2pgsql stores lat/lon as integers scaled by 1e7
+            return {r["id"]: (float(r["lat"]) / 1e7, float(r["lon"]) / 1e7) for r in cur.fetchall()}
         except psycopg2.ProgrammingError:
             return None
 
@@ -248,6 +249,7 @@ def bipartite_search(
     conn=None,
     max_expansions: int = 10,
     debug: bool = False,
+    progress_cb=None,
 ) -> Optional[List[BipartiteState]]:
     """Run BFS with iterative batch expansion of pedestrian ways.
 
@@ -285,17 +287,21 @@ def bipartite_search(
         if not new_ways:
             if debug:
                 print(f"[pathfind] Expansion {iteration + 1}: no new ways. Done.", flush=True)
+            if progress_cb:
+                progress_cb("No further walkable ways found — search complete")
             break
 
         for way_id, nodes in new_ways:
             _add_way_to_index(way_id, nodes, way_to_nodes, node_to_ways)
 
+        msg = (
+            f"Graph expansion round {iteration + 1}: "
+            f"+{len(new_ways)} ways ({len(way_to_nodes)} total)"
+        )
         if debug:
-            print(
-                f"[pathfind] Expansion {iteration + 1}: +{len(new_ways)} ways, "
-                f"index now {len(way_to_nodes)} ways / {len(node_to_ways)} nodes",
-                flush=True,
-            )
+            print(f"[pathfind] {msg}", flush=True)
+        if progress_cb:
+            progress_cb(msg)
 
     return None
 
@@ -470,10 +476,81 @@ def min_distance_between_node_sets(
 # Top-level entry point
 # ---------------------------------------------------------------------------
 
+def compute_path_geometry(
+    conn,
+    path_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Given a find_path result, return ordered coordinate arrays for map rendering.
+
+    Returns:
+      polyline          — ordered [[lat, lon], ...] for the full walking path
+      platform_1_coords — [[lat, lon], ...] for the start platform edge
+      platform_2_coords — [[lat, lon], ...] for the end platform edge
+    """
+    edge_1 = path_result.get("edge_1", {})
+    edge_2 = path_result.get("edge_2", {})
+
+    def nodes_to_coords(node_ids, coords_map):
+        return [[coords_map[n][0], coords_map[n][1]] for n in node_ids if n in coords_map]
+
+    if path_result.get("type") == "opposite_platform":
+        connecting_way_id = path_result.get("connecting_way_id")
+        ways_info = get_ways_info(conn, [connecting_way_id]) if connecting_way_id else {}
+        connecting_nodes = list(ways_info[connecting_way_id]["nodes"]) if connecting_way_id in ways_info else []
+
+        all_ids = list(set(edge_1.get("nodes", [])) | set(edge_2.get("nodes", [])) | set(connecting_nodes))
+        coords = get_node_coordinates(conn, all_ids) or {}
+
+        p1 = nodes_to_coords(edge_1.get("nodes", []), coords)
+        p2 = nodes_to_coords(edge_2.get("nodes", []), coords)
+        polyline = nodes_to_coords(
+            edge_1.get("nodes", []) + connecting_nodes + edge_2.get("nodes", []),
+            coords,
+        )
+        return {"polyline": polyline, "platform_1_coords": p1, "platform_2_coords": p2}
+
+    # way_path: stitch ways in order, respecting traversal direction
+    way_ids = path_result.get("way_ids", [])
+    ways_info = get_ways_info(conn, way_ids)
+    all_ids = list({n for wid in way_ids if wid in ways_info for n in ways_info[wid]["nodes"]})
+    all_ids = list(set(all_ids) | set(edge_1.get("nodes", [])) | set(edge_2.get("nodes", [])))
+    coords = get_node_coordinates(conn, all_ids) or {}
+
+    polyline: List[Tuple[float, float]] = []
+    prev_nodes_set: Optional[Set[int]] = None
+
+    for way_id in way_ids:
+        if way_id not in ways_info:
+            continue
+        nodes = list(ways_info[way_id]["nodes"])
+
+        if prev_nodes_set is not None:
+            shared = set(nodes) & prev_nodes_set
+            if shared and nodes[-1] in shared and nodes[0] not in shared:
+                nodes = list(reversed(nodes))
+            if polyline and nodes and coords.get(nodes[0]) == polyline[-1]:
+                nodes = nodes[1:]
+
+        for n in nodes:
+            if n in coords:
+                polyline.append(coords[n])
+
+        prev_nodes_set = set(ways_info[way_id]["nodes"])
+
+    p1 = nodes_to_coords(edge_1.get("nodes", []), coords)
+    p2 = nodes_to_coords(edge_2.get("nodes", []), coords)
+    return {
+        "polyline": [[lat, lon] for lat, lon in polyline],
+        "platform_1_coords": p1,
+        "platform_2_coords": p2,
+    }
+
+
 def find_path_between_edges(
     edge_1: Dict[str, Any],
     edge_2: Dict[str, Any],
     debug: bool = False,
+    progress_cb=None,
 ) -> Optional[Dict[str, Any]]:
     """Find a walkable path between two platform edges within the same
     station (same relation_id).
@@ -497,6 +574,8 @@ def find_path_between_edges(
 
     conn = get_conn()
     try:
+        if progress_cb:
+            progress_cb(f"Loading station graph (relation {relation_id})…")
         if debug:
             print(f"[pathfind] Loading segments for relation {relation_id} ...", flush=True)
         segments = get_way_segments_for_relation(conn, relation_id)
@@ -512,13 +591,15 @@ def find_path_between_edges(
         for edge in (edge_1, edge_2):
             _add_way_to_index(edge["way_id"], edge["nodes"], way_to_nodes, node_to_ways)
 
+        if progress_cb:
+            progress_cb(f"Initial graph: {len(way_to_nodes)} ways, {len(node_to_ways)} nodes — running BFS…")
         if debug:
             print(f"[pathfind] Initial index: {len(way_to_nodes)} ways, {len(node_to_ways)} nodes", flush=True)
 
         path = bipartite_search(
             start_way, goal_way,
             way_to_nodes, node_to_ways,
-            conn=conn, debug=debug,
+            conn=conn, debug=debug, progress_cb=progress_cb,
         )
         if path is None:
             if debug:
@@ -526,6 +607,8 @@ def find_path_between_edges(
             return None
 
         way_ids = [id_ for k, id_ in path if k == "way"]
+        if progress_cb:
+            progress_cb(f"Path found ({len(way_ids)} segments) — computing walking time…")
         timing = compute_path_walking_time(conn, way_ids)
 
         return {

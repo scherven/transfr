@@ -321,6 +321,7 @@ def find_path(
     station_1: str, ref_1: int,
     station_2: str, ref_2: int,
     debug: bool = False,
+    progress_cb=None,
 ) -> Optional[Dict[str, Any]]:
     """Find a walkable path between two platform edges.
 
@@ -330,11 +331,20 @@ def find_path(
          when node coordinates are available.
       2. BFS over station + pedestrian ways (with iterative batch expansion).
     """
+    if progress_cb:
+        progress_cb(f"Looking up platform edge {ref_1}…")
     if debug:
         print(f"[find_path] Looking up edges: {station_1}#{ref_1} -> {station_2}#{ref_2}", flush=True)
 
     edge_1 = find_edge(station_1, ref_1)
+    if progress_cb:
+        if edge_1:
+            progress_cb(f"Found platform {ref_1} (way {edge_1['way_id']}, {len(edge_1['nodes'])} nodes) — looking up platform {ref_2}…")
+        else:
+            progress_cb(f"Platform {ref_1} not found")
     edge_2 = find_edge(station_2, ref_2)
+    if progress_cb and edge_2:
+        progress_cb(f"Found platform {ref_2} (way {edge_2['way_id']}, {len(edge_2['nodes'])} nodes)")
 
     if not edge_1 or not edge_2:
         if debug:
@@ -346,8 +356,12 @@ def find_path(
         print(f"[find_path] edge_2: relation={edge_2['relation_id']} way={edge_2['way_id']} nodes={len(edge_2['nodes'])}", flush=True)
 
     # --- Case 1: opposite platform ---
+    if progress_cb:
+        progress_cb("Checking for opposite-platform connection…")
     connecting = get_opposite_platform_connecting_way(edge_1, edge_2)
     if connecting:
+        if progress_cb:
+            progress_cb("Opposite-platform connection found — computing crossing distance…")
         result: Dict[str, Any] = {
             "type": "opposite_platform",
             "edge_1": edge_1,
@@ -379,7 +393,7 @@ def find_path(
     if edge_1["relation_id"] == edge_2["relation_id"]:
         if debug:
             print("[find_path] Same station — running BFS pathfinding ...", flush=True)
-        return find_path_between_edges(edge_1, edge_2, debug=debug)
+        return find_path_between_edges(edge_1, edge_2, debug=debug, progress_cb=progress_cb)
 
     if debug:
         print("[find_path] Different stations with no opposite-platform link — no path.", flush=True)
@@ -393,12 +407,12 @@ def find_path(
 if __name__ == "__main__":
     init_pool(DB_CONFIG)
     try:
-        # station = "München Hauptbahnhof"
-        # e1 = 20
-        # e2 = 22
-        station = "Strasbourg-Ville"
-        e1 = 1
-        e2 = 7
+        station = "München Hauptbahnhof"
+        e1 = 20
+        e2 = 22
+        # station = "Strasbourg-Ville"
+        # e1 = 1
+        # e2 = 7
 
         result = find_path(station, e1, station, e2, debug=True)
 

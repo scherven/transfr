@@ -1,7 +1,7 @@
 import { useState, forwardRef, useImperativeHandle } from "react";
 
 const SearchBarDropDown = forwardRef(function SearchBarDropDown(
-  { showDropdown, setShowDropdown, onSelect, setInputVal },
+  { showDropdown, setShowDropdown, onSelect, setInputVal, apiUrl = "/api/autocomplete" },
   ref,
 ) {
   const [stations, setStations] = useState([]);
@@ -17,7 +17,7 @@ const SearchBarDropDown = forwardRef(function SearchBarDropDown(
 
       try {
         const res = await fetch(
-          `/api/autocomplete?q=${encodeURIComponent(value)}`,
+          `${apiUrl}?q=${encodeURIComponent(value)}`,
         );
         if (res.ok) {
           const data = await res.json();
