@@ -77,3 +77,23 @@ CREATE INDEX idx_osm_relations_public_transport ON osm_relations ((tags->>'publi
 -- forward lookup ("all members of this relation") both need to be fast.
 CREATE INDEX idx_relmembers_type_ref ON osm_relation_members (member_type, member_ref);
 CREATE INDEX idx_relmembers_relation ON osm_relation_members (relation_id);
+
+-- ---------------------------------------------------------------------------
+-- Materialized node -> way adjacency (built after the main load; see
+-- core/build_node_way_ids.py). SearchContext.expand()'s hot-path query,
+-- "which ways touch this one node", was a GIN bitmap-heap-scan over the
+-- full ~7GB osm_ways table -- correct, but on a cold cache (Postgres
+-- shared_buffers can't be raised on this deployment) that scan touches
+-- scattered, likely-uncached heap pages every time. A PRIMARY KEY lookup
+-- here touches O(1) pages regardless of cache state, then a second lookup
+-- fetches only the specific rows from osm_ways by id (also a PK lookup).
+-- Two cheap point lookups instead of one expensive scan.
+--
+-- Staleness: goes stale exactly when osm_ways is re-imported. Rebuild by
+-- re-running core/build_node_way_ids.py after any core/etl.py load --
+-- it's a single idempotent TRUNCATE + INSERT, not incremental, so there is
+-- no partial-staleness state to worry about.
+CREATE TABLE IF NOT EXISTS node_way_ids (
+    node_id BIGINT PRIMARY KEY,
+    way_ids BIGINT[] NOT NULL
+);

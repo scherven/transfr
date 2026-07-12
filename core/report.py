@@ -24,8 +24,10 @@ def format_verification_report(
 
     if not result.get("found"):
         lines.append(f"NOT FOUND -- reason: {result.get('reason')}")
-        if "graph_ways" in result:
-            lines.append(f"(searched a graph of {result['graph_ways']} ways / {result['graph_nodes']} nodes)")
+        ways_key = "graph_ways_touched" if "graph_ways_touched" in result else "graph_ways"
+        nodes_key = "graph_nodes_touched" if "graph_nodes_touched" in result else "graph_nodes"
+        if ways_key in result:
+            lines.append(f"(touched {result[ways_key]} ways / {result[nodes_key]} nodes during search)")
         return "\n".join(lines)
 
     lines.append(f"station relation: {_relation_link(result['relation_id'])}")
@@ -36,7 +38,9 @@ def format_verification_report(
         f"({result['walking_time_seconds'] / 60:.1f} min), "
         f"distance: {result['walking_distance_meters']}m"
     )
-    lines.append(f"searched graph: {result['graph_ways']} ways / {result['graph_nodes']} nodes (full closure)")
+    ways_key = "graph_ways_touched" if "graph_ways_touched" in result else "graph_ways"
+    nodes_key = "graph_nodes_touched" if "graph_nodes_touched" in result else "graph_nodes"
+    lines.append(f"touched during search: {result[ways_key]} ways / {result[nodes_key]} nodes (lazy, not a full closure)")
     lines.append(f"path uses {len(result['way_path'])} way(s), in order:")
     for w in result["way_path"]:
         lines.append(f"  {_way_link(w)}")
