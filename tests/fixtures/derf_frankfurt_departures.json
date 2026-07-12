@@ -1,0 +1,392 @@
+{
+ "departures": [
+  {
+   "delayArrival": 6,
+   "delayDeparture": 6,
+   "destination": "Dresden Hbf",
+   "isCancelled": 0,
+   "messages": {
+    "delay": [
+     {
+      "text": "Verspätung eines vorausfahrenden Zuges",
+      "timestamp": "2026-07-12T12:48:00"
+     }
+    ],
+    "qos": []
+   },
+   "missingRealtime": false,
+   "platform": "5",
+   "route": [
+    {
+     "name": "Wiesbaden Hbf"
+    },
+    {
+     "name": "Frankfurt(M) Flughafen Fernbf"
+    },
+    {
+     "name": "Frankfurt(Main)Hbf"
+    },
+    {
+     "name": "Fulda"
+    },
+    {
+     "name": "Bad Hersfeld"
+    },
+    {
+     "name": "Eisenach Hbf"
+    },
+    {
+     "name": "Gotha"
+    },
+    {
+     "name": "Erfurt Hbf"
+    },
+    {
+     "name": "Leipzig Hbf"
+    },
+    {
+     "name": "Dresden-Neustadt"
+    },
+    {
+     "name": "Dresden Hbf"
+    }
+   ],
+   "scheduledArrival": "13:13",
+   "scheduledDeparture": "13:19",
+   "scheduledPlatform": "6",
+   "train": "ICE 1651",
+   "trainClasses": [
+    "F"
+   ],
+   "trainNumber": "1651",
+   "via": [
+    "Fulda",
+    "Eisenach",
+    "Erfurt"
+   ]
+  },
+  {
+   "delayArrival": null,
+   "delayDeparture": 0,
+   "destination": "Bamberg",
+   "isCancelled": 0,
+   "messages": {
+    "delay": [],
+    "qos": []
+   },
+   "missingRealtime": false,
+   "platform": "9",
+   "route": [
+    {
+     "name": "Frankfurt(Main)Hbf"
+    },
+    {
+     "name": "Frankfurt(Main)Süd"
+    },
+    {
+     "name": "Offenbach(Main)Hbf"
+    },
+    {
+     "name": "Hanau Hbf"
+    },
+    {
+     "name": "Kahl(Main)"
+    },
+    {
+     "name": "Dettingen(Main)"
+    },
+    {
+     "name": "Kleinostheim"
+    },
+    {
+     "name": "Aschaffenburg Hbf"
+    },
+    {
+     "name": "Heigenbrücken"
+    },
+    {
+     "name": "Wiesthal"
+    },
+    {
+     "name": "Partenstein"
+    },
+    {
+     "name": "Lohr Bahnhof"
+    },
+    {
+     "name": "Langenprozelten"
+    },
+    {
+     "name": "Gemünden(Main)"
+    },
+    {
+     "name": "Karlstadt(Main)"
+    },
+    {
+     "name": "Retzbach-Zellingen"
+    },
+    {
+     "name": "Würzburg Hbf"
+    },
+    {
+     "name": "Schweinfurt Hbf"
+    },
+    {
+     "name": "Haßfurt"
+    },
+    {
+     "name": "Bamberg"
+    }
+   ],
+   "scheduledArrival": null,
+   "scheduledDeparture": "13:28",
+   "scheduledPlatform": "5",
+   "train": "RE RE54",
+   "trainClasses": [
+    "N"
+   ],
+   "trainNumber": "4617",
+   "via": [
+    "Frankfurt(Main)Süd",
+    "Offenbach(Main)",
+    "Hanau"
+   ]
+  },
+  {
+   "delayArrival": null,
+   "delayDeparture": 0,
+   "destination": "Bensheim-Auerbach",
+   "isCancelled": 0,
+   "messages": {
+    "delay": [],
+    "qos": []
+   },
+   "missingRealtime": false,
+   "platform": "10",
+   "route": [
+    {
+     "name": "Frankfurt(Main)Hbf"
+    },
+    {
+     "name": "Langen(Hess)"
+    },
+    {
+     "name": "Darmstadt Hbf"
+    },
+    {
+     "name": "Darmstadt Süd"
+    },
+    {
+     "name": "Darmstadt-Eberstadt"
+    },
+    {
+     "name": "Bickenbach(Bergstr)"
+    },
+    {
+     "name": "Hähnlein-Alsbach"
+    },
+    {
+     "name": "Zwingenberg(Bergstr)"
+    },
+    {
+     "name": "Bensheim-Auerbach"
+    }
+   ],
+   "scheduledArrival": null,
+   "scheduledDeparture": "13:34",
+   "scheduledPlatform": "10",
+   "train": "RE RE60",
+   "trainClasses": [
+    "N"
+   ],
+   "trainNumber": "4667",
+   "via": [
+    "Langen(Hess)",
+    "Darmstadt"
+   ]
+  },
+  {
+   "delayArrival": null,
+   "delayDeparture": 0,
+   "destination": "Amsterdam Centraal",
+   "isCancelled": 0,
+   "messages": {
+    "delay": [],
+    "qos": []
+   },
+   "missingRealtime": false,
+   "platform": "4",
+   "route": [
+    {
+     "name": "Frankfurt(Main)Hbf"
+    },
+    {
+     "name": "Frankfurt(M) Flughafen Fernbf"
+    },
+    {
+     "name": "Siegburg/Bonn"
+    },
+    {
+     "name": "Köln Hbf"
+    },
+    {
+     "name": "Düsseldorf Hbf"
+    },
+    {
+     "name": "Duisburg Hbf"
+    },
+    {
+     "name": "Oberhausen Hbf"
+    },
+    {
+     "name": "Arnhem Centraal"
+    },
+    {
+     "name": "Utrecht Centraal"
+    },
+    {
+     "name": "Amsterdam Centraal"
+    }
+   ],
+   "scheduledArrival": null,
+   "scheduledDeparture": "13:36",
+   "scheduledPlatform": "12",
+   "train": "ICE 124",
+   "trainClasses": [
+    "F"
+   ],
+   "trainNumber": "124",
+   "via": [
+    "Frankfurt(M) Flughafen Fernbf",
+    "Köln",
+    "Düsseldorf"
+   ]
+  },
+  {
+   "delayArrival": 0,
+   "delayDeparture": 2,
+   "destination": "Dortmund Hbf",
+   "isCancelled": 0,
+   "messages": {
+    "delay": [],
+    "qos": []
+   },
+   "missingRealtime": false,
+   "platform": "5",
+   "route": [
+    {
+     "name": "Nürnberg Hbf"
+    },
+    {
+     "name": "Würzburg Hbf"
+    },
+    {
+     "name": "Hanau Hbf"
+    },
+    {
+     "name": "Frankfurt(Main)Hbf"
+    },
+    {
+     "name": "Frankfurt(M) Flughafen Fernbf"
+    },
+    {
+     "name": "Mainz Hbf"
+    },
+    {
+     "name": "Koblenz Hbf"
+    },
+    {
+     "name": "Bonn Hbf"
+    },
+    {
+     "name": "Köln Hbf"
+    },
+    {
+     "name": "Düsseldorf Hbf"
+    },
+    {
+     "name": "Bochum Hbf"
+    },
+    {
+     "name": "Dortmund Hbf"
+    }
+   ],
+   "scheduledArrival": "13:37",
+   "scheduledDeparture": "13:41",
+   "scheduledPlatform": "5",
+   "train": "ICE 228",
+   "trainClasses": [
+    "F"
+   ],
+   "trainNumber": "228",
+   "via": [
+    "Frankfurt(M) Flughafen Fernbf",
+    "Mainz",
+    "Koblenz"
+   ]
+  },
+  {
+   "delayArrival": 3,
+   "delayDeparture": 3,
+   "destination": "Hamburg Hbf",
+   "isCancelled": 0,
+   "messages": {
+    "delay": [],
+    "qos": []
+   },
+   "missingRealtime": false,
+   "platform": "8",
+   "route": [
+    {
+     "name": "Basel SBB"
+    },
+    {
+     "name": "Basel Bad Bf"
+    },
+    {
+     "name": "Freiburg(Breisgau) Hbf"
+    },
+    {
+     "name": "Offenburg"
+    },
+    {
+     "name": "Karlsruhe Hbf"
+    },
+    {
+     "name": "Mannheim Hbf"
+    },
+    {
+     "name": "Frankfurt(Main)Hbf"
+    },
+    {
+     "name": "Kassel-Wilhelmshöhe"
+    },
+    {
+     "name": "Göttingen"
+    },
+    {
+     "name": "Hannover Hbf"
+    },
+    {
+     "name": "Uelzen"
+    },
+    {
+     "name": "Hamburg Hbf"
+    }
+   ],
+   "scheduledArrival": "13:40",
+   "scheduledDeparture": "13:46",
+   "scheduledPlatform": "8",
+   "train": "ICE 6",
+   "trainClasses": [
+    "F"
+   ],
+   "trainNumber": "6",
+   "via": [
+    "Kassel-Wilhelmshöhe",
+    "Göttingen",
+    "Hannover"
+   ]
+  }
+ ]
+}

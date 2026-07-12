@@ -1,0 +1,160 @@
+{
+ "data": {
+  "istformation": {
+   "fahrtnummer": "124",
+   "zuggattung": "ICE",
+   "halt": {
+    "bahnhofsname": "Frankfurt(Main)Hbf",
+    "evanummer": "8000105",
+    "gleisbezeichnung": "4",
+    "abfahrtszeit": "2026-07-12T13:36:00"
+   },
+   "allFahrzeuggruppe": [
+    {
+     "fahrzeuggruppebezeichnung": "ICE0124",
+     "verkehrlichezugnummer": "124",
+     "allFahrzeug": [
+      {
+       "fahrzeugnummer": "93800",
+       "kategorie": "TRIEBKOPF",
+       "wagenordnungsnummer": "0",
+       "fahrzeugsektor": "A",
+       "positionamhalt": {
+        "startprozent": 0.0,
+        "endeprozent": 5.05,
+        "startmeter": 0.0,
+        "endemeter": 20.3
+       }
+      },
+      {
+       "fahrzeugnummer": "938011",
+       "kategorie": "REISEZUGWAGENERSTEKLASSE",
+       "wagenordnungsnummer": "11",
+       "fahrzeugsektor": "A",
+       "positionamhalt": {
+        "startprozent": 5.05,
+        "endeprozent": 11.62,
+        "startmeter": 20.3,
+        "endemeter": 46.7
+       }
+      },
+      {
+       "fahrzeugnummer": "938012",
+       "kategorie": "REISEZUGWAGENERSTEKLASSE",
+       "wagenordnungsnummer": "12",
+       "fahrzeugsektor": "A",
+       "positionamhalt": {
+        "startprozent": 11.62,
+        "endeprozent": 18.18,
+        "startmeter": 46.7,
+        "endemeter": 73.1
+       }
+      },
+      {
+       "fahrzeugnummer": "938013",
+       "kategorie": "HALBSPEISEWAGENERSTEKLASSE",
+       "wagenordnungsnummer": "13",
+       "fahrzeugsektor": "B",
+       "positionamhalt": {
+        "startprozent": 18.18,
+        "endeprozent": 24.75,
+        "startmeter": 73.1,
+        "endemeter": 99.5
+       }
+      },
+      {
+       "fahrzeugnummer": "938014",
+       "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+       "wagenordnungsnummer": "14",
+       "fahrzeugsektor": "B",
+       "positionamhalt": {
+        "startprozent": 24.75,
+        "endeprozent": 31.32,
+        "startmeter": 99.5,
+        "endemeter": 125.9
+       }
+      },
+      {
+       "fahrzeugnummer": "938015",
+       "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+       "wagenordnungsnummer": "15",
+       "fahrzeugsektor": "C",
+       "positionamhalt": {
+        "startprozent": 31.32,
+        "endeprozent": 37.89,
+        "startmeter": 125.9,
+        "endemeter": 152.3
+       }
+      },
+      {
+       "fahrzeugnummer": "938016",
+       "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+       "wagenordnungsnummer": "16",
+       "fahrzeugsektor": "C",
+       "positionamhalt": {
+        "startprozent": 37.89,
+        "endeprozent": 44.45,
+        "startmeter": 152.3,
+        "endemeter": 178.7
+       }
+      },
+      {
+       "fahrzeugnummer": "938017",
+       "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+       "wagenordnungsnummer": "17",
+       "fahrzeugsektor": "D",
+       "positionamhalt": {
+        "startprozent": 44.45,
+        "endeprozent": 51.02,
+        "startmeter": 178.7,
+        "endemeter": 205.1
+       }
+      },
+      {
+       "fahrzeugnummer": "938018",
+       "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+       "wagenordnungsnummer": "18",
+       "fahrzeugsektor": "D",
+       "positionamhalt": {
+        "startprozent": 51.02,
+        "endeprozent": 57.59,
+        "startmeter": 205.1,
+        "endemeter": 231.5
+       }
+      }
+     ]
+    }
+   ],
+   "allSektor": [
+    {
+     "sektorbezeichnung": "A",
+     "positionamgleis": {
+      "startmeter": 0.0,
+      "endemeter": 100.5
+     }
+    },
+    {
+     "sektorbezeichnung": "B",
+     "positionamgleis": {
+      "startmeter": 100.5,
+      "endemeter": 201.0
+     }
+    },
+    {
+     "sektorbezeichnung": "C",
+     "positionamgleis": {
+      "startmeter": 201.0,
+      "endemeter": 301.5
+     }
+    },
+    {
+     "sektorbezeichnung": "D",
+     "positionamgleis": {
+      "startmeter": 301.5,
+      "endemeter": 402.0
+     }
+    }
+   ]
+  }
+ }
+}

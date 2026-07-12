@@ -1,0 +1,73 @@
+{
+ "itineraries": [
+  {
+   "legs": [
+    {
+     "mode": "WALK",
+     "routeShortName": null,
+     "displayName": null,
+     "from": {
+      "name": "START",
+      "track": null
+     },
+     "to": {
+      "name": "Frankfurt (Main) Hauptbahnhof",
+      "track": "7"
+     }
+    },
+    {
+     "mode": "HIGHSPEED_RAIL",
+     "routeShortName": "41",
+     "displayName": "ICE 720",
+     "from": {
+      "name": "Frankfurt (Main) Hauptbahnhof",
+      "track": "7"
+     },
+     "to": {
+      "name": "Köln Messe/Deutz Bf",
+      "track": "94"
+     }
+    },
+    {
+     "mode": "WALK",
+     "routeShortName": null,
+     "displayName": null,
+     "from": {
+      "name": "Köln Messe/Deutz Bf",
+      "track": "94"
+     },
+     "to": {
+      "name": "Köln Messe/Deutz Bf",
+      "track": "92"
+     }
+    },
+    {
+     "mode": "SUBURBAN",
+     "routeShortName": "S12",
+     "displayName": "S12",
+     "from": {
+      "name": "Köln Messe/Deutz Bf",
+      "track": "92"
+     },
+     "to": {
+      "name": "Köln Hbf",
+      "track": null
+     }
+    },
+    {
+     "mode": "WALK",
+     "routeShortName": null,
+     "displayName": null,
+     "from": {
+      "name": "Köln Hbf",
+      "track": null
+     },
+     "to": {
+      "name": "END",
+      "track": null
+     }
+    }
+   ]
+  }
+ ]
+}
