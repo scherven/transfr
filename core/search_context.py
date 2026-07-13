@@ -57,10 +57,30 @@ def _track_ref_matches(track_ref: Optional[str], ref: str) -> bool:
     return ref.zfill(2) in track_ref or ref in track_ref
 
 
+# Platforms are tagged three ways in OSM, in decreasing precision / increasing
+# breadth: railway=platform_edge (the boardable edge -- rarest, ~10k with a ref,
+# but the most reliable), railway=platform (the rail platform surface, ~40k with
+# a ref), and public_transport=platform (broadest, ~67k with a ref, but
+# mode-agnostic -- can be a bus/tram platform). All are walkable (see
+# graph.is_walkable_way), so any can anchor a platform-to-platform search. We try
+# them precise-first so stations mapped with platform_edge are unaffected, and
+# only fall back to the broader (area) tags when the precise lookup finds nothing.
+_PLATFORM_AREA_SQL = "(tags->>'railway' = 'platform' OR tags->>'public_transport' = 'platform')"
+
+
+def _is_platform_area(tags: Dict[str, str]) -> bool:
+    return tags.get("railway") == "platform" or tags.get("public_transport") == "platform"
+
+
+def _ref_or_local_ref_matches(tags: Dict[str, str], ref: str) -> bool:
+    return tags.get("ref") == ref or tags.get("local_ref") == ref
+
+
 def find_platform_edges(ways: Ways, ref: str) -> List[Tuple[int, List[int]]]:
-    """All platform_edge ways in *ways* whose ref (or, failing that,
-    railway:track_ref) matches. Returns every match rather than picking one,
-    since some stations tag more than one way with the same ref.
+    """All ways in *ways* that represent platform `ref`: a platform_edge by ref
+    or composite railway:track_ref first, else a railway=platform /
+    public_transport=platform area by ref or local_ref. Returns every match
+    rather than picking one, since some stations tag more than one way the same.
 
     Operates on an already-loaded Ways dict -- used by the eager algorithm
     and by tests. Live searches use _find_platform_edges_near() instead,
@@ -74,23 +94,35 @@ def find_platform_edges(ways: Ways, ref: str) -> List[Tuple[int, List[int]]]:
     ]
     if exact:
         return exact
-    return [
+    track_ref = [
         (way_id, info["nodes"])
         for way_id, info in ways.items()
         if info["tags"].get("railway") == "platform_edge"
         and _track_ref_matches(info["tags"].get("railway:track_ref"), ref)
+    ]
+    if track_ref:
+        return track_ref
+    return [
+        (way_id, info["nodes"])
+        for way_id, info in ways.items()
+        if _is_platform_area(info["tags"]) and _ref_or_local_ref_matches(info["tags"], ref)
     ]
 
 
 def _find_platform_edges_near(
     cur, ref: str, seed_nodes: set, coord_cache: Coords,
 ) -> List[Tuple[int, List[int], Dict[str, str]]]:
-    """Look up railway=platform_edge ways by ref directly (uses
-    idx_osm_ways_ref), then keep only the ones within
-    PLATFORM_EDGE_SEARCH_RADIUS_M of the station's own seed geometry --
-    rejects same-ref platform edges belonging to unrelated stations
-    elsewhere in Europe. Falls back to railway:track_ref LIKE matching if
-    no exact ref matches anything nearby, same as find_platform_edges().
+    """Look up the ways for platform `ref` by tag directly (indexed), then keep
+    only the ones within PLATFORM_EDGE_SEARCH_RADIUS_M of the station's own seed
+    geometry -- rejecting same-ref platforms belonging to unrelated stations
+    elsewhere in Europe.
+
+    Tries the tags precise-first (see the _PLATFORM_AREA_SQL comment): a
+    railway=platform_edge by ref then composite railway:track_ref, then -- only
+    if nothing precise matched -- a railway=platform / public_transport=platform
+    AREA by ref then local_ref. Stations mapped with platform_edge are therefore
+    resolved exactly as before; the area fallback only rescues stations that tag
+    their platforms as areas (the common case) rather than boardable edges.
 
     Returns (way_id, nodes, tags) triples.
     """
@@ -101,11 +133,8 @@ def _find_platform_edges_near(
         return []
     bbox = bbox_from_coords(seed_coords, PLATFORM_EDGE_SEARCH_RADIUS_M)
 
-    def _candidates_near(where_sql: str, param) -> List[Tuple[int, List[int], Dict[str, str]]]:
-        cur.execute(
-            f"SELECT id, nodes, tags FROM osm_ways WHERE tags->>'railway' = 'platform_edge' AND {where_sql}",
-            (param,),
-        )
+    def _candidates_near(predicate_sql: str, param) -> List[Tuple[int, List[int], Dict[str, str]]]:
+        cur.execute(f"SELECT id, nodes, tags FROM osm_ways WHERE {predicate_sql}", (param,))
         rows = cur.fetchall()
         if not rows:
             return []
@@ -121,10 +150,17 @@ def _find_platform_edges_near(
                 matches.append((row["id"], nodes, row["tags"] or {}))
         return matches
 
-    exact = _candidates_near("tags->>'ref' = %s", str(ref))
-    if exact:
-        return exact
-    return _candidates_near("tags->>'railway:track_ref' LIKE %s", f"%{str(ref).zfill(2)}%")
+    attempts = (
+        ("tags->>'railway' = 'platform_edge' AND tags->>'ref' = %s", str(ref)),
+        ("tags->>'railway' = 'platform_edge' AND tags->>'railway:track_ref' LIKE %s", f"%{str(ref).zfill(2)}%"),
+        (f"{_PLATFORM_AREA_SQL} AND tags->>'ref' = %s", str(ref)),
+        (f"{_PLATFORM_AREA_SQL} AND tags->>'local_ref' = %s", str(ref)),
+    )
+    for predicate_sql, param in attempts:
+        hit = _candidates_near(predicate_sql, param)
+        if hit:
+            return hit
+    return []
 
 
 class SearchContext:

@@ -20,5 +20,34 @@ from stop location:
   psql -h localhost -d openrailwaymap -U simonchervenak -c "SELECT pid, now() - query_start AS duration, state, left(query, 120) AS query FROM pg_stat_activity WHERE state != 'idle' ORDER BY duration DESC;"
 
   psql -h localhost -d openrailwaymap -U simonchervenak -f views.sql
-  
-  
+
+## backend API
+
+`api/` is a FastAPI service that connects a user's goal (departure + arrival
+station) to the platform-to-platform pathfinder in `core/`: it searches journeys
+via Transitous (MOTIS 2) and, for each change of train, assesses whether the
+platform transfer is walkable within the layover (`feasible` / `tight` /
+`infeasible` / `unknown`+reason).
+
+    .venv/bin/uvicorn api.main:app --port 5001
+
+    # then, e.g.
+    curl 'localhost:5001/journeys?from=Frankfurt&to=Z%C3%BCrich%20HB'
+    curl 'localhost:5001/transfer?lat=48.0732&lon=7.3470&from_platform=A&to_platform=B'
+
+It reads the `core/` `transfr_eu` database (PG* env vars, see `core/db.py`). The
+coordinate-based station resolver needs the `station_points` centroid index:
+
+    .venv/bin/python core/build_station_index.py     # ~333k rows; --rebuild to redo
+
+## development
+
+    .venv/bin/python -m pytest tests/ -q                       # offline (deterministic)
+    TRANSFR_DB=1   .venv/bin/python -m pytest tests/ -q         # + transfr_eu DB tests
+    TRANSFR_LIVE=1 .venv/bin/python -m pytest tests/ -q         # + real Transitous pulls
+
+The journey tests run against real MOTIS responses captured under
+`tests/fixtures/journeys/` (git-ignored — they're bulky). Regenerate them with:
+
+    .venv/bin/python tests/capture_journey_fixtures.py           # fill in what's missing
+    .venv/bin/python tests/capture_journey_fixtures.py --force   # re-capture all

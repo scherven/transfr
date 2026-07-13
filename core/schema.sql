@@ -69,6 +69,19 @@ CREATE INDEX idx_osm_ways_track_ref
     ON osm_ways ((tags->>'railway:track_ref'))
     WHERE tags->>'railway' = 'platform_edge';
 
+-- Broader platform match: when a station tags its platforms as areas
+-- (railway=platform / public_transport=platform, ~10x more common than
+-- platform_edge) rather than boardable edges, the transfer resolver falls back
+-- to these by ref/local_ref (see core/search_context._find_platform_edges_near).
+-- Partial, like the platform_edge indexes above, so they cover only the ~250k
+-- platform-area ways, not the whole table.
+CREATE INDEX idx_osm_ways_platform_area_ref
+    ON osm_ways ((tags->>'ref'))
+    WHERE tags->>'railway' = 'platform' OR tags->>'public_transport' = 'platform';
+CREATE INDEX idx_osm_ways_platform_area_local_ref
+    ON osm_ways ((tags->>'local_ref'))
+    WHERE tags->>'railway' = 'platform' OR tags->>'public_transport' = 'platform';
+
 CREATE INDEX idx_osm_relations_tags_gin ON osm_relations USING GIN (tags);
 CREATE INDEX idx_osm_relations_name ON osm_relations ((tags->>'name'));
 CREATE INDEX idx_osm_relations_public_transport ON osm_relations ((tags->>'public_transport'));
@@ -97,3 +110,27 @@ CREATE TABLE IF NOT EXISTS node_way_ids (
     node_id BIGINT PRIMARY KEY,
     way_ids BIGINT[] NOT NULL
 );
+
+-- ---------------------------------------------------------------------------
+-- Materialized station centroids for coordinate-based station resolution
+-- (built by core/build_station_index.py; consumed by api/bridge.py). One row
+-- per stop_area/stop_area_group relation: the mean lat/lon of its member
+-- geometry. Lets the API map a MOTIS journey stop (which carries lat/lon but a
+-- name that does NOT reliably match OSM's) to the OSM relation core/ needs.
+--
+-- No PostGIS on this deployment (only available, not installed), so nearest-
+-- station is a btree bbox prefilter (a few-km box -> a handful of rows) plus
+-- an exact haversine in Python -- cheap on ~333k rows, and needs no extension.
+--
+-- Staleness: rebuild after any osm_relations/osm_ways/osm_nodes reload by
+-- re-running core/build_station_index.py (idempotent; --rebuild to TRUNCATE).
+CREATE TABLE IF NOT EXISTS station_points (
+    relation_id BIGINT PRIMARY KEY,
+    name        TEXT,
+    lat         DOUBLE PRECISION NOT NULL,
+    lon         DOUBLE PRECISION NOT NULL,
+    country     TEXT,
+    n_members   INT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_station_points_lat ON station_points (lat);
+CREATE INDEX IF NOT EXISTS idx_station_points_lon ON station_points (lon);

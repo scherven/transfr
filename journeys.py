@@ -4,6 +4,8 @@ Calls api.transitous.org/api/v5/plan and maps the response to
 the same shape the frontend already expects from the old hafas module.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Dict, List, Any
 
@@ -39,13 +41,23 @@ def _extract_place(place: dict | None) -> Dict[str, Any]:
     }
 
 
+def _parse_iso(ts: str) -> datetime:
+    """Parse an ISO 8601 timestamp, tolerating a trailing 'Z'.
+
+    datetime.fromisoformat only accepts the 'Z' UTC suffix from Python 3.11;
+    MOTIS emits it (e.g. '2026-07-13T07:38:00Z'), so on 3.9/3.10 the bare
+    fromisoformat raises and delay/duration data is silently lost.
+    """
+    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+
+
 def _delay_seconds(actual: str | None, scheduled: str | None) -> int | None:
     """Compute delay in seconds between two ISO timestamps."""
     if not actual or not scheduled:
         return None
     try:
-        dt_a = datetime.fromisoformat(actual)
-        dt_s = datetime.fromisoformat(scheduled)
+        dt_a = _parse_iso(actual)
+        dt_s = _parse_iso(scheduled)
         diff = int((dt_a - dt_s).total_seconds())
         return diff if diff != 0 else None
     except (ValueError, TypeError):
@@ -126,6 +138,11 @@ def search_journeys(
     from_place = f"{origin['latitude']},{origin['longitude']}"
     to_place = f"{destination['latitude']},{destination['longitude']}"
 
+    # MOTIS requires a timezone-aware timestamp; a naive one is rejected with
+    # HTTP 500 "failed to parse timestamp". Treat a naive time as local.
+    if departure_time.tzinfo is None:
+        departure_time = departure_time.astimezone()
+
     resp = _get_session().get(
         PLAN_URL,
         params={
@@ -149,8 +166,8 @@ def search_journeys(
 
         if duration_s is None and first_dep and last_arr:
             try:
-                dt_dep = datetime.fromisoformat(first_dep)
-                dt_arr = datetime.fromisoformat(last_arr)
+                dt_dep = _parse_iso(first_dep)
+                dt_arr = _parse_iso(last_arr)
                 duration_s = int((dt_arr - dt_dep).total_seconds())
             except (ValueError, TypeError):
                 pass

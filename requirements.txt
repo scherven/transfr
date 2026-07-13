@@ -2,6 +2,9 @@ psycopg2-binary
 requests
 flask
 flask-cors
+fastapi
+uvicorn[standard]
+httpx
 osmium
 pytest
 plotly
