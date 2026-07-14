@@ -17,7 +17,11 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
-from search_context import SearchContext, _ANCHOR_KEY  # noqa: E402
+from search_context import (  # noqa: E402
+    PLAUSIBLE_TRANSFER_FLOOR_S,
+    SearchContext,
+    _ANCHOR_KEY,
+)
 
 DB = pytest.mark.skipif(
     os.environ.get("TRANSFR_DB") != "1",
@@ -43,6 +47,28 @@ def test_anchor_nodes_prefers_the_snap_anchor():
 
     # an anchor without a cached coord can't be used
     assert ctx._anchor_nodes([(9, [1, 2], {_ANCHOR_KEY: 99})]) == set()
+
+
+def test_plausibility_bound_floors_then_scales_with_platform_distance():
+    """The geometry bound that makes exceeded_plausibility_bound honest: floored
+    for near-adjacent platforms, scaling up only when the resolved platforms are
+    genuinely far apart (so a ref that resolved to a wrong far feature is caught)."""
+    ctx = SearchContext.__new__(SearchContext)  # bypass __init__; only the coord/anchor sets are used
+
+    # Co-located platforms -> the floor, never less.
+    ctx.coord_cache = {1: (50.0, 7.0), 2: (50.0, 7.0)}
+    ctx.sources, ctx.targets = {1}, {2}
+    assert ctx.plausibility_bound_seconds() == PLAUSIBLE_TRANSFER_FLOOR_S
+
+    # ~1 km apart (0.014 deg lon at lat 50) -> bound scales well above the floor.
+    ctx.coord_cache = {1: (50.0, 7.0), 2: (50.0, 7.014)}
+    bound = ctx.plausibility_bound_seconds()
+    assert bound > PLAUSIBLE_TRANSFER_FLOOR_S
+    assert bound > 1800  # ~1 km / 1.4 m/s * 3 + 60 ~= 2200 s
+
+    # No resolvable coordinates -> fall back to the floor rather than crash.
+    ctx.sources, ctx.targets = set(), set()
+    assert ctx.plausibility_bound_seconds() == PLAUSIBLE_TRANSFER_FLOOR_S
 
 
 # ---------------------------------------------------------------------------
@@ -94,7 +120,9 @@ def test_station_stops_table_is_populated():
     conn = db.connect(connect_timeout=5)
     cur = conn.cursor()
     cur.execute("SELECT count(*) AS n FROM station_stops")
-    assert cur.fetchone()["n"] > 50_000, "station_stops looks unbuilt -- run core/build_platform_index.py"
+    # Rail-only (bus/tram stops excluded, see build_platform_index.py) -- ~29k
+    # across Europe, down from ~112k when every stop_position was indexed.
+    assert cur.fetchone()["n"] > 20_000, "station_stops looks unbuilt -- run core/build_platform_index.py"
 
 
 @DB
@@ -112,3 +140,21 @@ def test_platform_edge_stations_unchanged_by_tier2(rel, a, b, expected):
     r = gt.find_shortest_path(conn, rel, a, b, algorithm="astar")
     assert r.get("found")
     assert abs(r["walking_time_seconds"] - expected) < 0.5
+
+
+@DB
+@pytest.mark.parametrize("algorithm", ["astar", "dijkstra"])
+def test_koblenz_bus_ref_never_returns_a_bogus_walk(algorithm):
+    """Koblenz Hbf (relation 3267269) rail track 9 -> "track C", where 'C' is a
+    forecourt bus bay, not a rail platform. core/ must never return a real-looking
+    walk here: either 'C' finds no rail stop (platform_not_found), or the resolved
+    walk to a far bus stop exceeds the geometry plausibility bound
+    (exceeded_plausibility_bound). Both algorithms must agree -- dijkstra is the
+    ground-truth baseline."""
+    import db
+    import ground_truth as gt
+
+    conn = db.connect(connect_timeout=5)
+    r = gt.find_shortest_path(conn, 3267269, "9", "C", algorithm=algorithm)
+    assert not r.get("found"), f"core/ returned a bogus walk: {r.get('walking_distance_meters')} m"
+    assert r.get("reason") in ("exceeded_plausibility_bound", "platform_not_found"), r.get("reason")

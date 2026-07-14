@@ -74,6 +74,11 @@ def search(
         heapq.heappush(heap, (h(s), counter, s))
         counter += 1
 
+    # Give up past whichever is tighter: the caller's compute budget, or the
+    # geometry-derived bound on a plausible transfer (rejects a ref that resolved
+    # to a wrong, far-away feature -- see SearchContext.plausibility_bound_seconds).
+    cutoff = min(max_search_seconds, ctx.plausibility_bound_seconds())
+
     visited: set = set()
     expansions = 0
     t_start = time.monotonic()
@@ -82,11 +87,15 @@ def search(
         _f, _, u = heapq.heappop(heap)
         if u in visited:
             continue
-        g = dist[u]
-        if g > max_search_seconds:
+        # A* pops in f-order and f = g + h lower-bounds the cost of any path to a
+        # target through u, so once the cheapest frontier f exceeds the cutoff, no
+        # path within it exists -- give up. Bounding on f (not g) means we don't
+        # sweep the whole cutoff-radius disc, just the wedge aimed at the target.
+        if _f > cutoff:
             return ctx.build_not_found(
                 "exceeded_plausibility_bound", expansions, max_search_seconds=max_search_seconds
             )
+        g = dist[u]
         visited.add(u)
         expansions += 1
         if progress_cb and expansions % 200 == 0:

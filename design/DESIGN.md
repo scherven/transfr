@@ -1,6 +1,6 @@
 # Transfr — Design Document
 
-> **Status:** living design doc · v0.1 · 2026-07-13
+> **Status:** living design doc · v0.2 · 2026-07-13
 > **Prototype:** [`design/prototype.html`](prototype.html) (open it in any browser; no build step). Live copy: `https://claude.ai/code/artifact/4657fc18-96b4-497a-b05d-3cc238985bd0` (private).
 > **Backlog / product ideas:** [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 
@@ -25,7 +25,8 @@ The eventual client is Swift/SwiftUI + ARKit. The prototype is HTML because it l
 10. [Feasibility & build sequencing](#10-feasibility--build-sequencing)
 11. [Open questions](#11-open-questions--to-revisit)
 12. [Decision log](#12-decision-log)
-13. [Appendix: design tokens](#appendix-design-tokens)
+13. [Translating to a Swift app](#13-translating-to-a-swift-app)
+14. [Appendix: design tokens](#appendix-design-tokens)
 
 ---
 
@@ -35,7 +36,7 @@ The eventual client is Swift/SwiftUI + ARKit. The prototype is HTML because it l
 - **Sections 4–6** are the concrete design system and screens.
 - **Section 7** is the important part: the *decisions*, each with rationale and status (`locked` / `provisional` / `open`).
 - **Sections 9–11** are the honest edges — what bounds the design and what's unresolved.
-- **Section 12** is a scannable decision log; **Appendix** has the raw tokens.
+- **Section 12** is a scannable decision log; **Section 13** maps the design onto Swift/iOS frameworks; the **Appendix** has the raw tokens.
 
 Status tags: **locked** = we're confident, change only with reason; **provisional** = reasonable default, expected to be revisited; **open** = flagged, not yet decided.
 
@@ -167,9 +168,12 @@ Plan ──▶ Connections ──▶ The connection ──▶ Transfers ──�
 - One card per change, horizontally swipeable, scroll-snapped. The hero surface. Each card: station, arrive/depart platform, a **feasibility ring** (walk vs layover, coloured by verdict), the **boarding module** (§7.3–7.4), a level/stairs description, stats (distance / level Δ / spare), and **3D / AR** buttons.
 - Adapts per transfer: Göttingen (cross-platform) is relaxed; Mannheim (tight) is the full treatment.
 
-### 6.5 3D walk
-- Stylised **side elevation**: two level planes (L0 platforms, L−1 underpass), the azure path, stair risers coloured by connector kind, endpoints labelled with platform + level. Below: stats and a **turn-by-turn** list whose first step is the step-off cue.
-- Reflects `viz_export`'s "Z = level, not elevation" honestly (labelled planes, not fake heights).
+### 6.5 The walk view — three representations
+The transfer's walk is shown three complementary ways (§7.6), with the default chosen by how many levels the path spans:
+- **Section overview** — a stylised side elevation: level bands, the azure path threading up, risers coloured by connector kind, endpoints labelled with platform + level. The fastest read of "how far up/down, and what do I take between floors." Plus a **turn-by-turn** list whose first step is the step-off cue.
+- **Per-level plans** — one clean top-down per floor, switched with a picker, with paired "from L−1 / to L+1" transition markers. Precise wayfinding.
+- **Rotatable 3D** — the real `core/viz_render` scene (WebGL, orthographic orbit): translucent per-level planes, walkways/platforms, and the whole path with coloured risers. Spatial overview and the pre-AR model.
+All reflect `viz_export`'s "Z = level, not elevation" honestly (labelled, evenly-spaced planes, not fake heights).
 
 ### 6.6 AR
 - Mocked camera: a receding floor grid, the glowing azure path with chevrons toward a vanishing point, a floating destination pill, a distance badge, and a top **instruction banner** ("Walk toward sector C — the stairs down are there"). Controls to recenter / drop to the 3D map.
@@ -211,8 +215,18 @@ The **first line** of the boarding module is a directional instruction: **"Doors
 ### 7.5 Honest gaps  `[locked]`
 When platform data is missing, the app **says so** (`unknown` / "no platform feed") rather than guessing. Verdict badges, journey cards, and reasons all carry this. An app that admits "I don't know this one" earns more trust than one that fabricates a walk — and our coverage genuinely is uneven (§9).
 
-### 7.6 3D walk  `[locked]`
-A stylised side elevation over a true perspective render, because the decision the traveller makes is vertical ("which floor, which stair") and an orthographic level view reads that at a glance. **Z is level-derived** (evenly-spaced planes), stated honestly, per `VIZ.md`. Risers coloured by connector kind. It's the ~80%-value view that needs no positioning tech.
+### 7.6 The walk view — section overview + per-level plans + rotatable 3D  `[locked]`
+A complex transfer is the test: **Berlin Hbf Pl 1 → 16** is a 4-storey climb — L−2 up to L+2, an escalator then a single elevator, 107 m / 122 s across 9 mapped levels (real `viz_export`, relation 5688517, verified from `core/viz_out/5688517_1_16.json`). No single view serves it, so the walk screen carries **three complementary representations**, and picks the default by how many levels the path spans:
+
+1. **Section overview** — a stylised side elevation (2D, SwiftUI-drawable): level bands, the path threading up, risers coloured by connector kind, endpoints labelled with platform + level. It is the *fastest read* of the vertical story ("how far up/down, how many transitions, what do I take"), needs no interaction, and stays legible on a phone. **First-class — not just a fallback for simple transfers.**
+2. **Per-level plans** — one clean top-down per floor, switched with a picker; the paired "from L−1 / to L+1" transition markers are the connective tissue that stitch the floors back into one journey. This is where turn-by-turn lives.
+3. **Rotatable 3D of the whole path** — the *actual* `core/viz_render.py` scene (Plotly/WebGL today, orthographic orbit): translucent per-`level` planes, context walkways/platforms, and the path with vertical circulation drawn as risers coloured by connector kind (stairs/escalator/elevator/ramp), start/end platforms marked. The spatial overview and the pre-visualisation for AR.
+
+They divide cleanly — **section = glance, per-level = precision, 3D = spatial model** — which is why all three are kept rather than one chosen. **Z is level-derived** (evenly-spaced, ×3 exaggerated for legibility), stated honestly per `VIZ.md`. All three fall out of one `viz_export` JSON, so they never drift (see §13.3).
+
+**In-app it's embedded, not reinvented** (no backend work — the export already exists): a `WKWebView` over the self-contained `viz_render` HTML ships the real rotatable viewer immediately; a SceneKit/RealityKit port reading the same JSON is the native follow-up. See §13.3–13.4.
+
+**Rejected:** a hand-built CSS/stacked-plate "3D overview" — it is neither real geometry nor legible under rotation. The rotatable view must be the real scene.
 
 ### 7.7 AR — the hard frontier  `[open]`
 Framed throughout as the flagship *v2*, not the launch centrepiece.
@@ -288,12 +302,74 @@ Detail and code-grounding for each in [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 | D9 | Step-off cue ("walk toward sector C") leads the card | Sector label is the first visible reference on a platform | locked (wording open) |
 | D10 | Mention a sector only when there is one to aim for | Cross-platform hops have none; otherwise it's noise | locked |
 | D11 | Honest `unknown` / "no platform feed" | Trust > fabricated walks; coverage is genuinely uneven | locked |
-| D12 | 3D as level-planed side elevation; Z = level not elevation | Matches the data (`VIZ.md`); reads the vertical decision | locked |
+| D12 | Walk view = section overview + per-level plans + rotatable 3D | Multi-level transfers (Berlin 1→16) need all three; section=glance, levels=precision, 3D=spatial | locked |
 | D13 | AR is v2, gated on indoor positioning | Indoor world-anchoring is unsolved; 3D gets ~80% risk-free | open |
 | D14 | Makeable = walk under X% of layover (default 70%) | Tunable margin that scales with layover | provisional |
 | D15 | Step-free toggle as a headline setting | Near-free (connectors already typed); big accessibility win | provisional |
 | D16 | Directional screen router (forward/back reverse) | Communicates depth/hierarchy; the main motion device | locked |
 | D17 | Everything editable is editable (prototype) | Don't show a field you can't touch | locked (prototype) |
+| D18 | Rotatable 3D = the real `viz_render` scene, embedded (WKWebView → SceneKit) | Reuse the built viewer; one `viz_export` JSON feeds every renderer | locked |
+| D19 | Reject the CSS stacked-plate "3D overview" | Not real geometry; illegible under rotation | locked |
+| D20 | Z = level, not elevation, stated honestly (×3 exaggeration) | OSM carries no usable indoor `ele`, per `VIZ.md` | locked |
+
+---
+
+## 13. Translating to a Swift app
+
+The eventual client is **SwiftUI + ARKit**. This section maps each design piece to concrete Apple frameworks. The architectural keystone: the `viz_export` JSON is a single `Codable` contract that feeds every walk renderer, so the three (soon four, with AR) representations never drift.
+
+### 13.1 App shell & navigation
+- **SwiftUI** throughout. Screens are views; the prototype's screen router → **`NavigationStack`** (value-driven), whose default push/pop *is* the directional forward/back slide. The transfer carousel → **`TabView(.page)`** or a horizontal `ScrollView` with `.scrollTargetBehavior(.paging)`. Fluid page transitions → `matchedGeometryEffect`, and on iOS 18+ `.navigationTransition(.zoom)`.
+- State: one `@Observable` `TripModel` (Observation framework) holds the journey, its transfers, and live delays.
+
+### 13.2 Data layer
+- An async/await **`URLSession`** client over the FastAPI. `Codable` structs mirror `api/schemas.py` (`Journey`, `Leg`, `Transfer`, `Place`). The verdict becomes `enum Verdict { case feasible, tight, infeasible, unknown(String) }`; the journey verdict is a worst-wins `reduce` (§7.1).
+- Near-term the app is a **thin client** over `/journeys` + `/transfer`; `core/` stays server-side. The pure, DB-independent modules (`boarding.py`, `formation_model.py`, ultimately the pathfinder) port cleanly to Swift value types later if on-device routing is wanted.
+
+### 13.3 The `viz_export` JSON — one contract, four renderers  *(the keystone)*
+Define `struct VizExport: Codable` matching the JSON (`meta`, `ways`, `path`, `transitions`, `details`, endpoints; coords as `SIMD3<Float>` in local-ENU metres). One decode drives all of:
+1. **Section overview** — SwiftUI **`Canvas` / `Path`** (2D). Project each segment to (along-track, level); draw bands + risers. Cheap, offline, no 3D dependency.
+2. **Per-level plans** — a `Canvas` per floor; filter segments by `level_raw`; a `Picker` switches floors; markers come from `transitions`.
+3. **Rotatable 3D** — **SceneKit** (§13.4).
+4. **AR** — **RealityKit** (§13.5).
+
+Add a station or fix geometry once and every view updates — the reason to keep all representations on one export rather than bespoke data per screen.
+
+### 13.4 The rotatable 3D — two stages
+- **Stage 0 (ship now):** a **`WKWebView`** loading the self-contained `viz_render` HTML. Zero new rendering code — the exact scene rendered in-chat.
+- **Stage 1 (native):** **SceneKit** reading the JSON. `SCNView(allowsCameraControl: true)` for orbit; `camera.usesOrthographicProjection = true` (matches `viz_render`); `SCNGeometry` line primitives from `path` / `ways`, an `SCNPlane` per level, risers coloured by `transition.kind`, start/end as marker nodes. Essentially a 1:1 port of `build_figure`. (Use RealityKit instead if you want to share entity code with AR.)
+
+### 13.5 AR
+- **ARKit + RealityKit**, hosted by SwiftUI **`RealityView`**. The JSON's `origin_lat/lon` → an **`ARGeoAnchor`** (Location Anchors) outdoors; indoors an `ARImageAnchor` / `ARWorldMap` seeded from platform signage (VPS). Path → `ModelEntity` tubes/arrows; the step-off arrow → a billboard entity. Z = level (schematic vertical, honest — not surveyed). Gated per §7.7.
+
+### 13.6 Boarding & step-off
+- Pure data → SwiftUI views. Compute the coach/sector + "walk toward X" server-side, or port the small `boarding` / `formation_model` logic to Swift structs. The sector strip is an `HStack` of cells; the step-off cue a `Label`.
+
+### 13.7 Live tracking & Live Activity
+- **CoreLocation** for position, **MapKit** (`Map`) for the route. The lock-screen / Dynamic-Island countdown → **ActivityKit** Live Activity + **WidgetKit** views, refreshed by background **APNs** driven by the live-delay feed (**live re-assessment**, the §10 keystone). A local notification fires the ~90 s AR nudge.
+
+### 13.8 Theming & type
+- Tokens → an **Asset Catalog** colour set per token with light/dark variants (or a `Theme` struct keyed to `ColorScheme`). SF Pro + SF Mono are system fonts — free (D5/D6). Tabular numerals → `.monospacedDigit()`; mono blocks → `.font(.system(.body, design: .monospaced))`. `@Environment(\.colorScheme)` drives the theme; Settings' Theme control writes an `@AppStorage` override.
+
+### 13.9 Offline
+- The per-transfer `viz_export` JSON is the offline unit (self-contained ENU geometry). Cache it to disk on trip-plan (`FileManager`), plus static route images via `MKMapSnapshotter`. Section, per-level, 3D and AR all render from the cache with no signal.
+
+### 13.10 Design piece → framework
+
+| Prototype piece | Swift / iOS |
+|---|---|
+| Screen router | `NavigationStack` |
+| Transfer carousel | `TabView(.page)` |
+| Section + per-level views | SwiftUI `Canvas` + `Path` |
+| Rotatable 3D | `WKWebView` (now) → SceneKit (native) |
+| AR | ARKit + RealityKit (`RealityView`) |
+| Verdict system | `enum` + worst-wins `reduce` |
+| Times / platforms | `.monospacedDigit()`, SF Mono |
+| Theme tokens | Asset Catalog colour sets |
+| Live countdown | ActivityKit + WidgetKit |
+| Position / map | CoreLocation + MapKit |
+| `viz_export` JSON | one `Codable` → 4 renderers |
+| API | `URLSession` async/await + `Codable` |
 
 ---
 

@@ -1,0 +1,3 @@
+tight_state*.json
+*.log
+__pycache__/

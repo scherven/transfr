@@ -46,6 +46,34 @@ NO_PLATFORM_DATA = "no_platform_data"
 STATION_UNRESOLVED = "station_unresolved"
 CROSS_STATION = "cross_station"
 NO_TIMING = "no_timing"
+IMPLAUSIBLE_WALK = "implausible_walk"
+
+# Plausibility guard on a resolved walk. core/ resolves a track *ref* to OSM
+# geometry without knowing where the journey said the platform actually is, so a
+# same-labelled feature elsewhere (a bus bay lettered "C" across town, a mistagged
+# platform) can resolve and route as a real-looking walk. We have the one thing
+# core/ doesn't: the two platforms' own coordinates, hence their straight-line
+# separation -- a hard lower bound on any honest transfer walk. A walk grossly
+# longer than that is a mis-resolution, not a transfer, so we reject it as
+# `unknown` rather than report a confidently-wrong distance. core/'s own
+# `exceeded_plausibility_bound` can't catch this: it's a flat walking-time budget
+# and never sees these coordinates. Bound = the larger of an absolute cap and a
+# generous detour multiple of the gap; real same-station transfers measure <=150 m
+# here (max: Munchen Ost 3->5 = 144 m), so 800 m clears them with wide margin
+# while catching the 2 km Koblenz 9->C bug.
+IMPLAUSIBLE_WALK_ABS_M = 800.0
+IMPLAUSIBLE_WALK_DETOUR_FACTOR = 4.0
+IMPLAUSIBLE_WALK_SLACK_M = 250.0
+
+
+def walk_is_implausible(walk_distance_m: Optional[float], gap_m: float) -> bool:
+    """True if a resolved walk is too long to be a real transfer between two
+    platforms `gap_m` apart in a straight line -- i.e. the ref resolved to the
+    wrong feature. Split out so the bound is unit-tested without a DB."""
+    if walk_distance_m is None:
+        return False
+    bound = max(IMPLAUSIBLE_WALK_ABS_M, gap_m * IMPLAUSIBLE_WALK_DETOUR_FACTOR + IMPLAUSIBLE_WALK_SLACK_M)
+    return walk_distance_m > bound
 
 
 @dataclass
@@ -153,13 +181,22 @@ def assess_transfer(
         kwargs["max_search_seconds"] = max_search_seconds
 
     first_reason = None
+    saw_implausible = False
     for cand in candidates:
         result = find_shortest_path(conn, cand.relation_id, arr_ref, dep_ref, **kwargs)
         if result.get("found"):
+            walk_m = result["walking_distance_meters"]
+            if walk_is_implausible(walk_m, gap_m):
+                # A "found" walk far longer than the platforms are apart means the
+                # ref resolved to the wrong OSM feature (e.g. a same-lettered bus
+                # bay elsewhere), not a real transfer. Don't report it; keep trying
+                # other candidate relations, and fall through to an honest reason.
+                saw_implausible = True
+                continue
             base.relation_id = cand.relation_id
             base.station_name = cand.name
             base.walk_time_s = result["walking_time_seconds"]
-            base.walk_distance_m = result["walking_distance_meters"]
+            base.walk_distance_m = walk_m
             base.verdict = classify(base.walk_time_s, lay, buffer_s)
             if base.verdict == UNKNOWN:
                 base.reason = NO_TIMING  # walk known but layover wasn't parseable
@@ -167,7 +204,119 @@ def assess_transfer(
         if first_reason is None:
             first_reason = result.get("reason", "not_found")
 
-    # No nearby relation contained both platforms -- the honest reason (usually
-    # platform_not_found: the refs simply aren't in the OSM data here).
-    base.reason = first_reason or "platform_not_found"
+    # No candidate yielded a plausible walk. Prefer the precise diagnosis when we
+    # actually resolved-and-rejected a bogus one (implausible_walk) over an
+    # incidental not-found reason from another candidate (e.g. a search that ran
+    # long) -- otherwise the surfaced reason would depend on candidate order.
+    base.reason = IMPLAUSIBLE_WALK if saw_implausible else (first_reason or "platform_not_found")
     return base
+
+
+# ---------------------------------------------------------------------------
+# Live re-assessment under delay
+#
+# The real platform-to-platform walk is delay-invariant -- a late train doesn't
+# move platform 8 away from platform 5. So the pathfinder (core/) runs ONCE at
+# plan time and the walk is cached in a LiveTransfer. On every live update we
+# only recompute the layover and re-classify -- pure arithmetic, no DB, no core/.
+# The one exception is a platform change (a re-tracked train), which re-runs the
+# pathfinder a single time against the new refs.
+#
+#     effective_layover = scheduled_layover - inbound_delay + outbound_delay
+#     verdict           = classify(real_walk, effective_layover)
+#
+# `rescued` is the product moment: MOTIS's conservative minimum interchange time
+# would drop the connection, but the real walk still makes it.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class LiveTransfer:
+    """Static, delay-invariant facts about one change of train, computed once at
+    plan time so re-assessment never re-runs the pathfinder unless a platform
+    itself changes."""
+
+    relation_id: Optional[int]
+    arr_ref: Optional[str]
+    dep_ref: Optional[str]
+    walk_time_s: Optional[float]        # from core/, cached
+    scheduled_layover_s: Optional[float]
+    motis_assumed_s: Optional[float] = None   # MOTIS's own required transfer, if known
+    buffer_s: float = DEFAULT_BUFFER_S
+    station_name: Optional[str] = None
+
+    @classmethod
+    def from_assessment(cls, a: "TransferAssessment", *,
+                        motis_assumed_s: Optional[float] = None,
+                        buffer_s: float = DEFAULT_BUFFER_S) -> "LiveTransfer":
+        """Build from an assess_transfer result (the plan-time -> live handoff)."""
+        return cls(
+            relation_id=a.relation_id, arr_ref=a.arrival_platform, dep_ref=a.departure_platform,
+            walk_time_s=a.walk_time_s, scheduled_layover_s=a.layover_s,
+            motis_assumed_s=motis_assumed_s, buffer_s=buffer_s, station_name=a.station_name,
+        )
+
+
+@dataclass
+class LiveVerdict:
+    verdict: str
+    effective_layover_s: Optional[float]
+    margin_s: Optional[float]        # slack over the raw walk -- the live countdown
+    absorb_s: Optional[float]        # extra inbound delay still survivable (keeping the buffer)
+    rescued: bool = False            # MOTIS would drop it; the real walk still makes it
+    walk_time_s: Optional[float] = None
+    replanned_walk: bool = False     # a platform change forced a fresh pathfind
+
+
+def reassess(
+    t: LiveTransfer,
+    *,
+    inbound_delay_s: float = 0.0,
+    outbound_delay_s: float = 0.0,
+    arr_track_now: Optional[str] = None,
+    dep_track_now: Optional[str] = None,
+    conn=None,
+    algorithm: str = DEFAULT_ALGORITHM,
+) -> LiveVerdict:
+    """Re-score one transfer against live delays. Pure arithmetic unless a
+    platform changed (then one fresh find_shortest_path). Never raises.
+
+    inbound_delay_s  -- lateness of the arriving train (eats into the layover)
+    outbound_delay_s -- lateness of the departing train (gives you more time)
+    arr/dep_track_now -- current platform from realtime; if it differs from the
+                         planned ref and a conn is given, the walk is recomputed.
+    """
+    walk = t.walk_time_s
+    replanned = False
+
+    # A platform change is the ONLY event that re-runs core/.
+    new_arr = map_track_to_ref(arr_track_now) if arr_track_now is not None else None
+    new_dep = map_track_to_ref(dep_track_now) if dep_track_now is not None else None
+    changed = (new_arr is not None and new_arr != t.arr_ref) or \
+              (new_dep is not None and new_dep != t.dep_ref)
+    if changed and conn is not None and t.relation_id is not None:
+        r = find_shortest_path(conn, t.relation_id,
+                               new_arr or t.arr_ref, new_dep or t.dep_ref, algorithm=algorithm)
+        if r.get("found"):
+            walk = r["walking_time_seconds"]
+            t.walk_time_s = walk
+            t.arr_ref = new_arr or t.arr_ref
+            t.dep_ref = new_dep or t.dep_ref
+            replanned = True
+
+    if walk is None or t.scheduled_layover_s is None:
+        return LiveVerdict(verdict=UNKNOWN, effective_layover_s=None, margin_s=None,
+                           absorb_s=None, walk_time_s=walk, replanned_walk=replanned)
+
+    eff = t.scheduled_layover_s - inbound_delay_s + outbound_delay_s
+    verdict = classify(walk, eff, t.buffer_s)
+    motis_would_drop = t.motis_assumed_s is not None and eff < t.motis_assumed_s
+    return LiveVerdict(
+        verdict=verdict,
+        effective_layover_s=eff,
+        margin_s=eff - walk,
+        absorb_s=eff - walk - t.buffer_s,
+        rescued=motis_would_drop and verdict in (FEASIBLE, TIGHT),
+        walk_time_s=walk,
+        replanned_walk=replanned,
+    )

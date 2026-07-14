@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple
 from graph import (
     Coords,
     NOT_WALKABLE_WAY_SQL,
+    WALKING_SPEED_MS,
     Ways,
     bbox_from_coords,
     collapse_port_path,
@@ -31,6 +32,23 @@ from graph import (
 )
 
 PLATFORM_EDGE_SEARCH_RADIUS_M = 600.0
+
+# Plausibility bound on a platform-to-platform search (see plausibility_bound_seconds).
+# A ref can resolve to the wrong OSM feature -- a same-lettered bus bay across
+# town, a mistagged platform -- and route as a real-looking multi-kilometre walk.
+# The straight-line distance between the two *resolved* platforms is a hard lower
+# bound on any honest transfer, so a walk far longer than a generous multiple of
+# it is a mis-resolution, not a transfer: the search abandons it as
+# `exceeded_plausibility_bound` rather than returning it. This is a GEOMETRY bound,
+# distinct from max_search_seconds (a caller-controlled compute budget); the
+# search stops at whichever is tighter. Calibrated wide: real same-station
+# transfers measured <=122 s of walking (max: Munchen Ost 3->5), so the 900 s
+# floor clears them ~7x over, while the 2 km Koblenz 9->C bug (1501 s) is caught.
+# The detour term only *relaxes* the bound further, for genuinely far-apart
+# platforms at large stations.
+PLAUSIBLE_TRANSFER_FLOOR_S = 900.0
+PLAUSIBLE_TRANSFER_DETOUR_FACTOR = 3.0
+PLAUSIBLE_TRANSFER_SLACK_S = 60.0
 
 
 def find_station_relations(conn, name: str) -> List[int]:
@@ -499,6 +517,23 @@ class SearchContext:
                 for lvl in levels:
                     if lvl != u_level:
                         yield (u_node, lvl), vertical_transition_cost(kind, lvl - u_level), None
+
+    def plausibility_bound_seconds(self) -> float:
+        """Upper bound on the walking time of any plausible transfer between the
+        resolved source and target platforms, from their straight-line
+        separation. A search whose cost exceeds this has resolved a wrong,
+        far-away feature (not the intended platform) -- see the
+        PLAUSIBLE_TRANSFER_* constants. Floors at PLAUSIBLE_TRANSFER_FLOOR_S so
+        near-adjacent platforms still get a generous budget."""
+        src = [self.coord_cache[s] for s in self.sources if s in self.coord_cache]
+        tgt = [self.coord_cache[t] for t in self.targets if t in self.coord_cache]
+        if not src or not tgt:
+            return PLAUSIBLE_TRANSFER_FLOOR_S
+        straight_m = min(haversine_meters(a[0], a[1], b[0], b[1]) for a in src for b in tgt)
+        return max(
+            PLAUSIBLE_TRANSFER_FLOOR_S,
+            straight_m / WALKING_SPEED_MS * PLAUSIBLE_TRANSFER_DETOUR_FACTOR + PLAUSIBLE_TRANSFER_SLACK_S,
+        )
 
     def edge_way_ids(self) -> Tuple[List[int], List[int]]:
         return [w for w, _, _ in self.edges_1], [w for w, _, _ in self.edges_2]
