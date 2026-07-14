@@ -21,6 +21,7 @@ from api.transfers import (  # noqa: E402
     FEASIBLE, INFEASIBLE, TIGHT, UNKNOWN,
     NO_PLATFORM_DATA, STATION_UNRESOLVED, CROSS_STATION,
     assess_transfer, classify, layover_seconds,
+    LiveTransfer, reassess,
 )
 
 DB = pytest.mark.skipif(
@@ -157,6 +158,82 @@ def test_all_candidates_fail_surfaces_reason(monkeypatch):
            lambda *a, **k: {"found": False, "reason": "platform_not_found"})
     a = assess_transfer(_FakeConn(), **_base_kwargs())
     assert a.verdict == UNKNOWN and a.reason == "platform_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Live re-assessment under delay (pure -- cached walk, no DB/core/)
+# ---------------------------------------------------------------------------
+
+def _live(**over):
+    kw = dict(relation_id=1, arr_ref="8", dep_ref="5", walk_time_s=71.0,
+              scheduled_layover_s=420.0, motis_assumed_s=240.0, buffer_s=60.0)
+    kw.update(over)
+    return LiveTransfer(**kw)
+
+
+def test_reassess_on_time_matches_classify():
+    v = reassess(_live())
+    assert v.verdict == FEASIBLE
+    assert v.effective_layover_s == 420.0
+    assert v.margin_s == 420.0 - 71.0
+    assert v.absorb_s == 420.0 - 71.0 - 60.0
+    assert v.rescued is False  # 420s layover, MOTIS is happy too
+
+
+@pytest.mark.parametrize("inb, outb, verdict, rescued", [
+    (0,   0,   FEASIBLE,   False),   # scheduled: plenty of time
+    (200, 0,   FEASIBLE,   True),    # eff 220s; MOTIS(<240) drops, real 71s walk makes it
+    (340, 0,   TIGHT,      True),    # eff 80s; still >= 71s walk, MOTIS long gone
+    (360, 0,   INFEASIBLE, False),   # eff 60s < 71s walk: genuinely missed
+    (320, 120, FEASIBLE,   True),    # outbound 2min late gives time back; eff 220s < 240s MOTIS
+    (300, 120, FEASIBLE,   False),   # eff exactly 240s == MOTIS min: boundary, both keep it
+])
+def test_reassess_delay_sweep(inb, outb, verdict, rescued):
+    v = reassess(_live(), inbound_delay_s=inb, outbound_delay_s=outb)
+    assert v.verdict == verdict
+    assert v.rescued is rescued
+    assert v.effective_layover_s == 420.0 - inb + outb
+
+
+def test_reassess_absorb_is_the_delay_budget():
+    # margin over the raw walk, and how much MORE inbound delay you can still take
+    v = reassess(_live(), inbound_delay_s=200)
+    assert v.margin_s == 220.0 - 71.0        # 149s of physical slack left
+    assert v.absorb_s == 220.0 - 71.0 - 60.0  # 89s more delay and still "feasible"
+
+
+def test_reassess_unknown_when_walk_never_resolved():
+    v = reassess(_live(walk_time_s=None))
+    assert v.verdict == UNKNOWN
+    assert v.margin_s is None and v.absorb_s is None
+
+
+def test_reassess_no_rescue_flag_without_motis_baseline():
+    # can't claim a rescue if we don't know MOTIS's bar
+    v = reassess(_live(motis_assumed_s=None), inbound_delay_s=200)
+    assert v.verdict == FEASIBLE and v.rescued is False
+
+
+def test_reassess_platform_change_repathfinds_once(monkeypatch):
+    calls = []
+
+    def finder(conn, relation_id, a, b, **k):
+        calls.append((relation_id, a, b))
+        return {"found": True, "walking_time_seconds": 180.0, "walking_distance_meters": 250.0}
+
+    monkeypatch.setattr(T, "find_shortest_path", finder)
+    t = _live(scheduled_layover_s=300.0)
+    v = reassess(t, dep_track_now="12", conn=object())
+    assert v.replanned_walk is True
+    assert calls == [(1, "8", "12")]        # re-routed to the new departure platform
+    assert v.walk_time_s == 180.0 and t.dep_ref == "12"
+    assert v.verdict == FEASIBLE            # 300s layover still clears the 180s walk
+
+
+def test_reassess_same_platform_does_not_repathfind(monkeypatch):
+    monkeypatch.setattr(T, "find_shortest_path", lambda *a, **k: pytest.fail("should not route"))
+    v = reassess(_live(), arr_track_now="8", dep_track_now="5", conn=object())
+    assert v.replanned_walk is False and v.walk_time_s == 71.0
 
 
 # ---------------------------------------------------------------------------
