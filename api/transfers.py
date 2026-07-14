@@ -46,6 +46,34 @@ NO_PLATFORM_DATA = "no_platform_data"
 STATION_UNRESOLVED = "station_unresolved"
 CROSS_STATION = "cross_station"
 NO_TIMING = "no_timing"
+IMPLAUSIBLE_WALK = "implausible_walk"
+
+# Plausibility guard on a resolved walk. core/ resolves a track *ref* to OSM
+# geometry without knowing where the journey said the platform actually is, so a
+# same-labelled feature elsewhere (a bus bay lettered "C" across town, a mistagged
+# platform) can resolve and route as a real-looking walk. We have the one thing
+# core/ doesn't: the two platforms' own coordinates, hence their straight-line
+# separation -- a hard lower bound on any honest transfer walk. A walk grossly
+# longer than that is a mis-resolution, not a transfer, so we reject it as
+# `unknown` rather than report a confidently-wrong distance. core/'s own
+# `exceeded_plausibility_bound` can't catch this: it's a flat walking-time budget
+# and never sees these coordinates. Bound = the larger of an absolute cap and a
+# generous detour multiple of the gap; real same-station transfers measure <=150 m
+# here (max: Munchen Ost 3->5 = 144 m), so 800 m clears them with wide margin
+# while catching the 2 km Koblenz 9->C bug.
+IMPLAUSIBLE_WALK_ABS_M = 800.0
+IMPLAUSIBLE_WALK_DETOUR_FACTOR = 4.0
+IMPLAUSIBLE_WALK_SLACK_M = 250.0
+
+
+def walk_is_implausible(walk_distance_m: Optional[float], gap_m: float) -> bool:
+    """True if a resolved walk is too long to be a real transfer between two
+    platforms `gap_m` apart in a straight line -- i.e. the ref resolved to the
+    wrong feature. Split out so the bound is unit-tested without a DB."""
+    if walk_distance_m is None:
+        return False
+    bound = max(IMPLAUSIBLE_WALK_ABS_M, gap_m * IMPLAUSIBLE_WALK_DETOUR_FACTOR + IMPLAUSIBLE_WALK_SLACK_M)
+    return walk_distance_m > bound
 
 
 @dataclass
@@ -153,13 +181,22 @@ def assess_transfer(
         kwargs["max_search_seconds"] = max_search_seconds
 
     first_reason = None
+    saw_implausible = False
     for cand in candidates:
         result = find_shortest_path(conn, cand.relation_id, arr_ref, dep_ref, **kwargs)
         if result.get("found"):
+            walk_m = result["walking_distance_meters"]
+            if walk_is_implausible(walk_m, gap_m):
+                # A "found" walk far longer than the platforms are apart means the
+                # ref resolved to the wrong OSM feature (e.g. a same-lettered bus
+                # bay elsewhere), not a real transfer. Don't report it; keep trying
+                # other candidate relations, and fall through to an honest reason.
+                saw_implausible = True
+                continue
             base.relation_id = cand.relation_id
             base.station_name = cand.name
             base.walk_time_s = result["walking_time_seconds"]
-            base.walk_distance_m = result["walking_distance_meters"]
+            base.walk_distance_m = walk_m
             base.verdict = classify(base.walk_time_s, lay, buffer_s)
             if base.verdict == UNKNOWN:
                 base.reason = NO_TIMING  # walk known but layover wasn't parseable
@@ -167,9 +204,11 @@ def assess_transfer(
         if first_reason is None:
             first_reason = result.get("reason", "not_found")
 
-    # No nearby relation contained both platforms -- the honest reason (usually
-    # platform_not_found: the refs simply aren't in the OSM data here).
-    base.reason = first_reason or "platform_not_found"
+    # No candidate yielded a plausible walk. Prefer the precise diagnosis when we
+    # actually resolved-and-rejected a bogus one (implausible_walk) over an
+    # incidental not-found reason from another candidate (e.g. a search that ran
+    # long) -- otherwise the surfaced reason would depend on candidate order.
+    base.reason = IMPLAUSIBLE_WALK if saw_implausible else (first_reason or "platform_not_found")
     return base
 
 

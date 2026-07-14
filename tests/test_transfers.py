@@ -19,8 +19,8 @@ import api.transfers as T  # noqa: E402
 from api.bridge import StationMatch  # noqa: E402
 from api.transfers import (  # noqa: E402
     FEASIBLE, INFEASIBLE, TIGHT, UNKNOWN,
-    NO_PLATFORM_DATA, STATION_UNRESOLVED, CROSS_STATION,
-    assess_transfer, classify, layover_seconds,
+    NO_PLATFORM_DATA, STATION_UNRESOLVED, CROSS_STATION, IMPLAUSIBLE_WALK,
+    assess_transfer, classify, layover_seconds, walk_is_implausible,
     LiveTransfer, reassess,
 )
 
@@ -69,6 +69,19 @@ def test_layover_seconds():
 ])
 def test_classify(walk, layover, expected):
     assert classify(walk, layover, buffer_s=60) == expected
+
+
+@pytest.mark.parametrize("walk_m, gap_m, implausible", [
+    (144.0, 0.0, False),      # Munchen Ost 3->5, the longest real transfer measured
+    (650.0, 0.0, False),      # a long-but-real transfer stays under the 800 m cap
+    (2032.0, 167.0, True),    # the Koblenz 9->C bug: 'C' resolved to a bus stop 500 m away
+    (2032.0, 0.0, True),      # same walk, gap unknown -> still caught by the absolute cap
+    (1200.0, 400.0, False),   # far-apart platforms (gap 400) allow a proportionally long walk
+    (2100.0, 400.0, True),    # ... but not an arbitrarily long one (> 4*400 + 250)
+    (None, 100.0, False),     # no walk -> nothing to reject
+])
+def test_walk_is_implausible(walk_m, gap_m, implausible):
+    assert walk_is_implausible(walk_m, gap_m) is implausible
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +171,41 @@ def test_all_candidates_fail_surfaces_reason(monkeypatch):
            lambda *a, **k: {"found": False, "reason": "platform_not_found"})
     a = assess_transfer(_FakeConn(), **_base_kwargs())
     assert a.verdict == UNKNOWN and a.reason == "platform_not_found"
+
+
+def test_implausible_walk_rejected_not_reported(monkeypatch):
+    """A 'found' walk far longer than the platforms are apart (the Koblenz 9->C
+    shape: ref 'C' resolves to a bus stop ~500 m away, routed as a 2 km walk) is
+    a mis-resolution -- surfaced as `unknown`, never as a real walk."""
+    same = [StationMatch(3267269, "Koblenz Hauptbahnhof", 50.35, 7.59, 5.0)]
+    _patch(
+        monkeypatch,
+        lambda *a, **k: same,
+        lambda *a, **k: {"found": True, "walking_time_seconds": 1501.4, "walking_distance_meters": 2032.0},
+    )
+    # arr/dep coords ~170 m apart -> a 2 km "transfer" cannot be real
+    a = assess_transfer(_FakeConn(), **_base_kwargs(
+        arr_lat=50.350906, arr_lon=7.588375, dep_lat=50.349762, dep_lon=7.589902))
+    assert a.verdict == UNKNOWN and a.reason == IMPLAUSIBLE_WALK
+    assert a.walk_time_s is None and a.walk_distance_m is None
+
+
+def test_implausible_walk_does_not_block_a_later_real_candidate(monkeypatch):
+    """One candidate relation resolving a bogus far-away platform must not hide a
+    later candidate that routes a real, plausible transfer."""
+    cands = [StationMatch(1, "bogus wing", 50.1, 8.6, 5.0),
+             StationMatch(2, "real wing", 50.1, 8.6, 40.0)]
+
+    def finder(conn, relation_id, a, b, **k):
+        if relation_id == 1:
+            return {"found": True, "walking_time_seconds": 1400.0, "walking_distance_meters": 1900.0}
+        return {"found": True, "walking_time_seconds": 90.0, "walking_distance_meters": 120.0}
+
+    _patch(monkeypatch, lambda *a, **k: cands, finder)
+    a = assess_transfer(_FakeConn(), **_base_kwargs(
+        arr_time="2026-07-13T07:00:00Z", dep_time="2026-07-13T07:10:00Z"))
+    assert a.verdict == FEASIBLE
+    assert a.relation_id == 2 and a.walk_distance_m == 120.0
 
 
 # ---------------------------------------------------------------------------
@@ -320,3 +368,37 @@ def test_end_to_end_area_tagged_platforms_resolve():
     )
     assert a.verdict == FEASIBLE, f"got {a.verdict}/{a.reason}"
     assert a.walk_time_s and a.walk_time_s > 0
+
+
+@DB
+def test_end_to_end_koblenz_lettered_bus_platform_is_unknown_not_bogus_walk():
+    """Regression: Koblenz Hbf rail track 9 -> "track C". 'C' is a *bus* bay on
+    the forecourt, not a rail platform (rail tracks there are numbered). core/
+    used to resolve 'C' to a same-lettered bus stop ~500 m away and route a
+    2032 m / 1501 s "platform transfer" -- reported with reason=None as if real.
+
+    Two independent fixes must keep this an honest `unknown`: rail-only
+    station_stops (so 'C' finds no rail stop -> platform_not_found) and the
+    walk-plausibility guard (so any bogus far-away resolution is rejected ->
+    implausible_walk). Either way it must never come back as a valid ~1500 s
+    walk. The two platform coordinates are the real MOTIS stops, ~170 m apart."""
+    import db
+
+    conn = db.connect(connect_timeout=5)
+    a = assess_transfer(
+        conn,
+        arr_lat=50.350906, arr_lon=7.588375, arr_platform="9", arr_time="2026-07-14T08:00:00Z",
+        dep_lat=50.349762, dep_lon=7.589902, dep_platform="C", dep_time="2026-07-14T08:10:00Z",
+    )
+    assert a.station_name and "Koblenz" in a.station_name, a.station_name
+    assert a.verdict == UNKNOWN, f"expected unknown, got {a.verdict} ({a.walk_distance_m} m)"
+    # Any honest not-found reason is fine (the bug report lists several); the one
+    # that must never happen is a real-looking walk. Which fires depends on which
+    # of the two fixes catches it first: rail-only station_stops -> platform_not_found;
+    # the plausibility guard -> implausible_walk; a candidate whose search runs
+    # long -> exceeded_plausibility_bound / disconnected.
+    assert a.reason in (
+        IMPLAUSIBLE_WALK, "platform_not_found", "exceeded_plausibility_bound", "disconnected",
+    ), a.reason
+    # The whole point: no spuriously-large "valid" walk leaks out.
+    assert a.walk_time_s is None and a.walk_distance_m is None

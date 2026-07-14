@@ -22,13 +22,15 @@ def search(
     max_search_seconds: float = DEFAULT_MAX_SEARCH_SECONDS,
     progress_cb=None,
 ) -> Dict[str, Any]:
-    """max_search_seconds bounds runaway searches for genuinely disconnected
-    platforms directly in the units that matter (walking time), not a
-    straight-line proxy: since Dijkstra pops nodes in non-decreasing
-    distance order, once the popped distance exceeds the bound we know
-    every real path, if one exists at all, is already known to be
-    infeasible, so stopping there costs nothing a feasibility check would
-    have wanted anyway."""
+    """The search stops once the popped distance exceeds a cutoff, in the units
+    that matter (walking time): since Dijkstra pops nodes in non-decreasing
+    distance order, every real path is by then already known to be worse, so
+    stopping costs nothing a feasibility check would have wanted anyway. The
+    cutoff is the tighter of two bounds: max_search_seconds (a caller-controlled
+    compute budget for runaway searches on disconnected platforms) and
+    SearchContext.plausibility_bound_seconds() (a geometry bound that rejects a
+    ref resolved to a wrong, far-away feature). Both surface as
+    exceeded_plausibility_bound."""
     dist: Dict[int, float] = {}
     prev: Dict[int, Optional[int]] = {}
     prev_way: Dict[int, Optional[int]] = {}
@@ -41,6 +43,11 @@ def search(
         heapq.heappush(heap, (0.0, counter, s))
         counter += 1
 
+    # Give up past whichever is tighter: the caller's compute budget, or the
+    # geometry-derived bound on a plausible transfer (rejects a ref that resolved
+    # to a wrong, far-away feature -- see SearchContext.plausibility_bound_seconds).
+    cutoff = min(max_search_seconds, ctx.plausibility_bound_seconds())
+
     visited: set = set()
     expansions = 0
     t_start = time.monotonic()
@@ -49,7 +56,7 @@ def search(
         d, _, u = heapq.heappop(heap)
         if u in visited:
             continue
-        if d > max_search_seconds:
+        if d > cutoff:
             return ctx.build_not_found("exceeded_plausibility_bound", expansions, max_search_seconds=max_search_seconds)
         visited.add(u)
         expansions += 1

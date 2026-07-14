@@ -71,9 +71,15 @@ neither is on any imported way.
 
 ### Mechanism (BUILT)
 
-1. `station_stops` (`core/build_platform_index.py`) — every stop_position /
-   railway=stop node with a `ref`/`local_ref`, by coordinate. Resolve track *N*
-   to its coordinate near the station seed.
+1. `station_stops` (`core/build_platform_index.py`) — every **rail** stop_position
+   / railway=stop node with a `ref`/`local_ref`, by coordinate. Resolve track *N*
+   to its coordinate near the station seed. Bus/tram stops are excluded: their
+   letter/number refs (Verkehrsverbund bays "A"/"B"/"C" …) collide with rail
+   tracks, and two thirds of all European stop_position nodes with a ref are
+   bus/tram. Without the filter, Koblenz Hbf's rail-side departure "track C"
+   (actually a forecourt bus bay) resolved to a same-lettered bus stop 500 m away
+   and routed a bogus 2 km "platform transfer"; now it finds no rail `C` and fails
+   cleanly (`platform_not_found`). The index drops from ~112k rows to ~29k.
 2. **Snap** that coordinate to the nearest node that IS in the walkable graph,
    within `STOP_SNAP_RADIUS_M` (40 m) — the platform surface (a footway or a
    platform area) beside the track. This needed a general coordinate index on
@@ -111,8 +117,17 @@ These are genuine gaps, not resolution bugs — surfaced honestly as `unknown`:
 - **Bus/tram platforms.** MOTIS sometimes routes a transfer via a non-rail
   platform: **Köln Hbf tracks 87/88** are `highway=platform`/`public_transport=platform`
   **bus** bays (not near the rail station's geometry); **München Ost track 91** is
-  a **tram** platform. Different infrastructure and numbering scheme; neither tier
-  targets non-rail modes, and matching them would risk confidently-wrong walks.
+  a **tram** platform; **Koblenz Hbf "track C"** is a forecourt bus bay. Different
+  infrastructure and numbering scheme; neither tier targets non-rail modes, and
+  matching them would risk confidently-wrong walks. Three guards keep these honest
+  `unknown`s rather than bogus walks: `station_stops` is rail-only (above, so a
+  bus ref finds no rail stop); `SearchContext.plausibility_bound_seconds` makes
+  core/'s `exceeded_plausibility_bound` a real geometry bound on the *resolved*
+  platforms' separation (not a flat time budget), so a walk far longer than they
+  are apart is abandoned mid-search; and `api/transfers.walk_is_implausible`
+  applies the same test against the two platforms' *own MOTIS coordinates* — the
+  stronger signal, since a mis-resolution inflates the resolved endpoints but not
+  the journey's coordinates, which core/ never sees.
 - **`no_platform_data` (MOTIS side).** MOTIS omits the platform for a leg entirely
   (`p52→pNone`) — patchy and asymmetric even in DACH. There is no identifier to
   resolve; this is a data-source limit, not a `core/` concern, and is intentionally
