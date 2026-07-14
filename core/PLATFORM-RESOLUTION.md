@@ -49,7 +49,7 @@ the fallback is an index scan, not a seq scan.
 areas, no `platform_edge` — now routes (3→5 = 103.1 s, 1→4 = 32.0 s) where it
 previously returned `platform_not_found`.
 
-## Tier 2 — anchor on `stop_position` nodes (PROPOSED)
+## Tier 2 — anchor on `stop_position` nodes (BUILT)
 
 The biggest remaining pool is `stop_position` / `railway=stop` **nodes** (112k
 with a ref — 10× platform_edge). Every station that still fails Tier 1 was
@@ -69,29 +69,40 @@ them). They can't be used as search endpoints directly. Measured: Aarau's track-
 and track-5 stop nodes are **12.9 m apart** (a classic island platform) but
 neither is on any imported way.
 
-### Proposed mechanism
+### Mechanism (BUILT)
 
-1. Resolve track *N* → the `stop_position`/`railway=stop` node whose
-   `ref`/`local_ref` = *N*, near the station seed (a new indexed lookup; needs a
-   partial index on stop nodes' ref/local_ref, or a `station_stops` materialized
-   table analogous to `station_points`).
-2. **Snap** that node's coordinate to the nearest node that *is* in the walkable
-   graph (within ~25 m — the platform surface beside the track), and use that as
-   the search source/target. Reuses the existing proximity machinery.
-3. **Island-platform fast path**: if both tracks' stop nodes are < ~20 m apart
-   with no third track between them, return `feasible` directly — a cross-platform
-   step needs no routing (handles Aarau 4↔5 even where the platform surface isn't
-   mapped as a way at all).
+1. `station_stops` (`core/build_platform_index.py`) — every stop_position /
+   railway=stop node with a `ref`/`local_ref`, by coordinate. Resolve track *N*
+   to its coordinate near the station seed.
+2. **Snap** that coordinate to the nearest node that IS in the walkable graph,
+   within `STOP_SNAP_RADIUS_M` (40 m) — the platform surface (a footway or a
+   platform area) beside the track. This needed a general coordinate index on
+   `osm_nodes` (the DB otherwise had none, and `platform_nodes`-only snapping
+   missed footway-tagged platforms); the isolated track/stop nodes are skipped
+   because they touch no walkable way.
+3. Return the snap node's **whole** walkable way (so SearchContext loads real
+   geometry to traverse) but anchor the source/target to the single snap node
+   (tagged `_snap_anchor`), so two tracks on one island platform anchor to
+   *different* points — the real cross-platform walk, not a zero-distance overlap
+   of the shared way.
 
-### What it would unlock, and its limits
+Wired as the last fallback in `_find_platform_edges_near`, so platform_edge and
+platform-area stations are untouched (`test_ground_truth` 43/43 unchanged).
 
-Unlocks the large class of stations that carry track numbers only on stop nodes
-(Aarau, Olten, Basel SBB, …). **Bounded by** whether walkable platform geometry
-exists near the stop node to snap onto — where a station's platform surfaces
-aren't mapped as ways at all, only the island-platform fast path (step 3) can
-answer, and only for adjacent tracks. Effort: moderate `core/` change (new
-resolution strategy + a spatial snap + an index/table); it also needs the
-snap-target search to stay cheap per transfer.
+### Measured (BUILT)
+
+| station | tracks | tag reality | result |
+|---|---|---|---|
+| Basel SBB | 7→8 | platform ways lettered A–M; numbers on stop nodes | **26.8 m / 19.1 s** |
+| Aarau | 4→5 | island platform, footway surface | **15.8 m / 11.3 s** |
+| Aachen Hbf | 6→9 | underpass + two flights of stairs | **44.6 m / 51.5 s** |
+| Olten | 9→12 | platforms not linked by any mapped footway | `disconnected` (real OSM gap) |
+
+**Bounded by** whether *any* walkable geometry exists near the stop node and
+whether the platforms are actually connected in OSM (Olten's aren't — same class
+as Colmar's platform E). The separate island-platform fast path in the original
+design proved unnecessary: snapping to the nearest walkable node already handles
+island platforms (Aarau routes across the surface).
 
 ## Won't be fixed by either tier
 

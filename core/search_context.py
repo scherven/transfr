@@ -109,6 +109,84 @@ def find_platform_edges(ways: Ways, ref: str) -> List[Tuple[int, List[int]]]:
     ]
 
 
+# Tier 2: some stations record a track number only on a stop_position /
+# railway=stop NODE, which sits on the (un-imported) track and is isolated from
+# the walkable graph. We find that node by ref near the station, then snap its
+# coordinate to the nearest node that IS in the walkable graph within this radius
+# -- the platform surface (a footway or a platform area) beside the track -- and
+# route from there. See core/PLATFORM-RESOLUTION.md. Needs the station_stops table
+# and an osm_nodes coordinate index (core/build_platform_index.py).
+STOP_SNAP_RADIUS_M = 40.0
+
+# When a platform is resolved by snapping (Tier 2) we return the snap node's
+# WHOLE way -- so SearchContext loads real geometry to traverse -- but tag the
+# result with the single anchor node the source/target should actually be, so two
+# tracks on one island platform anchor to different points (the real cross-platform
+# walk) instead of the whole shared way collapsing to a zero-distance overlap.
+_ANCHOR_KEY = "_snap_anchor"
+
+
+def _nearest_stop_coord(cur, ref: str, bbox) -> Optional[Tuple[float, float]]:
+    """The coordinate of a stop_position/railway=stop node tagged with this track
+    ref, within the station-seed bbox -- i.e. 'where is track `ref` here'."""
+    min_lat, max_lat, min_lon, max_lon = bbox
+    cur.execute(
+        "SELECT lat, lon FROM station_stops "
+        "WHERE ref = %s AND lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+        (ref, min_lat, max_lat, min_lon, max_lon),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return None
+    clat, clon = (min_lat + max_lat) / 2, (min_lon + max_lon) / 2
+    best = min(rows, key=lambda r: haversine_meters(clat, clon, r["lat"], r["lon"]))
+    return (best["lat"], best["lon"])
+
+
+def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords):
+    """The walkable way owning the node nearest to (lat, lon) within
+    STOP_SNAP_RADIUS_M, as a full (way_id, nodes, tags) triple with its node
+    coords cached -- i.e. the platform surface (a footway or a platform area)
+    beside where this track's train stops.
+
+    The track's stop node is isolated (on the un-imported track), and so are any
+    other track nodes nearby, so we skip candidate nodes that touch no walkable
+    way; the first walkable one is the platform edge. We return that node's whole
+    way (not just the node) so SearchContext loads the real geometry to route
+    across; two different tracks usually own different ways, so the transfer is
+    the real platform-to-platform walk. (Two tracks on a single island platform
+    resolve to the same way and read as ~0 m -- correctly 'feasible', just not the
+    few-metre cross-platform figure.)"""
+    min_lat, max_lat, min_lon, max_lon = bbox_from_coords({0: (lat, lon)}, STOP_SNAP_RADIUS_M)
+    cur.execute(
+        "SELECT id, lat, lon FROM osm_nodes "
+        "WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+        (min_lat, max_lat, min_lon, max_lon),
+    )
+    rows = sorted(cur.fetchall(), key=lambda r: haversine_meters(lat, lon, r["lat"], r["lon"]))
+    for r in rows:
+        if haversine_meters(lat, lon, r["lat"], r["lon"]) > STOP_SNAP_RADIUS_M:
+            break
+        cur.execute("SELECT way_ids FROM node_way_ids WHERE node_id = %s", (r["id"],))
+        nw = cur.fetchone()
+        if not nw or not nw["way_ids"]:
+            continue
+        cur.execute(
+            f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {NOT_WALKABLE_WAY_SQL} LIMIT 1",
+            (list(nw["way_ids"]),),
+        )
+        w = cur.fetchone()
+        if w:
+            nodes = list(w["nodes"])
+            missing = [n for n in nodes if n not in coord_cache]
+            if missing:
+                cur.execute("SELECT id, lat, lon FROM osm_nodes WHERE id = ANY(%s)", (missing,))
+                for x in cur.fetchall():
+                    coord_cache[x["id"]] = (x["lat"], x["lon"])
+            return (w["id"], nodes, {**(w["tags"] or {}), _ANCHOR_KEY: r["id"]})
+    return None
+
+
 def _find_platform_edges_near(
     cur, ref: str, seed_nodes: set, coord_cache: Coords,
 ) -> List[Tuple[int, List[int], Dict[str, str]]]:
@@ -160,6 +238,14 @@ def _find_platform_edges_near(
         hit = _candidates_near(predicate_sql, param)
         if hit:
             return hit
+
+    # Tier 2: the ref wasn't on any platform way near the seed; it may live only
+    # on a stop_position node. Resolve that, then snap to the nearest platform.
+    stop = _nearest_stop_coord(cur, str(ref), bbox)
+    if stop is not None:
+        snapped = _nearest_walkable_way(cur, stop[0], stop[1], coord_cache)
+        if snapped is not None:
+            return [snapped]
     return []
 
 
@@ -258,10 +344,24 @@ class SearchContext:
             for n in set(nodes):
                 self.node_to_ways.setdefault(n, set()).add(way_id)
 
-        self.sources = {n for _, nodes, _ in self.edges_1 for n in nodes if n in self.coord_cache}
-        self.targets = {n for _, nodes, _ in self.edges_2 for n in nodes if n in self.coord_cache}
+        self.sources = self._anchor_nodes(self.edges_1)
+        self.targets = self._anchor_nodes(self.edges_2)
         if not self.sources or not self.targets:
             self.error = {"found": False, "reason": "no_coordinates_for_platform_nodes"}
+
+    def _anchor_nodes(self, edges) -> set:
+        """Source/target nodes for a resolved platform: the single snap anchor
+        when it was resolved by snapping (Tier 2 tags the edge with _ANCHOR_KEY),
+        else every platform node (platform_edge / platform-area matches)."""
+        out: set = set()
+        for _, nodes, tags in edges:
+            anchor = tags.get(_ANCHOR_KEY)
+            if anchor is not None:
+                if anchor in self.coord_cache:
+                    out.add(anchor)
+            else:
+                out.update(n for n in nodes if n in self.coord_cache)
+        return out
 
     def expand(self, u: int) -> None:
         """Fetch (and cache) every way touching node u, the first time u is

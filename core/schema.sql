@@ -134,3 +134,25 @@ CREATE TABLE IF NOT EXISTS station_points (
 );
 CREATE INDEX IF NOT EXISTS idx_station_points_lat ON station_points (lat);
 CREATE INDEX IF NOT EXISTS idx_station_points_lon ON station_points (lon);
+
+-- Tier-2 platform resolution (built by core/build_platform_index.py; consumed by
+-- core/search_context._find_platform_edges_near). Some stations record a track
+-- number only on a stop_position node, which sits on the (un-imported) track and
+-- is isolated from the walkable graph. station_stops maps "track N here" ->
+-- coordinate; we then snap that coordinate to the nearest node that IS in the
+-- walkable graph (via the osm_nodes coordinate index below) and route from there.
+-- See core/PLATFORM-RESOLUTION.md.
+CREATE TABLE IF NOT EXISTS station_stops (
+    node_id BIGINT PRIMARY KEY,
+    ref     TEXT NOT NULL,
+    lat     DOUBLE PRECISION NOT NULL,
+    lon     DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_station_stops_lat ON station_stops (lat);
+CREATE INDEX IF NOT EXISTS idx_station_stops_lon ON station_stops (lon);
+CREATE INDEX IF NOT EXISTS idx_station_stops_ref ON station_stops (ref);
+
+-- General node coordinate index: the spatial index the DB otherwise lacked, used
+-- to snap a track's isolated stop node to the nearest walkable node. ~73M rows.
+CREATE INDEX IF NOT EXISTS idx_osm_nodes_lat ON osm_nodes (lat);
+CREATE INDEX IF NOT EXISTS idx_osm_nodes_lon ON osm_nodes (lon);

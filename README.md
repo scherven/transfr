@@ -36,9 +36,10 @@ platform transfer is walkable within the layover (`feasible` / `tight` /
     curl 'localhost:5001/transfer?lat=48.0732&lon=7.3470&from_platform=A&to_platform=B'
 
 It reads the `core/` `transfr_eu` database (PG* env vars, see `core/db.py`). The
-coordinate-based station resolver needs the `station_points` centroid index:
+coordinate-based station resolver and the platform matcher need two index builds:
 
-    .venv/bin/python core/build_station_index.py     # ~333k rows; --rebuild to redo
+    .venv/bin/python core/build_station_index.py     # station_points (~333k rows)
+    .venv/bin/python core/build_platform_index.py    # station_stops + osm_nodes coord index (Tier 2)
 
 ## development
 
