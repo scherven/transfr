@@ -21,6 +21,7 @@ from graph import (
     collapse_port_path,
     haversine_meters,
     in_bbox,
+    is_elevator_way,
     is_vertical_node,
     is_walkable_way,
     node_vertical_kind,
@@ -323,9 +324,16 @@ class SearchContext:
     """
 
     def __init__(self, cur, relation_id: int, ref_1: str, ref_2: str, use_adjacency_table: bool = True,
-                 use_stitch_bridges: bool = False):
+                 use_stitch_bridges: bool = False, avoid_elevators: bool = False):
         self.cur = cur
         self.relation_id = relation_id
+        # Step-free routing: when True, neighbors() omits every elevator, both
+        # the way-mapped kind (highway/railway=elevator) and the node-mapped kind
+        # (a shared vertical node tagged as an elevator). The search then routes
+        # over stairs/escalators/ramps only -- or returns `disconnected` if the
+        # sole vertical link between the two platforms is an elevator. Off by
+        # default, so a normal search is byte-for-byte unchanged.
+        self.avoid_elevators = avoid_elevators
         # Opt-in synthetic stitch bridges (core/build_stitch_bridges.py): short
         # edges joining a pedestrian connector node that lies inside a platform
         # polygon to that platform, where OSM mapped them overlapping but sharing
@@ -573,6 +581,10 @@ class SearchContext:
             info = self.way_cache[way_id]
             nodes = info["nodes"]
             tags = info["tags"]
+            # Step-free routing: an elevator way is simply not traversable, as
+            # if it weren't in the graph.
+            if self.avoid_elevators and is_elevator_way(tags):
+                continue
             # Standing on a port, you can only leave along a way that is on
             # this level here; other-level ways are reachable only after a
             # vertical edge.
@@ -610,6 +622,10 @@ class SearchContext:
             levels = self._port_levels(u_node)
             if len(levels) >= 2:
                 kind = node_vertical_kind(self.node_tags[u_node])
+                # Step-free routing: a node-mapped elevator offers no vertical
+                # edges, so the search can't change level through it.
+                if self.avoid_elevators and kind == "elevator":
+                    return
                 for lvl in levels:
                     if lvl != u_level:
                         yield (u_node, lvl), vertical_transition_cost(kind, lvl - u_level), None

@@ -275,6 +275,14 @@ def way_speed_and_penalty(tags: Dict[str, str]) -> Tuple[float, float]:
     return WALKING_SPEED_MS, 0.0
 
 
+def is_elevator_way(tags: Dict[str, str]) -> bool:
+    """True iff a way is a traversable elevator (highway=elevator /
+    railway=elevator) -- the way-mapped counterpart to node_vertical_kind's
+    'elevator'. Used to exclude elevators when a search is run with
+    avoid_elevators (step-free routing)."""
+    return tags.get("highway") == "elevator" or tags.get("railway") == "elevator"
+
+
 def way_direction(tags: Dict[str, str]) -> int:
     """1 = forward-only (way's node order), -1 = backward-only, 0 = both."""
     conveying = tags.get("conveying")

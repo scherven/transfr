@@ -87,7 +87,7 @@ A single, coherent, click-through mobile prototype (not scattered mockups). 9 sc
 2. **Connections** — journey list, verdict-first.
 3. **The connection** — vertical timeline of legs + transfer cards.
 4. **Transfers** — swipeable carousel, one card per change (boarding + step-off cue).
-5. **3D walk** — level planes, path, coloured risers, turn-by-turn.
+5. **Walk views** — the three §7.6 representations in one screen (section overview · per-level plans · rotatable 3D), coloured risers, turn-by-turn. The 3D is a live orthographic orbit (real geometry, drag to rotate) standing in for the embedded `viz_render` scene.
 6. **AR** — mocked camera with the path overlaid + step-off instruction.
 7. **Live** — map, moving position, countdown to next transfer.
 8. **Settings** — step-free, walking pace, makeable %, buffer, theme, units, Live Activity, auto-AR.

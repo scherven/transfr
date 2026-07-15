@@ -108,3 +108,19 @@ def test_missing_coords_are_skipped():
     proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
     h = vx.way_node_heights([1, 2], coords, [1.0], proj)
     assert set(h) == {1}
+
+
+def test_node_levels_orient_a_reversed_level_list():
+    # A connector tagged level='1;2' whose nodes actually run L2 -> L1 (as
+    # Berlin Hbf escalator 269400497 is mapped). Without the per-node hint the
+    # level-list order wins and the endpoints render flipped (the "N"); with the
+    # endpoints' own level tags the slope follows the real floors.
+    coords = {1: (48.0, 7.0), 2: (48.0, 7.002)}
+    proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
+
+    flipped = vx.way_node_heights([1, 2], coords, [1.0, 2.0], proj)
+    assert flipped[1] == proj.z(1.0) and flipped[2] == proj.z(2.0)
+
+    oriented = vx.way_node_heights([1, 2], coords, [1.0, 2.0], proj, {1: 2.0, 2: 1.0})
+    assert oriented[1] == proj.z(2.0)  # node 1's own tag (L2) wins
+    assert oriented[2] == proj.z(1.0)  # node 2's own tag (L1) wins

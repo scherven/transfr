@@ -60,6 +60,7 @@ def find_shortest_path(
     algorithm: str = BASELINE,
     use_adjacency_table: bool = True,
     use_stitch_bridges: bool = False,
+    avoid_elevators: bool = False,
     **kwargs,
 ) -> Dict[str, Any]:
     """Find the true shortest (by walking time) path between two platform
@@ -85,7 +86,7 @@ def find_shortest_path(
     search_fn = ALGORITHMS[algorithm]
     with conn.cursor() as cur:
         ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_adjacency_table=use_adjacency_table,
-                            use_stitch_bridges=use_stitch_bridges)
+                            use_stitch_bridges=use_stitch_bridges, avoid_elevators=avoid_elevators)
         if ctx.error is not None:
             return ctx.error
         return search_fn(ctx, **kwargs)

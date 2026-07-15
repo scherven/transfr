@@ -171,10 +171,21 @@ class Projector:
 def way_node_heights(
     node_ids: List[int], coords: Dict[int, Tuple[float, float]],
     levels: List[float], proj: Projector,
+    node_levels: Optional[Dict[int, float]] = None,
 ) -> Dict[int, float]:
     """Per-node Z (metres) for one way. Flat if single-level; otherwise
     interpolated first->last along cumulative horizontal distance, so an
-    uneven-spaced staircase still slopes evenly between its two floors."""
+    uneven-spaced staircase still slopes evenly between its two floors.
+
+    A ';'-joined `level` tag (e.g. '1;2') is a SET of the levels the way spans,
+    NOT a sequence guaranteed to run in the way's node order -- OSM mappers
+    routinely tag '1;2' on a way whose nodes go high->low. Taken literally that
+    flips the endpoints' heights, so a connector renders sloping the wrong way
+    (the "N" a step-free Berlin Hbf 1->16 showed: escalator 269400497 is tagged
+    level=1;2 but its nodes run L2->L1). When the endpoint nodes carry their own
+    single `level` tag (node_levels), we orient the interpolation to THOSE --
+    the reliable per-node signal -- so the slope always matches the floors the
+    way actually connects."""
     present = [(n, coords[n]) for n in node_ids if n in coords]
     if not present:
         return {}
@@ -187,7 +198,14 @@ def way_node_heights(
     for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
         cum.append(cum[-1] + math.hypot(x1 - x0, y1 - y0))
     total = cum[-1] or 1.0
-    z0, z1 = proj.z(levels[0]), proj.z(levels[-1])
+    # Endpoint levels default to the way's level-list order, but a node's own
+    # `level` tag overrides it -- so a level list ordered opposite to the node
+    # order (level=1;2 on nodes running L2->L1) no longer reverses the slope.
+    l0, l1 = levels[0], levels[-1]
+    if node_levels:
+        l0 = node_levels.get(present[0][0], l0)
+        l1 = node_levels.get(present[-1][0], l1)
+    z0, z1 = proj.z(l0), proj.z(l1)
     return {present[i][0]: z0 + (z1 - z0) * (cum[i] / total) for i in range(len(present))}
 
 
@@ -274,13 +292,13 @@ def gather_details(bbox_lonlat: Tuple[float, float, float, float]) -> List[Dict]
                 })
                 return
             cat = next((c for c in POI_CATEGORIES if c in tags), None)
-            if cat and _keep_poi(cat, tags.get(cat)):  # a POI mapped as an area -> centroid
+            if cat and _keep_poi(cat, tags.get(cat)):  # a POI mapped as an area
                 clat = sum(p[0] for p in pts) / len(pts)
                 clon = sum(p[1] for p in pts) / len(pts)
                 feats.append({
                     "id": w.id, "kind": "poi", "category": cat, "subtype": tags.get(cat),
                     "name": tags.get("name"), "level_raw": tags.get("level"),
-                    "lat": clat, "lon": clon,
+                    "lat": clat, "lon": clon, "outline": pts,  # keep the real footprint
                 })
 
     Handler().apply_file(pbf, locations=True)
@@ -302,13 +320,14 @@ def export(
     algorithm: str = "astar", radius_m: float = 0.0,
     floor_height_m: float = DEFAULT_FLOOR_HEIGHT_M,
     details: bool = False, detail_radius_m: float = DEFAULT_DETAIL_RADIUS_M,
-    stitch: bool = False,
+    stitch: bool = False, avoid_elevators: bool = False,
 ) -> Dict:
     """Resolve the path, gather context ways, project to metres, return the
     renderer JSON as a dict."""
     with conn.cursor() as cur:
         name = _station_name(cur, relation_id)
-        ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch)
+        ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch,
+                            avoid_elevators=avoid_elevators)
         result = ctx.error if ctx.error is not None else ALGORITHMS[algorithm](ctx)
         print(result)
         # Combined geometry pool: everything the search touched, in lat/lon.
@@ -336,6 +355,25 @@ def export(
             cur.execute("SELECT id, tags FROM osm_nodes WHERE id = ANY(%s)", (result["node_path"],))
             path_node_tags = {row["id"]: row["tags"] or {} for row in cur.fetchall()}
 
+        # Orientation hint for rendering multi-level connectors: each endpoint's
+        # own single `level` tag. A way tagged level='1;2' spans two floors but
+        # its nodes may run high->low, so way_node_heights uses these per-node
+        # levels to orient the slope correctly (see its docstring). Only the
+        # endpoints of multi-level ways can be mis-oriented, so that's all we ask.
+        endpoint_ids: set = set()
+        for info in ways.values():
+            if len(parse_levels((info["tags"] or {}).get("level"))) > 1:
+                present = [n for n in info["nodes"] if n in coords]
+                if present:
+                    endpoint_ids.update((present[0], present[-1]))
+        node_levels: Dict[int, float] = {}
+        if endpoint_ids:
+            cur.execute("SELECT id, tags->>'level' AS lvl FROM osm_nodes WHERE id = ANY(%s)", (list(endpoint_ids),))
+            for row in cur.fetchall():
+                lv = parse_levels(row["lvl"])
+                if len(lv) == 1:
+                    node_levels[row["id"]] = lv[0]
+
     if not coords:
         raise SystemExit("no coordinates resolved -- is relation/ref correct?")
 
@@ -357,7 +395,7 @@ def export(
         tags = info["tags"] or {}
         levels = parse_levels(tags.get("level"))
         levels_seen.update(levels)
-        heights = way_node_heights(info["nodes"], coords, levels, proj)
+        heights = way_node_heights(info["nodes"], coords, levels, proj, node_levels)
         way_heights[wid] = heights
         pts = [[*proj.xy(*coords[n]), heights[n]] for n in info["nodes"] if n in coords]
         if len(pts) < 2:
@@ -478,15 +516,18 @@ def export(
         path_xy = [(p[0], p[1]) for p in path_json.get("points", [])] or [(0.0, 0.0)]
         for f in feats:
             z = proj.z(parse_levels(f.get("level_raw"))[0])
-            if "outline" in f:
+            if f["kind"] == "building":
                 pts = [[*proj.xy(la, lo), z] for la, lo in f["outline"]]
                 cx = sum(p[0] for p in pts) / len(pts)
                 cy = sum(p[1] for p in pts) / len(pts)
                 geom = {"points": [[round(v, 2) for v in p] for p in pts]}
-            else:
+            else:  # poi: a point, plus its real footprint when mapped as an area
                 x, y = proj.xy(f["lat"], f["lon"])
                 cx, cy = x, y
                 geom = {"xyz": [round(x, 2), round(y, 2), round(z, 2)]}
+                if f.get("outline"):
+                    opts = [[*proj.xy(la, lo), z] for la, lo in f["outline"]]
+                    geom["outline"] = [[round(v, 2) for v in p] for p in opts]
             dist = min(math.hypot(cx - px, cy - py) for px, py in path_xy)
             if dist > r:
                 continue
@@ -538,6 +579,9 @@ def main():
     ap.add_argument("--stitch", action="store_true",
                     help="enable synthetic stitch bridges (core/build_stitch_bridges.py): join a "
                          "connector that ends inside a platform polygon without a shared node")
+    ap.add_argument("--no-elevators", dest="avoid_elevators", action="store_true",
+                    help="step-free routing: never use an elevator (way- or node-mapped); "
+                         "route over stairs/escalators/ramps only")
     ap.add_argument("--detail-radius", type=float, default=DEFAULT_DETAIL_RADIUS_M,
                     help=f"how far out (metres) to gather details (<= {int(MAX_DETAIL_RADIUS_M)})")
     ap.add_argument("--out", default=None, help="output json path (default core/viz_out/<rel>_<ref1>_<ref2>.json)")
@@ -555,7 +599,7 @@ def main():
                       algorithm=args.algorithm, radius_m=args.radius,
                       floor_height_m=args.floor_height,
                       details=args.details, detail_radius_m=args.detail_radius,
-                      stitch=args.stitch)
+                      stitch=args.stitch, avoid_elevators=args.avoid_elevators)
     except KeyboardInterrupt:
         print("\ninterrupted before export completed; nothing written.", file=sys.stderr)
         return
