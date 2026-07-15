@@ -322,9 +322,17 @@ class SearchContext:
     `.sources` / `.targets`.
     """
 
-    def __init__(self, cur, relation_id: int, ref_1: str, ref_2: str, use_adjacency_table: bool = True):
+    def __init__(self, cur, relation_id: int, ref_1: str, ref_2: str, use_adjacency_table: bool = True,
+                 use_stitch_bridges: bool = False):
         self.cur = cur
         self.relation_id = relation_id
+        # Opt-in synthetic stitch bridges (core/build_stitch_bridges.py): short
+        # edges joining a pedestrian connector node that lies inside a platform
+        # polygon to that platform, where OSM mapped them overlapping but sharing
+        # no node. Off by default, so a search routes byte-for-byte as before
+        # unless a caller explicitly asks for the stitches. node -> [(partner, weight_s)].
+        self.use_stitch_bridges = use_stitch_bridges
+        self.bridges: Dict[int, List[Tuple[int, float]]] = {}
         # expand() has two implementations, selectable per-instance so both
         # can be benchmarked head to head against the same fixtures:
         #   True (default): point-lookup node_way_ids (see
@@ -412,6 +420,38 @@ class SearchContext:
         self.targets = self._anchor_nodes(self.edges_2)
         if not self.sources or not self.targets:
             self.error = {"found": False, "reason": "no_coordinates_for_platform_nodes"}
+            return
+        if self.use_stitch_bridges:
+            self._load_stitch_bridges()
+
+    def _load_stitch_bridges(self) -> None:
+        """Load synthetic stitch bridges near the resolved platforms into
+        `self.bridges` (bidirectional), caching each endpoint's coords so the
+        search and its heuristic can use them immediately. No-op if the table
+        hasn't been built."""
+        cur = self.cur
+        cur.execute("SELECT to_regclass('synthetic_bridges') AS t")
+        if cur.fetchone()["t"] is None:
+            return
+        anchors = {n: self.coord_cache[n] for n in (self.sources | self.targets) if n in self.coord_cache}
+        if not anchors:
+            return
+        min_lat, max_lat, min_lon, max_lon = bbox_from_coords(anchors, PLATFORM_EDGE_SEARCH_RADIUS_M)
+        cur.execute(
+            "SELECT b.node_a, b.node_b, b.dist_m, "
+            "na.lat AS a_lat, na.lon AS a_lon, nb.lat AS b_lat, nb.lon AS b_lon "
+            "FROM synthetic_bridges b "
+            "JOIN osm_nodes na ON na.id = b.node_a "
+            "JOIN osm_nodes nb ON nb.id = b.node_b "
+            "WHERE na.lat BETWEEN %s AND %s AND na.lon BETWEEN %s AND %s",
+            (min_lat, max_lat, min_lon, max_lon),
+        )
+        for r in cur.fetchall():
+            a, b, weight = r["node_a"], r["node_b"], r["dist_m"] / WALKING_SPEED_MS
+            self.coord_cache.setdefault(a, (r["a_lat"], r["a_lon"]))
+            self.coord_cache.setdefault(b, (r["b_lat"], r["b_lon"]))
+            self.bridges.setdefault(a, []).append((b, weight))
+            self.bridges.setdefault(b, []).append((a, weight))
 
     def _anchor_nodes(self, edges) -> set:
         """Source/target nodes for a resolved platform: the single snap anchor
@@ -552,6 +592,16 @@ class SearchContext:
                     dist = haversine_meters(*self.coord_cache[u_node], *self.coord_cache[v])
                     weight = dist / speed + penalty if speed > 0 else penalty
                     yield self._vertex(v, self._level_at(info, v)), weight, way_id
+
+        # Synthetic stitch bridges (opt-in): a short edge onto a platform whose
+        # polygon this node lies inside but shares no node with (see
+        # core/build_stitch_bridges.py). way_id None, like a vertical edge, so it
+        # drops out of the way_path. Both endpoints are plain platform/footway
+        # nodes; keyed on the raw node id so it fires whether u arrived plain or
+        # as a port.
+        for v, weight in self.bridges.get(u_node, ()):
+            if v in self.coord_cache:
+                yield v, weight, None
 
         # Explicit vertical edges: from this port to every other level the node
         # serves, priced by the mechanism. Only when the node genuinely spans

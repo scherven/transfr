@@ -175,3 +175,21 @@ CREATE INDEX IF NOT EXISTS idx_station_stops_ref ON station_stops (ref);
 -- to snap a track's isolated stop node to the nearest walkable node. ~73M rows.
 CREATE INDEX IF NOT EXISTS idx_osm_nodes_lat ON osm_nodes (lat);
 CREATE INDEX IF NOT EXISTS idx_osm_nodes_lon ON osm_nodes (lon);
+
+-- Synthetic stitch bridges (built by core/build_stitch_bridges.py; consumed by
+-- core/search_context when use_stitch_bridges=True). A one-edge join from a
+-- pedestrian connector node lying INSIDE a platform polygon to that platform,
+-- for the ~5% of platform areas OSM mapped overlapping but sharing no node
+-- (Colmar A->E: the underpass footways/stairs/elevator end inside the platform
+-- polygon but share no node, so the search can't step across). Opt-in, so
+-- default routing is unchanged. See core/build_stitch_bridges.py for the
+-- point-in-polygon / pedestrian-only / level-compatible safety guardrails.
+CREATE TABLE IF NOT EXISTS synthetic_bridges (
+    node_a       BIGINT NOT NULL,   -- pedestrian connector node, inside the platform
+    node_b       BIGINT NOT NULL,   -- nearest node of the platform polygon
+    dist_m       DOUBLE PRECISION NOT NULL,
+    platform_way BIGINT NOT NULL,
+    PRIMARY KEY (node_a, node_b)
+);
+CREATE INDEX IF NOT EXISTS idx_synthetic_bridges_a ON synthetic_bridges (node_a);
+CREATE INDEX IF NOT EXISTS idx_synthetic_bridges_b ON synthetic_bridges (node_b);

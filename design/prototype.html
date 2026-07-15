@@ -480,7 +480,10 @@
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h7"/></svg>Type it
                 </button>
                 <button data-mode="paste">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Paste a link
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>Paste link
+                </button>
+                <button data-mode="walk">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 4.5a1.5 1.5 0 1 0 0-.01M11 21l1.5-6-3-2 1-5 3 2 2 1M8.5 13.5L7 21"/></svg>Walk only
                 </button>
               </div>
 
@@ -543,8 +546,38 @@
                 </div>
               </div>
 
-              <button class="cta" data-go="results">
-                Find connections
+              <!-- walk-only mode: station + two platform refs, no journey -->
+              <div id="modeWalk" style="display:none;flex-direction:column;gap:14px">
+                <div class="field">
+                  <span class="dot" style="background:var(--accent)"></span>
+                  <div class="fstack">
+                    <span class="fstack-lab">Station</span>
+                    <input value="Berlin Hbf" aria-label="Station" spellcheck="false">
+                  </div>
+                </div>
+                <div style="display:flex;gap:8px;align-items:stretch">
+                  <div class="field" style="flex:1">
+                    <div class="fstack">
+                      <span class="fstack-lab">From platform</span>
+                      <input value="1" aria-label="From platform" spellcheck="false" placeholder="e.g. 5a">
+                    </div>
+                  </div>
+                  <span class="plat-arrow" style="align-self:center;flex:0 0 auto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+                  <div class="field" style="flex:1">
+                    <div class="fstack">
+                      <span class="fstack-lab">To platform</span>
+                      <input value="16" aria-label="To platform" spellcheck="false" placeholder="e.g. Gl 1">
+                    </div>
+                  </div>
+                </div>
+                <div class="paste-note" style="padding:0 2px">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+                  <span>Any two platforms at one station — we draw the walk between them. No trip, no train, no verdict: just the route, timed at your pace. Platform names are free-form (<span class="mono">5a</span>, <span class="mono">Gl 1</span>).</span>
+                </div>
+              </div>
+
+              <button class="cta" id="planCta" data-go="results">
+                <span id="planCtaLabel">Find connections</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
               </button>
             </div>
@@ -1177,6 +1210,108 @@
             </div>
           </section>
 
+          <!-- ========== WALK LOOKUP (direct, verdict-free) ========== -->
+          <section class="screen" id="s-walklookup">
+            <div class="scr">
+              <div class="topbar">
+                <button class="chev" data-go="input" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
+                <div>
+                  <h2>Berlin Hbf</h2>
+                  <div class="sub mono">Platform 1 → 16 · 107 m · 2:02</div>
+                </div>
+              </div>
+
+              <!-- no verdict here, so the facts lead -->
+              <div class="walk-stats">
+                <div class="tstat"><span class="k">Walk time</span><span class="v">2:02</span></div>
+                <div class="tstat"><span class="k">Distance</span><span class="v">107 m</span></div>
+                <div class="tstat"><span class="k">Level Δ</span><span class="v">+4</span></div>
+              </div>
+
+              <div class="tc-levels" style="background:var(--go-soft)">
+                <span class="lvl-ic" style="background:var(--go-soft);color:var(--go)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="4.5" r="2"/><path d="M7 9h10M12 9v6M9 20l3-6 3 6"/></svg></span>
+                <span class="txt"><b>Step-free the whole way</b> — escalator up to the concourse, then the lift to Pl 16. (Step-free is on in Settings.)</span>
+              </div>
+
+              <div class="stage3d">
+                <svg viewBox="0 0 340 210" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="pathG2" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0" stop-color="var(--accent)" stop-opacity=".55"/>
+                      <stop offset="1" stop-color="var(--accent)"/>
+                    </linearGradient>
+                    <filter id="glow2"><feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+                  </defs>
+                  <!-- level reference planes -->
+                  <line x1="20" y1="56" x2="320" y2="56" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4"/>
+                  <line x1="20" y1="124" x2="320" y2="124" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4"/>
+                  <line x1="20" y1="189" x2="320" y2="189" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4"/>
+                  <text x="24" y="50" font-size="8" font-family="var(--mono)" fill="var(--ink-3)">L+2 · Stadtbahn (Pl 11–16)</text>
+                  <text x="24" y="118" font-size="8" font-family="var(--mono)" fill="var(--ink-3)">L0 · main concourse</text>
+                  <text x="24" y="183" font-size="8" font-family="var(--mono)" fill="var(--ink-3)">L−2 · Pl 1–8 (N–S)</text>
+                  <!-- floor slabs -->
+                  <rect x="40" y="176" width="95" height="9" rx="2" fill="var(--panel-3)"/>
+                  <rect x="96" y="116" width="180" height="9" rx="2" fill="var(--panel-3)"/>
+                  <rect x="205" y="48" width="100" height="9" rx="2" fill="var(--panel-3)"/>
+                  <!-- context way (faint) -->
+                  <line x1="135" y1="120" x2="250" y2="120" stroke="var(--line)" stroke-width="6" stroke-linecap="round" opacity=".5"/>
+                  <!-- the PATH -->
+                  <g filter="url(#glow2)">
+                    <path d="M62 176 L98 176 L128 120 L250 120 L250 56 L285 56"
+                          fill="none" stroke="url(#pathG2)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  </g>
+                  <!-- escalator riser -->
+                  <path d="M98 176 L128 120" stroke="var(--esc)" stroke-width="5" stroke-linecap="round"/>
+                  <g stroke="#fff" stroke-width="1" opacity=".8">
+                    <line x1="104" y1="164" x2="109" y2="166"/><line x1="110" y1="152" x2="115" y2="154"/><line x1="116" y1="140" x2="121" y2="142"/><line x1="122" y1="128" x2="127" y2="130"/>
+                  </g>
+                  <!-- elevator riser -->
+                  <path d="M250 120 L250 56" stroke="var(--elev)" stroke-width="6" stroke-linecap="round"/>
+                  <g stroke="#fff" stroke-width="1.4" fill="none" opacity=".85">
+                    <path d="M246 92 l4 -5 l4 5"/><path d="M246 78 l4 -5 l4 5"/>
+                  </g>
+                  <!-- endpoints -->
+                  <circle cx="62" cy="176" r="6" fill="var(--go)" stroke="var(--panel)" stroke-width="2.5"/>
+                  <circle cx="285" cy="56" r="6" fill="var(--accent)" stroke="var(--panel)" stroke-width="2.5"/>
+                  <rect x="38" y="154" width="50" height="17" rx="5" fill="var(--panel)" stroke="var(--line)"/>
+                  <text x="63" y="166" font-size="9" font-weight="700" font-family="var(--mono)" fill="var(--ink)" text-anchor="middle">Pl 1 · L−2</text>
+                  <rect x="258" y="30" width="54" height="17" rx="5" fill="var(--panel)" stroke="var(--line)"/>
+                  <text x="285" y="42" font-size="9" font-weight="700" font-family="var(--mono)" fill="var(--accent-ink)" text-anchor="middle">Pl 16 · L+2</text>
+                </svg>
+                <div class="walk-legend">
+                  <span class="lg"><i style="background:var(--accent)"></i>Your path</span>
+                  <span class="lg"><i style="background:var(--esc)"></i>Escalator</span>
+                  <span class="lg"><i style="background:var(--elev)"></i>Elevator</span>
+                </div>
+              </div>
+
+              <div class="steps">
+                <div class="eyebrow">Turn by turn</div>
+                <div class="step">
+                  <span class="step-ic" style="background:var(--go)"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg></span>
+                  <div><div class="step-t">Start on <b>Platform 1</b> — lower level</div><div class="step-s">N–S platforms · level −2 · head for the escalators</div></div>
+                </div>
+                <div class="step">
+                  <span class="step-ic" style="background:var(--esc)"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2"><path d="M4 18h4v-4h4v-4h4V6h4"/></svg></span>
+                  <div><div class="step-t"><b>Escalator up</b> to the main concourse</div><div class="step-s">level −2 → 0</div></div>
+                </div>
+                <div class="step">
+                  <span class="step-ic" style="background:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+                  <div><div class="step-t">Cross the concourse toward the <b>Pl 11–16 lifts</b></div><div class="step-s">≈70 m · level 0</div></div>
+                </div>
+                <div class="step">
+                  <span class="step-ic" style="background:var(--elev)"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="6" y="3" width="12" height="18" rx="2"/><path d="M12 7l-2 2h4zM12 17l-2-2h4z"/></svg></span>
+                  <div><div class="step-t">Take the <b>lift up</b> to Platform 16</div><div class="step-s">level 0 → +2 · upper Stadtbahn</div></div>
+                </div>
+              </div>
+
+              <div class="walk-hint" style="padding:0 4px">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5v10l-9 5-9-5V7z"/><path d="M12 12l9-5M12 12v10M12 12L3 7"/></svg>
+                Direct walk lookup — you gave a station and two platforms, so there's no train, layover, or <b>verdict</b> here. Just the route, from the same <b>core/</b> <span class="mono">viz_export</span> every transfer walk uses.
+              </div>
+            </div>
+          </section>
+
         </div><!-- /viewport -->
         <div class="homebar"></div>
       </div>
@@ -1184,8 +1319,8 @@
 
     <!-- NAVIGATOR -->
     <nav class="navigator" id="navigator">
-      <div class="nav-h">Prototype · 8 screens</div>
-      <button class="nav-item on" data-nav="input"><span class="ni-n">01</span><span class="ni-t">Plan a trip<div class="ni-d">link or type · editable</div></span></button>
+      <div class="nav-h">Prototype · 9 screens</div>
+      <button class="nav-item on" data-nav="input"><span class="ni-n">01</span><span class="ni-t">Plan a trip<div class="ni-d">link · type · walk-only</div></span></button>
       <button class="nav-item" data-nav="results"><span class="ni-n">02</span><span class="ni-t">Connections<div class="ni-d">verdict at a glance</div></span></button>
       <button class="nav-item" data-nav="journey"><span class="ni-n">03</span><span class="ni-t">The connection<div class="ni-d">timeline + transfers</div></span></button>
       <button class="nav-item" data-nav="carousel"><span class="ni-n">04</span><span class="ni-t">Transfers<div class="ni-d">swipeable carousel</div></span></button>
@@ -1193,6 +1328,7 @@
       <button class="nav-item" data-nav="ar"><span class="ni-n">06</span><span class="ni-t">AR mode<div class="ni-d">path over the world</div></span></button>
       <button class="nav-item" data-nav="live"><span class="ni-n">07</span><span class="ni-t">Live tracking<div class="ni-d">countdown to change</div></span></button>
       <button class="nav-item" data-nav="settings"><span class="ni-n">08</span><span class="ni-t">Settings<div class="ni-d">step-free · makeable %</div></span></button>
+      <button class="nav-item" data-nav="walklookup"><span class="ni-n">09</span><span class="ni-t">Walk lookup<div class="ni-d">station → 2 platforms</div></span></button>
       <div class="nav-note">Tap a screen, or move through the phone itself — every <b>back</b> chevron and button is wired.</div>
     </nav>
   </div>
@@ -1204,7 +1340,7 @@
 
 <script>
 (function(){
-  var order = ["input","results","journey","carousel","walk","ar","live","settings"];
+  var order = ["input","results","journey","carousel","walk","ar","live","settings","walklookup"];
   function idx(n){ return order.indexOf(n); }
 
   function setNav(id){
@@ -1256,6 +1392,7 @@
 
   // input mode toggle
   var seg=document.getElementById("inputSeg");
+  var planCta=document.getElementById("planCta"), planCtaLabel=document.getElementById("planCtaLabel");
   seg.addEventListener("click", function(e){
     var b=e.target.closest("button"); if(!b) return;
     seg.querySelectorAll("button").forEach(function(x){x.classList.remove("on")});
@@ -1263,6 +1400,10 @@
     var m=b.getAttribute("data-mode");
     document.getElementById("modeType").style.display = m==="type"?"flex":"none";
     document.getElementById("modePaste").style.display = m==="paste"?"flex":"none";
+    document.getElementById("modeWalk").style.display = m==="walk"?"flex":"none";
+    // walk-only skips the journey spine and goes straight to the walk view
+    planCta.setAttribute("data-go", m==="walk"?"walklookup":"results");
+    planCtaLabel.textContent = m==="walk"?"Show the walk":"Find connections";
   });
 
   // swap from/to

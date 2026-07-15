@@ -1,6 +1,6 @@
 # Transfr — Design Document
 
-> **Status:** living design doc · v0.2 · 2026-07-13
+> **Status:** living design doc · v0.3 · 2026-07-15
 > **Prototype:** [`design/prototype.html`](prototype.html) (open it in any browser; no build step). Live copy: `https://claude.ai/code/artifact/4657fc18-96b4-497a-b05d-3cc238985bd0` (private).
 > **Backlog / product ideas:** [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 
@@ -66,6 +66,7 @@ Every screen is a view over data the backend already produces. This is deliberat
 | Transfer verdict (`feasible`/`tight`/`infeasible`/`unknown`) + walk time/distance | `api/transfers.py`, per change-of-train, rolled up worst-wins |
 | Platform-to-platform walk (distance, level changes) | `core/` pathfinder (`find_shortest_path`, `search_context.py`) |
 | 3D walk geometry (levels, stairs/escalator/elevator risers) | `core/viz_export.py` JSON contract (the "AR contract", see `core/VIZ.md`) |
+| Direct walk lookup (station + two platform refs → walk view, no journey) | `core/` pathfinder + `viz_export` directly, bypassing `/journeys` and the verdict (see §6.9/§7.10) |
 | Boarding position (which coach/sector → where you alight) | `core/boarding.py` (seat→offset→point) + `core/formation_model.py` (sector map) |
 | "no platform feed" / `unknown` reasons | `api/transfers.py` reasons; `no_platform_data`, `cross_station`, `platform_not_found` |
 | Station autocomplete | `/stations` |
@@ -80,9 +81,9 @@ Key properties inherited from the engine that the design must respect:
 
 ## 3. The prototype: what exists
 
-A single, coherent, click-through mobile prototype (not scattered mockups). 8 screens, all wired — every back chevron, button, the carousel swipe, the theme toggle, the settings controls, and the live countdown work.
+A single, coherent, click-through mobile prototype (not scattered mockups). 9 screens, all wired — every back chevron, button, the carousel swipe, the theme toggle, the settings controls, and the live countdown work.
 
-1. **Plan** — link-paste or type; everything editable. Gear → Settings.
+1. **Plan** — link-paste, type, or **walk-only** (§6.9); everything editable. Gear → Settings.
 2. **Connections** — journey list, verdict-first.
 3. **The connection** — vertical timeline of legs + transfer cards.
 4. **Transfers** — swipeable carousel, one card per change (boarding + step-off cue).
@@ -90,6 +91,7 @@ A single, coherent, click-through mobile prototype (not scattered mockups). 8 sc
 6. **AR** — mocked camera with the path overlaid + step-off instruction.
 7. **Live** — map, moving position, countdown to next transfer.
 8. **Settings** — step-free, walking pace, makeable %, buffer, theme, units, Live Activity, auto-AR.
+9. **Walk lookup** — station + two platform refs → the walk view directly, verdict-free (the §6.9 door; Berlin Hbf 1→16 as the multi-level example).
 
 The **Hamburg → Stuttgart** ICE journey is the running example, with **Göttingen 7→8** (feasible, cross-platform) and **Mannheim 4→5** (tight; stairs → underpass → stairs) as the deliberate throughline — the change that's fine on paper but tight in practice, and therefore the one that justifies the 3D map and AR.
 
@@ -136,14 +138,17 @@ Inline SVG line icons, ~1.5–2.4 stroke, no fills — consistent weight with th
 ## 5. Information architecture & flow
 
 ```
-Plan ──▶ Connections ──▶ The connection ──▶ Transfers ──▶ 3D walk ⇄ AR
- │                            │                              
- └▶ Settings                  └▶ Live  ──▶ (Preview) ──▶ Transfers
+Plan ─┬▶ Connections ──▶ The connection ──▶ Transfers ──▶ 3D walk ⇄ AR
+      │                       │                              ▲
+      ├▶ Settings             └▶ Live ──▶ (Preview) ──▶ Transfers
+      │                                                      │
+      └▶ Walk lookup (station + platform A + platform B) ────┘
 ```
 
 - The **spine** is Plan → Connections → The connection. From the connection you branch to the **transfer carousel** (browse all changes) or **Live** (the on-trip mode).
 - **3D walk ⇄ AR** are two representations of the same transfer and toggle between each other.
 - **Live** is reachable directly (it's where the app spends most of its time) and deep-links into a transfer preview.
+- **Walk lookup** is a **second entry door on Plan** (§6.9): pick a station and two platform refs and jump *straight* to the walk view, bypassing the journey spine entirely. It reuses the exact walk screen the transfer path lands on; it just arrives there without a journey, layover, or verdict behind it.
 - **Settings** hangs off the home screen (gear) — not in the main flow.
 
 **Decision:** browsing (carousel) and doing (Live's single "next thing") are separate modes. The carousel is for pre-trip understanding; Live collapses to just the next action. `[provisional]`
@@ -184,6 +189,15 @@ All reflect `viz_export`'s "Z = level, not elevation" honestly (labelled, evenly
 
 ### 6.8 Settings
 - Grouped: **Getting around** (step-free toggle, walking pace, prefer-escalators), **Making the connection** (the makeable % slider + boarding buffer), **Appearance** (theme, units), **On the move** (Live Activity, auto-AR lead time).
+
+### 6.9 Walk lookup (direct platform-to-platform)
+A minimal, verdict-free door for "I just want to see the walk." A second tab/mode on **Plan** (§6.1): **one station** (with `/stations` autocomplete) and **two platform refs** — free-text/pickers over the arbitrary-string refs (`'Gl 1'`, `'5a'`, `'Regio 3'`), never integer steppers. A single **Show walk** action resolves both refs and lands directly on the walk view (§6.5) — section overview / per-level / rotatable 3D — with turn-by-turn.
+- **Why it exists:** the walk view is fed by one `viz_export` JSON, which `core/` produces from `(station, platform A, platform B)` alone. None of the journey machinery (timetable, layover, arriving/departing trains) is needed to draw a walk, so exposing it directly is nearly free and serves a real use — scoping out an unfamiliar station, checking a step-free route, or answering "how bad is that change?" without booking anything.
+- **What it drops vs the transfer path:**
+  - **No verdict.** With no layover there's nothing for `feasible/tight/infeasible` to measure, so the feasibility ring is absent. The screen leads with the *facts* instead — distance, walk time (at the Settings pace), level Δ, connector kinds. This is the one place the walk view appears without a verdict driving it (§7.10).
+  - **No boarding / step-off** (§7.3–7.4): no arriving train ⇒ no seat offset or sector to aim for.
+- **Reuses everything else:** step-free routing, walking-pace, units and theme (§7.9) all apply unchanged, since they live in `core/` routing + presentation, not in the verdict.
+- **Honest gaps still hold** (§7.5): an unmapped or `disconnected` platform pair reports *why* (`platform_not_found`, `disconnected`) rather than inventing a path — the same reasons the transfer path surfaces.
 
 ---
 
@@ -241,6 +255,13 @@ Prioritised to the cheap, high-value ones given the data:
 - **Step-free routing** — near-free: connectors are already typed, so it's a routing weight profile that excludes/penalises stairs. Big accessibility + luggage win.
 - **Makeable %** (§7.2), **boarding buffer** (the backend's ~60 s), **walking pace** (scales walk time), **prefer escalators**, **units**, **theme** (System/Light/Dark, actually functional), **Live Activity**, **auto-AR lead time**.
 
+### 7.10 Direct walk lookup — the verdict-free door  `[provisional]`
+A second, minimal entry point (§6.9): station + two platform refs → the walk view, with no journey, layover, or verdict. It falls out of the same seam that makes §7.6 cheap — the walk view depends only on a `viz_export` JSON, and `core/` produces that from two resolved platform endpoints without any timetable input.
+- **Why keep it separate from the journey spine rather than folding it in:** the two modes answer different questions — the spine answers *"will I make this connection?"* (verdict-first, §1), the lookup answers *"what does this walk look like?"* (wayfinding-first). Bolting a fake layover onto a lookup just to force a verdict would violate §7.5 (honest gaps) and §7.1 (verdict is the hero *when there is one to earn*).
+- **The design tension it introduces:** every other screen makes the verdict the hero (§1, D1). The lookup is the one screen where the walk stands alone. Resolution: the walk view already renders fully without a verdict pill (the ring is a *layer*, not the frame), so the lookup simply omits that layer and promotes the raw facts (distance / time / level Δ / connectors) to the top. It reads as "the walk view, minus the countdown pressure," not as a different screen.
+- **Reuse, not a new subsystem:** same resolver (the platform-ref resolution ladder from `formation_model`/transfer path), same `viz_export`, same three renderers, same Settings (step-free, pace, units). The only net-new surface is the input mode on Plan.
+- **Open:** whether the lookup should optionally accept a coach/seat to restore the step-off cue (§7.4) for a user who *does* know their train but doesn't want the full journey flow — a cheap add, deferred until the base lookup ships. See §11.
+
 ---
 
 ## 8. Content & voice
@@ -284,6 +305,7 @@ Detail and code-grounding for each in [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 5. **Name normalisation** — resolve link-imported stops to stop-ids before hitting `/journeys`. §9.
 6. **Uppercase micro-labels** — keep the signage texture, or go sentence-case for calm? §4.2.
 7. **Direct vs multi-modal** — the prototype is rail-only; do we show the walk to the *first* platform / from the *last*?
+8. **Walk lookup + coach** — should the verdict-free lookup (§6.9/§7.10) optionally take a coach/seat to restore the step-off cue, for a user who knows their train but skips the journey flow? §7.10.
 
 ---
 
@@ -311,6 +333,7 @@ Detail and code-grounding for each in [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 | D18 | Rotatable 3D = the real `viz_render` scene, embedded (WKWebView → SceneKit) | Reuse the built viewer; one `viz_export` JSON feeds every renderer | locked |
 | D19 | Reject the CSS stacked-plate "3D overview" | Not real geometry; illegible under rotation | locked |
 | D20 | Z = level, not elevation, stated honestly (×3 exaggeration) | OSM carries no usable indoor `ele`, per `VIZ.md` | locked |
+| D21 | Direct walk lookup (station + two platform refs), verdict-free, as a second Plan door | Walk view needs only a `viz_export` from two endpoints — no journey/layover; serves "just show the walk" nearly free (§6.9/§7.10) | provisional |
 
 ---
 

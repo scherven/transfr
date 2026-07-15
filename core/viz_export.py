@@ -302,14 +302,15 @@ def export(
     algorithm: str = "astar", radius_m: float = 0.0,
     floor_height_m: float = DEFAULT_FLOOR_HEIGHT_M,
     details: bool = False, detail_radius_m: float = DEFAULT_DETAIL_RADIUS_M,
+    stitch: bool = False,
 ) -> Dict:
     """Resolve the path, gather context ways, project to metres, return the
     renderer JSON as a dict."""
     with conn.cursor() as cur:
         name = _station_name(cur, relation_id)
-        ctx = SearchContext(cur, relation_id, ref_1, ref_2)
+        ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch)
         result = ctx.error if ctx.error is not None else ALGORITHMS[algorithm](ctx)
-
+        print(result)
         # Combined geometry pool: everything the search touched, in lat/lon.
         ways: Dict[int, Dict] = {wid: dict(info) for wid, info in ctx.way_cache.items()}
         coords: Dict[int, Tuple[float, float]] = dict(ctx.coord_cache)
@@ -379,13 +380,28 @@ def export(
         def hop_way(a, b):
             return way_for_hop(a, b, ctx.way_cache, ctx.node_to_ways)
 
+        def best_z(node):
+            """The node's height from any real way it belongs to -- used when a
+            hop has no way of its own (a stitch bridge) so the node still sits on
+            its true level instead of being flattened to the ground plane."""
+            for wid in ctx.node_to_ways.get(node, ()):
+                heights = way_heights.get(wid)
+                if heights and node in heights:
+                    return heights[node]
+            return proj.z(0.0)
+
         def node_z(node, wid):
             if wid is not None and node in way_heights.get(wid, {}):
                 return way_heights[wid][node]
-            return proj.z(0.0)
+            return best_z(node)
 
         pts = []
         transitions = []
+        # A "stitch" hop walks a synthetic bridge (core/build_stitch_bridges.py):
+        # it has NO OSM way of its own (way None) between two distinct nodes. That
+        # is the one segment of the route we INFERRED rather than read off a mapped
+        # footpath, so it's exported as its own category for the renderer to flag.
+        stitch_segments = []
         prev_node = prev_z = None
         for a, b in zip(node_path, node_path[1:]):
             wid = hop_way(a, b)
@@ -406,9 +422,14 @@ def export(
                     "to": pa,
                 })
             pts.append(pa)
+            if wid is None and a != b:
+                stitch_segments.append({
+                    "from": pa, "to": pb,
+                    "length_m": round(math.hypot(xa - xb, ya - yb), 1),
+                })
             # Within-hop level change: the hop walks a connector *way* that
             # slopes between floors (stairs/escalator/ramp). Classify from it.
-            if abs(za - zb) > 0.01:
+            elif abs(za - zb) > 0.01:
                 wtags = ways.get(wid, {}).get("tags", {}) or {}
                 transitions.append({
                     "kind": way_kind(wtags, parse_levels(wtags.get("level"))),
@@ -424,6 +445,7 @@ def export(
             "way_ids": result["way_path"],
             "points": pts,
             "transitions": transitions,
+            "stitch_segments": stitch_segments,
             "walking_time_seconds": result["walking_time_seconds"],
             "walking_distance_meters": result["walking_distance_meters"],
             "endpoints": {
@@ -482,6 +504,8 @@ def export(
             "ref_2": ref_2,
             "algorithm": algorithm,
             "context_mode": context_mode,
+            "stitched": stitch,
+            "n_stitches": len(path_json.get("stitch_segments", [])),
             "floor_height_m": floor_height_m,
             "z_is_level_not_elevation": True,
             "origin_lat": lat0,
@@ -511,6 +535,9 @@ def main():
     ap.add_argument("--details", action="store_true",
                     help="also gather nearby buildings + POIs (landmarks/stores) from the local "
                          "planet extract, for the render's detail slider (slow once, then cached)")
+    ap.add_argument("--stitch", action="store_true",
+                    help="enable synthetic stitch bridges (core/build_stitch_bridges.py): join a "
+                         "connector that ends inside a platform polygon without a shared node")
     ap.add_argument("--detail-radius", type=float, default=DEFAULT_DETAIL_RADIUS_M,
                     help=f"how far out (metres) to gather details (<= {int(MAX_DETAIL_RADIUS_M)})")
     ap.add_argument("--out", default=None, help="output json path (default core/viz_out/<rel>_<ref1>_<ref2>.json)")
@@ -527,7 +554,8 @@ def main():
         data = export(conn, args.relation, args.ref1, args.ref2,
                       algorithm=args.algorithm, radius_m=args.radius,
                       floor_height_m=args.floor_height,
-                      details=args.details, detail_radius_m=args.detail_radius)
+                      details=args.details, detail_radius_m=args.detail_radius,
+                      stitch=args.stitch)
     except KeyboardInterrupt:
         print("\ninterrupted before export completed; nothing written.", file=sys.stderr)
         return
