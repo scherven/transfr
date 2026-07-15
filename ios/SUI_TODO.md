@@ -22,7 +22,7 @@ driven by the real `api/` service (and the live-delay feed).
 | 2 | Connections | `ResultsView.swift` | 🟢 | Fully from `/journeys`. |
 | 3 | The connection | `JourneyView.swift` | 🟢 | Legs/transfers/delays from live data. |
 | 4 | Transfers (carousel) | `CarouselView.swift` | 🟠 | Core stats live; **boarding module is illustrative** (§3 below). |
-| 5 | Walk views | `WalkView.swift` | 🟡 | Section/Levels are schematic; real `viz_export` is fetched but **not drawn**. |
+| 5 | Walk views | `WalkView.swift` | 🟢 | Section / Levels / **3D** all project real `viz_export` geometry (`WalkGeometryViews.swift`); turn-by-turn from real `transitions`. Schematic only stands in for the sample tier. |
 | 6 | AR | `ARView.swift` | 🔴 | Mocked camera. Real ARKit/RealityKit is v2 (§7.7). |
 | 7 | Live | `LiveView.swift` | 🔴 | Map + countdown are illustrative; no CoreLocation/live feed. |
 | 8 | Settings | `SettingsView.swift` | 🟠 | Persisted & real, but **preferences don't affect routing yet** (§6). Theme 🟢. |
@@ -54,19 +54,20 @@ driven by the real `api/` service (and the live-delay feed).
   resolve the two refs and fetch that walk's `viz_export` (the `/transfer` +
   `/walk` path exists in `TransfrClient`).
 
-## 2. Walk renderers — `WalkView.swift`
+## 2. Walk renderers — `WalkView.swift` ✅
 
-- 🟡 **Real `viz_export` geometry is fetched but never drawn.** `loadGeometry()`
-  stores `@State geometry`, but `SectionCanvas`/`LevelCanvas` ignore it and draw
-  schematically. **The headline item:** the "one contract → four renderers" payoff
-  only lands once these project `export.path.points` / `ways` / `transitions`.
-  🚧 also needs `/walk` to return exports.
-- 🟠 **Section & Levels are schematic**, inferred from `hasLevelChange`
-  (`verdict != feasible`) — a proxy, not real level data.
-- 🟠 **Turn-by-turn steps are synthesized copy** ("sector C", "underpass", "21 steps"),
-  not derived from `transitions`.
-- 🔴 **3D tab is a placeholder** — no `WKWebView` (stage-0 `viz_render`) or SceneKit
-  port (§13.4).
+- 🟢 **Real `viz_export` geometry is drawn.** `loadGeometry()` builds a `WalkScene`
+  and the three canvases in `WalkGeometryViews.swift` project it:
+  - **Section** — a true longitudinal elevation from `path.points` (distance-walked
+    vs level), with `transitions` coloured by kind (stairs / escalator / vertical).
+  - **Levels** — a top-down floor plan per level from `ways` + the on-level path,
+    picker driven by `meta.levels_present` (fractional mezzanines collapse to floors).
+  - **3D** — an exploded-floor axonometric of `ways` + `path`, drag to rotate. Drawn
+    straight from the export, so no `WKWebView`/SceneKit port was needed after all.
+  Verified headless via `TransfrUITests` (rasterises all three on Berlin 1→16 and
+  Dortmund 11→4). The schematic now only stands in for the sample tier.
+- 🟢 **Turn-by-turn is derived from real `transitions`** + endpoints (step-off →
+  each level change → board). Synthesized copy remains only for the sample tier.
 
 ## 3. Boarding & step-off — `CarouselView.swift`, `LiveView.swift`, `WalkView.swift`
 
@@ -130,11 +131,14 @@ Persisted and real, but the preferences are **not yet applied**:
 
 ## 9. Data-source configuration & states
 
-- 🔴 **Repository hard-coded to `.sample`** in `App/TransfrApp.swift`; the `.live(url)`
-  line is commented out. No runtime toggle / base-URL setting. Settings shows a
-  read-only "Bundled sample".
+- 🟢 **Repository is live by default**, resolved by `Data/AppConfig.swift` from the
+  environment (`TRANSFR_API_URL` / `TRANSFR_API_KEY`), injected by the Xcode scheme
+  (`project.yml`) so no secret is committed. `TRANSFR_USE_SAMPLE=1` forces the
+  offline tier; `TRANSFR_AUTOPLAN=1` jumps straight to live results on launch.
+  Settings' read-only "Bundled sample" label is now stale (cosmetic).
 - 🟠 **Minimal error/empty states** — `plan()` surfaces a message on the CTA, but no
-  retry, no empty-results state, no per-screen loading skeletons.
+  retry, no empty-results state, no per-screen loading skeletons (the walk stage does
+  show a spinner during its first geometry fetch).
 
 ---
 
@@ -154,7 +158,7 @@ The spine is done — this is a punch-list, not a teardown:
 
 ## Suggested order
 
-1. Render fetched `viz_export` in Section/Levels (§2) — unlocks the core value.
+1. ~~Render fetched `viz_export` in Section/Levels (§2)~~ — **done** (+3D, +live repo §9).
 2. Station autocomplete + editable departure time (§1).
 3. Apply Settings that can act client-side: step-free on walk keys, makeable-% re-verdict, units (§6).
 4. Batch prefetch + `CachingRepository` (§8) — offline + speed.

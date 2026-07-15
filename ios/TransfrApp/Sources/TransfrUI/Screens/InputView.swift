@@ -42,6 +42,10 @@ struct InputView: View {
         .background(Theme.paper.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) { cta }
         .navigationBarBackButtonHidden(true)
+        .task {
+            // Opt-in (TRANSFR_AUTOPLAN=1): jump straight to live results on launch.
+            if AppConfig.autoplanOnLaunch, model.load == .idle { await model.plan() }
+        }
     }
 
     private var header: some View {

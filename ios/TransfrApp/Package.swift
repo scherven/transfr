@@ -32,5 +32,14 @@ let package = Package(
             // serves, so swapping in `.live` is a one-line change.
             resources: [.process("Resources")]
         ),
+        // Verifies the walk renderer: decodes real `viz_export` goldens into a
+        // `WalkScene` and rasterises the Section / Levels / 3D canvases, so the
+        // keystone geometry projection is exercised end-to-end (not just typed).
+        .testTarget(
+            name: "TransfrUITests",
+            dependencies: ["TransfrUI"],
+            path: "Tests/TransfrUITests",
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )

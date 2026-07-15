@@ -13,7 +13,8 @@ struct WalkView: View {
 
     @State private var mode: Mode = .section
     @State private var level: Int = 0
-    @State private var geometry: VizExport?   // populated if /walk has real data
+    @State private var scene: WalkScene?      // real geometry once /walk returns it
+    @State private var loading = true         // fetching that geometry (first load)
 
     enum Mode: String, CaseIterable, Identifiable { case section, levels, threeD
         var id: String { rawValue }
@@ -75,42 +76,89 @@ struct WalkView: View {
         case .section:
             Panel(padding: 12, tint: Theme.panel) {
                 VStack(spacing: 10) {
-                    SectionCanvas(transfer: transfer, hasLevelChange: hasLevelChange)
-                        .frame(height: 200)
+                    stageBox {
+                        if let scene { SectionGeometryCanvas(scene: scene) }
+                        else { SectionCanvas(transfer: transfer, hasLevelChange: hasLevelChange) }
+                    }
                     legend([("Your path", Theme.accent), ("Stairs", Theme.stair),
                             ("Escalator", Theme.esc), ("Elevator", Theme.elev)])
                 }
             }
         case .levels:
             VStack(spacing: 10) {
-                if hasLevelChange {
-                    Picker("Level", selection: $level) {
-                        Text("L0 · Platforms").tag(0)
-                        Text("L−1 · Underpass").tag(-1)
-                    }.pickerStyle(.segmented)
-                }
+                levelPicker
                 Panel(padding: 12) {
                     VStack(spacing: 10) {
-                        LevelCanvas(level: level, transfer: transfer, hasLevelChange: hasLevelChange)
-                            .frame(height: 200)
-                        legend([("Path", Theme.accent), ("Stairwell", Theme.stair), ("Arrive", Theme.go)])
+                        stageBox {
+                            if let scene { PlanGeometryCanvas(scene: scene, level: level) }
+                            else { LevelCanvas(level: level, transfer: transfer, hasLevelChange: hasLevelChange) }
+                        }
+                        legend([("Path", Theme.accent), ("Platform", Theme.panel3), ("Connector", Theme.stair)])
                     }
                 }
             }
         case .threeD:
             Panel(padding: 12) {
                 VStack(spacing: 10) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 14).fill(Theme.panel2).frame(height: 200)
-                        VStack(spacing: 8) {
-                            Image(systemName: "cube.transparent").font(.system(size: 34)).foregroundStyle(Theme.accent)
-                            Text("Rotatable 3D").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                            Text("Ships as core/'s viz_render scene in a WKWebView, then a native SceneKit port (DESIGN.md §13.4).")
-                                .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                                .multilineTextAlignment(.center).padding(.horizontal, 24)
-                        }
+                    stageBox(height: 260) {
+                        if let scene { IsoGeometryCanvas(scene: scene) }
+                        else { threeDPlaceholder }
+                    }
+                    if scene != nil {
+                        Text("Exploded floors, drawn from the walk's real geometry — the same viz_export the Section and Levels tabs project.")
+                            .font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+            }
+        }
+    }
+
+    /// Fixed-height stage that shows a spinner over the first geometry fetch, so a
+    /// live walk never flashes the schematic before its real drawing arrives.
+    @ViewBuilder
+    private func stageBox<Content: View>(height: CGFloat = 210, @ViewBuilder _ content: () -> Content) -> some View {
+        ZStack {
+            content().frame(height: height).frame(maxWidth: .infinity)
+            if scene == nil && loading {
+                RoundedRectangle(cornerRadius: 12).fill(Theme.panel2).frame(height: height)
+                    .overlay(ProgressView())
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var levelPicker: some View {
+        if let scene, scene.levelsAsc.count > 1 {
+            Picker("Level", selection: $level) {
+                ForEach(scene.levelsAsc.reversed(), id: \.self) { lvl in
+                    Text(levelPickerLabel(lvl, scene)).tag(lvl)
+                }
+            }.pickerStyle(.segmented)
+        } else if scene == nil && hasLevelChange {
+            Picker("Level", selection: $level) {
+                Text("L0 · Platforms").tag(0)
+                Text("L−1 · Underpass").tag(-1)
+            }.pickerStyle(.segmented)
+        }
+    }
+
+    private func levelPickerLabel(_ lvl: Int, _ scene: WalkScene) -> String {
+        var s = WalkScene.label(forLevel: lvl)
+        if lvl == scene.startLevel { s += " · off" }
+        else if lvl == scene.endLevel { s += " · board" }
+        return s
+    }
+
+    private var threeDPlaceholder: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 14).fill(Theme.panel2)
+            VStack(spacing: 8) {
+                Image(systemName: "cube.transparent").font(.system(size: 34)).foregroundStyle(Theme.accent)
+                Text("3D view").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text("Rotatable floors render once this walk's geometry loads from /walk.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                    .multilineTextAlignment(.center).padding(.horizontal, 24)
             }
         }
     }
@@ -131,14 +179,25 @@ struct WalkView: View {
         HStack {
             StatCell(key: "Walk time", value: Fmt.walkTime(transfer?.walkTimeS))
             StatCell(key: "Distance", value: Fmt.meters(transfer?.walkDistanceM))
-            StatCell(key: "Levels", value: hasLevelChange ? "−1" : "0")
+            StatCell(key: "Levels", value: levelsStat)
         }
+    }
+
+    /// The deepest level the path drops to relative to where you step off — real
+    /// when geometry is loaded, the `hasLevelChange` proxy otherwise.
+    private var levelsStat: String {
+        guard let scene else { return hasLevelChange ? "−1" : "0" }
+        let levels = scene.pathLevels
+        guard let lo = levels.min(), let hi = levels.max(), lo != hi else { return "0" }
+        let deepest = abs(lo - scene.startLevel) >= abs(hi - scene.startLevel) ? lo : hi
+        let d = deepest - scene.startLevel
+        return d == 0 ? "0" : (d > 0 ? "+\(d)" : "−\(abs(d))")
     }
 
     private var steps: some View {
         VStack(alignment: .leading, spacing: 10) {
             Eyebrow(text: "Turn by turn")
-            ForEach(Array(turnByTurn.enumerated()), id: \.offset) { _, step in
+            ForEach(currentSteps) { step in
                 HStack(alignment: .top, spacing: 10) {
                     Image(systemName: step.icon).font(.system(size: 12, weight: .bold))
                         .foregroundStyle(.white)
@@ -153,40 +212,47 @@ struct WalkView: View {
         }
     }
 
-    private struct Step { let icon: String; let color: Color; let title: String; let sub: String }
+    /// Derived from the real `transitions` when geometry is present; the synthesized
+    /// walkthrough only stands in for the sample tier / off-path lookups.
+    private var currentSteps: [WalkStep] {
+        if let scene { return scene.turnByTurn() }
+        return schematicSteps
+    }
 
-    private var turnByTurn: [Step] {
+    private var schematicSteps: [WalkStep] {
         guard let t = transfer else { return [] }
         let from = t.arrivalPlatform ?? "?", to = t.departurePlatform ?? "?"
         if !hasLevelChange {
             return [
-                Step(icon: "figure.walk", color: Theme.go,
-                     title: "Step off onto Platform \(from)", sub: "Platform \(to) is directly across the island"),
-                Step(icon: "checkmark", color: Theme.accent,
-                     title: "Board on Platform \(to)", sub: "No stairs — very comfortable"),
+                WalkStep(icon: "figure.walk", color: Theme.go,
+                         title: "Step off onto Platform \(from)", sub: "Platform \(to) is directly across the island"),
+                WalkStep(icon: "checkmark", color: Theme.accent,
+                         title: "Board on Platform \(to)", sub: "No stairs — very comfortable"),
             ]
         }
         return [
-            Step(icon: "clock", color: Theme.go,
-                 title: "Off the train — walk toward sector C", sub: "Platform \(from) · the stairwell is at C"),
-            Step(icon: "stairs", color: Theme.stair,
-                 title: "Stairs down to the underpass", sub: "escalator alongside · level 0 → −1"),
-            Step(icon: "arrow.right", color: Theme.accent,
-                 title: "Along the underpass to the Platform \(to) stairwell", sub: "level −1"),
-            Step(icon: "checkmark", color: Theme.accent,
-                 title: "Up the stairs — your train boards here", sub: "Platform \(to)"),
+            WalkStep(icon: "clock", color: Theme.go,
+                     title: "Off the train — walk toward sector C", sub: "Platform \(from) · the stairwell is at C"),
+            WalkStep(icon: "stairs", color: Theme.stair,
+                     title: "Stairs down to the underpass", sub: "escalator alongside · level 0 → −1"),
+            WalkStep(icon: "arrow.right", color: Theme.accent,
+                     title: "Along the underpass to the Platform \(to) stairwell", sub: "level −1"),
+            WalkStep(icon: "checkmark", color: Theme.accent,
+                     title: "Up the stairs — your train boards here", sub: "Platform \(to)"),
         ]
     }
 
-    /// The keystone hook. Asks the repository for real `viz_export` geometry; the
-    /// sample tier returns `ok == false`, so the schematic stands. When the live
-    /// `/walk` endpoint is wired, `geometry` populates and the Canvas views can
-    /// project `export.path.points` (local-ENU metres) instead of the schematic.
+    /// The keystone hook. Asks the repository for real `viz_export` geometry and
+    /// builds a `WalkScene` the Canvas views project. The sample tier returns
+    /// `ok == false`, so `scene` stays nil and the schematic stands.
     private func loadGeometry() async {
+        defer { loading = false }
         guard let t = transfer, let key = WalkKey(transfer: t) else { return }
-        // The sample tier returns ok == false → we keep the schematic. The live
-        // tier returns real ENU geometry the Canvas views can project.
-        if let result = await model.walk(for: key), result.ok { geometry = result.export }
+        if let result = await model.walk(for: key), result.ok, let export = result.export {
+            let s = WalkScene(export)
+            scene = s
+            level = s.levelsAsc.contains(s.startLevel) ? s.startLevel : (s.levelsAsc.first ?? 0)
+        }
     }
 }
 

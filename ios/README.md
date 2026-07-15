@@ -111,9 +111,18 @@ Every screen talks to a `JourneyRepository`, never to `TransfrClient` directly:
   is in progress.
 - `LiveRepository` wraps `TransfrClient` against the FastAPI service.
 
-Switching is one line in `App/TransfrApp.swift` (`.sample` → `.live(url)`); no view
-changes. A `CachingRepository` decorator is the natural next layer for the offline
-unit-of-work (DESIGN.md §13.9).
+Which one runs is resolved by `Data/AppConfig.swift` from the environment
+(`TRANSFR_API_URL` / `TRANSFR_API_KEY`, injected by the Xcode scheme in
+`project.yml`; `TRANSFR_USE_SAMPLE=1` forces the offline tier) — no view changes and
+no secret in source. A `CachingRepository` decorator is the natural next layer for
+the offline unit-of-work (DESIGN.md §13.9).
+
+> **Running against the live API.** The scheme injects the base URL and key at run
+> time. The key is expanded from the gitignored secret at generation time, so before
+> `xcodegen generate` run `export TRANSFR_API_KEY=$(cat ../deploy/secrets/api_key)`.
+> The generated `.xcodeproj` is gitignored (the baked key never lands in git). For a
+> Simulator dev server on `http://localhost:5001`, `NSAllowsLocalNetworking` (also in
+> `project.yml`) lets ATS through; a tunnel URL is HTTPS and needs no exception.
 
 | File / dir | What |
 |---|---|
@@ -133,10 +142,11 @@ station walk · Nearest facility · Map health · Offline & regions) / Attributi
 
 What is **live-driven** vs **illustrative/stub** per screen is tracked in
 [`SUI_TODO.md`](SUI_TODO.md). In short: the journey spine (Connections → timeline →
-carousel) reads real `/journeys` data; the walk renderers are schematic pending
-`viz_export` projection; AR/Live/the Advanced tools are faithful **visual** builds
-on illustrative content; Settings persists for real (theme fully wired). The hook to
-project real geometry is `WalkView.loadGeometry()`.
+carousel) reads real `/journeys` data, and the walk renderers (Section / Levels / 3D)
+now project real `viz_export` geometry from `/walk` (`WalkView.loadGeometry()` →
+`WalkGeometryViews.swift`); AR/Live/the Advanced tools are faithful **visual** builds
+on illustrative content; Settings persists for real (theme fully wired). The
+repository is live by default via `Data/AppConfig.swift` (env-driven; see below).
 
 ## Points that need the API's attention
 
@@ -159,7 +169,8 @@ Where the client is ahead of, or depends on, `api/`:
 
 ## Next
 
-- Project real `viz_export` geometry in `WalkView` (Section/Levels), then the 3D/AR
-  renderers off the same decode (DESIGN.md §13.3).
+- ~~Project real `viz_export` geometry in `WalkView` (Section/Levels/3D)~~ — done
+  (`WalkGeometryViews.swift`). **AR** is the remaining renderer off the same decode
+  (DESIGN.md §13.3, §7.7).
 - Wire a disk cache around `TransfrClient` (keyed by `WalkKey`) so prefetched
   walks render offline (§13.9).

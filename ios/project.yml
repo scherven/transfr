@@ -38,6 +38,11 @@ targets:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        # The dev API is plain-HTTP on localhost; this exempts local hosts from
+        # App Transport Security so the Simulator can reach the uvicorn server.
+        # (Only localhost/*.local/link-local — not a blanket HTTP allowance.)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.transfr.app
@@ -55,3 +60,13 @@ schemes:
         TransfrApp: all
     run:
       config: Debug
+      # Injected into the running app (read by TransfrUI/AppConfig). The key is
+      # NOT stored here: `${TRANSFR_API_KEY}` is expanded from the shell at
+      # `xcodegen generate` time, so export it from the gitignored secret first:
+      #     export TRANSFR_API_KEY=$(cat ../deploy/secrets/api_key)
+      #     xcodegen generate
+      # The generated .xcodeproj is gitignored, so the baked key never lands in
+      # git. Unset TRANSFR_API_URL or set TRANSFR_USE_SAMPLE=1 to run offline.
+      environmentVariables:
+        TRANSFR_API_URL: https://observed-representative-abc-tigers.trycloudflare.com
+        TRANSFR_API_KEY: ${TRANSFR_API_KEY}
