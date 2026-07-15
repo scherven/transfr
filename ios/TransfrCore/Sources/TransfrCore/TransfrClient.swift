@@ -48,7 +48,9 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
-    /// GET /transfer?lat=&lon=&from=&to= — the debug single-station platform walk.
+    /// GET /transfer?lat=&lon=&from_platform=&to_platform= — the debug
+    /// single-station platform walk. (Server param names are `from_platform` /
+    /// `to_platform`; see `api/main.py:get_transfer`.)
     public func transfer(lat: Double, lon: Double,
                          from: String, to: String) async throws -> PlatformWalkResponse {
         var comps = URLComponents(url: baseURL.appendingPathComponent("transfer"),
@@ -56,10 +58,41 @@ public struct TransfrClient: Sendable {
         comps?.queryItems = [
             URLQueryItem(name: "lat", value: String(lat)),
             URLQueryItem(name: "lon", value: String(lon)),
-            URLQueryItem(name: "from", value: from),
-            URLQueryItem(name: "to", value: to),
+            URLQueryItem(name: "from_platform", value: from),
+            URLQueryItem(name: "to_platform", value: to),
         ]
         return try await get(comps?.url)
+    }
+
+    /// GET /walk?relation_id=&from_platform=&to_platform=&step_free= — one
+    /// transfer's drawable walk geometry (the `viz_export` document). Keyed by the
+    /// triple a `Transfer` already carries, so callers forward them verbatim.
+    public func walk(relationId: Int, from: String, to: String,
+                     stepFree: Bool = false) async throws -> WalkResult {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("walk"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "relation_id", value: String(relationId)),
+            URLQueryItem(name: "from_platform", value: from),
+            URLQueryItem(name: "to_platform", value: to),
+            URLQueryItem(name: "step_free", value: stepFree ? "true" : "false"),
+        ]
+        return try await get(comps?.url)
+    }
+
+    /// POST /walks — batch prefetch of a planned journey's walks in one round
+    /// trip so its transfers cache to the device together (DESIGN.md §13.9).
+    public func walks(_ keys: [WalkKey]) async throws -> WalksResponse {
+        let url = baseURL.appendingPathComponent("walks")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try TransfrJSON.encoder.encode(WalksRequest(keys: keys))
+        let (data, response) = try await transport.data(for: req)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw TransfrClientError.badStatus(http.statusCode)
+        }
+        return try TransfrJSON.decode(WalksResponse.self, from: data)
     }
 
     private func get<T: Decodable>(_ url: URL?) async throws -> T {

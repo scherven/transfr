@@ -341,7 +341,7 @@ Detail and code-grounding for each in [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 
 The eventual client is **SwiftUI + ARKit**. This section maps each design piece to concrete Apple frameworks. The architectural keystone: the `viz_export` JSON is a single `Codable` contract that feeds every walk renderer, so the three (soon four, with AR) representations never drift.
 
-> **Status (2026-07-15):** the shared logic package **`ios/TransfrCore`** exists — the `Codable` mirrors of `api/schemas.py` and `viz_export`, the `Verdict` worst-wins logic, the async API client, and a Swift Testing suite that decodes the Python engine's own goldens (9 tests green on the iOS Simulator). The SwiftUI app target is not yet scaffolded. See `ios/README.md`.
+> **Status (2026-07-15):** the shared logic package **`ios/TransfrCore`** exists — the `Codable` mirrors of `api/schemas.py` and `viz_export`, the `Verdict` worst-wins logic, the async API client (journeys / stations / transfer / **walk / walks**), and a Swift Testing suite that decodes the Python engine's own goldens (14 tests green on the iOS Simulator). The walk-delivery endpoints (`/walk`, `/walks`) are built server-side too (§13.9). The SwiftUI app target is not yet scaffolded. See `ios/README.md`.
 
 ### 13.1 App shell & navigation
 - **SwiftUI** throughout. Screens are views; the prototype's screen router → **`NavigationStack`** (value-driven), whose default push/pop *is* the directional forward/back slide. The transfer carousel → **`TabView(.page)`** or a horizontal `ScrollView` with `.scrollTargetBehavior(.paging)`. Fluid page transitions → `matchedGeometryEffect`, and on iOS 18+ `.navigationTransition(.zoom)`.
@@ -401,7 +401,12 @@ Add a station or fix geometry once and every view updates — the reason to keep
 | Verdict (initial + recompute) | No | `Verdict.rolledUp()` runs on cached/live data locally. |
 | Live re-assessment (delays) | **Yes** — realtime | Fails soft: `LiveMonitor` keeps the last verdicts (`api/live.py`); the trip stays usable, just not fresh. |
 
-**Net:** once a trip is planned with signal, the *entire experience for that trip* — verdict spine, all four walk views, boarding — works in airplane mode. Only *new* planning and *fresh* delays need the network, and both degrade gracefully. **Server-side lever:** add a `/journeys` mode that inlines (or bundles URLs for) each transfer's `viz_export`, so a plan prefetches in one round trip instead of N — worth wiring in `api/` before the client grows.
+**Net:** once a trip is planned with signal, the *entire experience for that trip* — verdict spine, all four walk views, boarding — works in airplane mode. Only *new* planning and *fresh* delays need the network, and both degrade gracefully.
+
+**Walk delivery — built (2026-07-15).** `/journeys` stays lean; the drawable geometry is fetched separately and cached:
+- **`GET /walk?relation_id=&from_platform=&to_platform=&step_free=`** → one transfer's `viz_export` document (the `WalkResult` envelope), `Cache-Control: public, max-age=86400` (deterministic given the DB).
+- **`POST /walks {keys:[…]}`** → the same for a whole journey's transfers in one round trip (the prefetch path), capped at `MAX_WALKS_BATCH`. One bad key fails only itself (`ok:false` + reason).
+- A walk is keyed by the exact triple a `Transfer` already carries (`relation_id`, `arrival_platform`, `departure_platform`), so `WalkKey(transfer:)` builds it directly (nil when the transfer never resolved a walk). The default walk uses the *same* pathfinder settings as the verdict, so its time equals `Transfer.walk_time_s`; `step_free` deliberately reroutes and may differ. All in `api/walks.py` + `ios/TransfrCore` (`WalkResult.export: VizExport?`), fixture-tested both sides.
 
 ### 13.10 Design piece → framework
 

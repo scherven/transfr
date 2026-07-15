@@ -22,6 +22,7 @@ sys.path.insert(0, REPO)
 from api.schemas import (  # noqa: E402
     Place, Leg, Transfer, Journey, JourneysResponse,
     StationSuggestion, PlatformWalkResponse,
+    WalkKey, WalkResult, WalksResponse,
 )
 
 FIX = os.path.join(os.path.dirname(__file__), "TransfrCoreTests", "Fixtures")
@@ -101,3 +102,22 @@ for src, dst in [("5688517_1_16.json", "viz_berlin_1_16.json"),
         print("copied", dst)
     else:
         print("SKIP (regenerate via core/viz_export.py):", src)
+
+# --- /walk and /walks envelopes ---------------------------------------------
+# Built from the schemas that back the endpoints, wrapping a real (small),
+# current-schema viz_export doc as `export` -- so the Swift WalkResult/VizExport
+# nesting decodes exactly what the server sends. `viz_small_found.json` is a
+# committed Berlin Hbf 1->2 walk (GET /walk output); regenerate it with the API
+# when the viz_export shape changes. A found walk plus a failed key (no geometry)
+# exercise both envelope levels.
+_small = os.path.join(FIX, "viz_small_found.json")
+if os.path.exists(_small):
+    export_doc = json.load(open(_small))
+    ok = WalkResult(relation_id=5688517, from_platform="1", to_platform="2",
+                    ok=True, export=export_doc)
+    bad = WalkResult(relation_id=999999999, from_platform="1", to_platform="2",
+                     ok=False, reason="no_geometry_for_platforms")
+    write("walk_single.json", ok.model_dump_json(indent=2))
+    write("walks_batch.json", WalksResponse(walks=[ok, bad]).model_dump_json(indent=2))
+else:
+    print("SKIP walk envelopes (need Fixtures/viz_small_found.json)")

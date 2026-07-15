@@ -29,7 +29,31 @@ ports cleanly if the app shell is ever rebuilt.
 | `Contracts.swift` | `Journey`/`Leg`/`Transfer`/`Place`/… mirroring `api/schemas.py` |
 | `VizExport.swift` | `VizExport` mirroring the `core/viz_export.py` JSON (keystone contract) |
 | `TransfrJSON.swift` | the one configured `JSONDecoder`/`Encoder` (`.convertFromSnakeCase`) |
-| `TransfrClient.swift` | async `URLSession` client over `/journeys`, `/stations`, `/transfer` |
+| `TransfrClient.swift` | async `URLSession` client over `/journeys`, `/stations`, `/transfer`, `/walk`, `/walks` |
+
+### Fetching walk geometry
+
+`/journeys` returns the lean verdict spine. The drawable per-transfer walk
+geometry is fetched separately (so journeys stays small and each walk caches
+independently):
+
+```swift
+let client = TransfrClient(baseURL: url)
+let plan = try await client.journeys(from: "Hamburg", to: "Stuttgart")
+
+// Prefetch a selected journey's walks in ONE round trip, then cache them:
+let keys = plan.journeys[0].transfers.compactMap { WalkKey(transfer: $0) }
+let walks = try await client.walks(keys)          // POST /walks
+for w in walks.walks where w.ok {
+    render(w.export!)                              // VizExport → 4 renderers
+}
+
+// …or one walk on demand (GET /walk, HTTP-cacheable):
+let w = try await client.walk(relationId: 5688517, from: "1", to: "16")
+```
+
+`WalkKey(transfer:)` returns nil when a transfer never resolved a walk
+(`no_platform_data` etc.) — those transfers simply have no geometry to show.
 
 ## Running the tests
 
@@ -56,11 +80,83 @@ When `api/schemas.py` or a `viz_export` shape changes, regenerate and re-run:
 ```
 
 The `viz_*` goldens are copied from `core/viz_out/`; regenerate those first with
-`core/viz_export.py --relation 5688517 --ref1 1 --ref2 16 [--details]`.
+`core/viz/viz_export.py --relation 5688517 --ref1 1 --ref2 16 [--details]`. The
+walk-envelope goldens wrap `Fixtures/viz_small_found.json` (a committed Berlin
+Hbf 1→2 `GET /walk` output); regenerate it from the running API if the
+`viz_export` shape changes.
+
+## `TransfrApp` / `TransfrUI` (the SwiftUI app)
+
+`TransfrApp/` is a second SwiftPM package whose `TransfrUI` library holds the app —
+screens, theme, the observable trip model, and the **agnostic data layer** — and
+depends only on `TransfrCore` for the wire contracts. Keeping the UI in a package
+(not app-target files) means the whole surface builds and previews via
+`xcodebuild -scheme TransfrApp` on the Simulator SDK, exactly like `TransfrCore`.
+
+```sh
+# From ios/TransfrApp
+xcodebuild build -scheme TransfrApp -destination 'platform=iOS Simulator,name=iPhone 16'
+```
+
+The shipping device app is a thin Xcode app target that imports `TransfrUI` and
+hosts `TransfrApp` (the `@main App` lives in `App/TransfrApp.swift`).
+
+### API-agnostic by construction
+
+Every screen talks to a `JourneyRepository`, never to `TransfrClient` directly:
+
+- `SampleRepository` serves the bundled `Resources/sample_journeys.json` (the exact
+  `api/schemas.py` shape, decoded through the same `TransfrJSON` coder the live path
+  uses) — so **the app runs fully with no server**, which is the point while `api/`
+  is in progress.
+- `LiveRepository` wraps `TransfrClient` against the FastAPI service.
+
+Switching is one line in `App/TransfrApp.swift` (`.sample` → `.live(url)`); no view
+changes. A `CachingRepository` decorator is the natural next layer for the offline
+unit-of-work (DESIGN.md §13.9).
+
+| File / dir | What |
+|---|---|
+| `Theme/Theme.swift` | design tokens → dynamic light/dark `Color`s + `Verdict` colours |
+| `Data/JourneyRepository.swift` | the agnostic seam; `LiveRepository` |
+| `Data/SampleRepository.swift` | bundled offline tier |
+| `Data/TripModel.swift` | `@Observable` session state + value `Route`s |
+| `Screens/` | `RootView` (NavigationStack) → Input → Results → Journey → Carousel → Walk |
+| `Components/` | verdict badge, platform chip, panel, walk ring, button styles |
+
+### Screen coverage (this first cut)
+
+Done: Input (type mode) → Results → Journey timeline → Transfer carousel → Walk
+(**Section** and **Levels** rendered with SwiftUI `Canvas`), plus Settings.
+Schematic-only for now: the walk views draw from each transfer's own fields; the
+hook to project real `viz_export` geometry is `WalkView.loadGeometry()`.
+
+Follow-ups (stubbed with in-app notes): rotatable **3D** (WKWebView→SceneKit,
+§13.4), **AR** (RealityView, §13.5), **Live** tracking / Live Activity (§13.7),
+and Input's *paste-link* / *walk-only* modes.
+
+## Points that need the API's attention
+
+Where the client is ahead of, or depends on, `api/`:
+
+1. **`/journeys` time param.** The client sends `time=` (ISO-8601), matching
+   `api/main.py:get_journeys` — previously it sent `when=`. Fixed in this pass.
+2. **`/transfer` param names.** Now sends `from_platform` / `to_platform` (was
+   `from`/`to`). Fixed in this pass.
+3. **Inlined-`viz_export` on `/journeys` (DESIGN.md §13.9).** So a selected plan
+   prefetches every transfer's geometry in one round trip instead of N. The client
+   is structured for it (`walks()` batch, `WalkKey(transfer:)`) but the server
+   endpoint doesn't exist yet. Not a blocker — the app is usable without geometry.
+4. **Boarding / step-off data.** The carousel's coach/sector guidance is currently
+   illustrative. It should arrive in the plan payload (server-side `boarding` /
+   `formation_model`, §13.6) rather than be synthesised client-side.
+5. **Verdict `reason` strings.** The UI renders honest "why we can't say" copy from
+   `unknown(reason)` (e.g. `no_platform_data`); keeping those strings stable keeps
+   that copy correct.
 
 ## Next
 
-- The SwiftUI app target (screens per `design/prototype.html`, `NavigationStack`,
-  the four walk renderers) — not yet scaffolded.
-- A `/journeys`-with-inlined-`viz_export` endpoint so a plan prefetches in one
-  round trip (see DESIGN.md §13.9).
+- Project real `viz_export` geometry in `WalkView` (Section/Levels), then the 3D/AR
+  renderers off the same decode (DESIGN.md §13.3).
+- Wire a disk cache around `TransfrClient` (keyed by `WalkKey`) so prefetched
+  walks render offline (§13.9).

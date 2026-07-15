@@ -94,3 +94,67 @@ public struct PlatformWalkResponse: Codable, Sendable {
     public var walkDistanceM: Double?
     public var reason: String?
 }
+
+// MARK: - Walk geometry delivery (/walk, /walks) — mirrors api/schemas.py
+
+/// Identifies one platform-to-platform walk. These three fields are exactly what
+/// a `Transfer` already carries, so a client forwards them verbatim. `stepFree`
+/// requests the elevator-free variant (a different route, hence a different walk
+/// time than the verdict's).
+public struct WalkKey: Codable, Hashable, Sendable {
+    public var relationId: Int
+    public var fromPlatform: String
+    public var toPlatform: String
+    public var stepFree: Bool
+
+    public init(relationId: Int, fromPlatform: String, toPlatform: String, stepFree: Bool = false) {
+        self.relationId = relationId
+        self.fromPlatform = fromPlatform
+        self.toPlatform = toPlatform
+        self.stepFree = stepFree
+    }
+
+    /// Build the key straight from a `Transfer` (nil if it never resolved a
+    /// relation/platforms, in which case there is no walk to fetch).
+    public init?(transfer: Transfer, stepFree: Bool = false) {
+        guard let rel = transfer.relationId,
+              let from = transfer.arrivalPlatform,
+              let to = transfer.departurePlatform else { return nil }
+        self.init(relationId: rel, fromPlatform: from, toPlatform: to, stepFree: stepFree)
+    }
+}
+
+/// One walk's geometry, or a reason it couldn't be built. `export` is the full
+/// `core/viz_export.py` document (typed as `VizExport`). Two failure levels:
+/// `ok == false` means no export could be produced at all; `ok == true` with
+/// `export.path.found == false` means the export exists but the platforms don't
+/// connect (a real, drawable "no route" state).
+public struct WalkResult: Codable, Sendable {
+    public var relationId: Int
+    public var fromPlatform: String
+    public var toPlatform: String
+    public var stepFree: Bool
+    public var ok: Bool
+    public var reason: String?
+    public var export: VizExport?
+
+    public init(relationId: Int, fromPlatform: String, toPlatform: String, stepFree: Bool,
+                ok: Bool, reason: String? = nil, export: VizExport? = nil) {
+        self.relationId = relationId
+        self.fromPlatform = fromPlatform
+        self.toPlatform = toPlatform
+        self.stepFree = stepFree
+        self.ok = ok
+        self.reason = reason
+        self.export = export
+    }
+}
+
+public struct WalksRequest: Codable, Sendable {
+    public var keys: [WalkKey]
+    public init(keys: [WalkKey]) { self.keys = keys }
+}
+
+public struct WalksResponse: Codable, Sendable {
+    public var walks: [WalkResult]
+}

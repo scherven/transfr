@@ -1,0 +1,137 @@
+{
+  "origin": { "id": "de:hamburg-hbf", "name": "Hamburg Hbf", "latitude": 53.5528, "longitude": 10.0067 },
+  "destination": { "id": "de:stuttgart-hbf", "name": "Stuttgart Hbf", "latitude": 48.7838, "longitude": 9.1815 },
+  "departure_time": "2026-07-15T08:34:00",
+  "journeys": [
+    {
+      "id": "j1",
+      "date": "2026-07-15",
+      "duration_s": 18900,
+      "num_changes": 2,
+      "verdict": "tight",
+      "legs": [
+        {
+          "mode": "TRAIN", "train_name": "ICE 573",
+          "origin": { "name": "Hamburg Hbf", "latitude": 53.5528, "longitude": 10.0067 },
+          "destination": { "name": "Göttingen", "latitude": 51.5366, "longitude": 9.9266 },
+          "departure": "2026-07-15T08:34:00", "arrival": "2026-07-15T10:31:00",
+          "planned_departure": "2026-07-15T08:34:00", "planned_arrival": "2026-07-15T10:31:00",
+          "departure_platform": "6", "arrival_platform": "7",
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 254000
+        },
+        {
+          "mode": "TRAIN", "train_name": "ICE 271",
+          "origin": { "name": "Göttingen", "latitude": 51.5366, "longitude": 9.9266 },
+          "destination": { "name": "Mannheim Hbf", "latitude": 49.4794, "longitude": 8.4693 },
+          "departure": "2026-07-15T10:39:00", "arrival": "2026-07-15T12:14:00",
+          "planned_departure": "2026-07-15T10:39:00", "planned_arrival": "2026-07-15T12:11:00",
+          "departure_platform": "8", "arrival_platform": "4",
+          "departure_delay_s": 0, "arrival_delay_s": 180, "cancelled": false, "distance_m": 289000
+        },
+        {
+          "mode": "TRAIN", "train_name": "ICE 1197",
+          "origin": { "name": "Mannheim Hbf", "latitude": 49.4794, "longitude": 8.4693 },
+          "destination": { "name": "Stuttgart Hbf", "latitude": 48.7838, "longitude": 9.1815 },
+          "departure": "2026-07-15T12:19:00", "arrival": "2026-07-15T13:49:00",
+          "planned_departure": "2026-07-15T12:19:00", "planned_arrival": "2026-07-15T13:49:00",
+          "departure_platform": "5", "arrival_platform": "14",
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 96000
+        }
+      ],
+      "transfers": [
+        {
+          "at_station": "Göttingen", "relation_id": 2100001,
+          "arrival_platform": "7", "departure_platform": "8",
+          "layover_s": 480, "walk_time_s": 64, "walk_distance_m": 18,
+          "verdict": "feasible", "reason": null
+        },
+        {
+          "at_station": "Mannheim Hbf", "relation_id": 2100002,
+          "arrival_platform": "4", "departure_platform": "5",
+          "layover_s": 300, "walk_time_s": 78, "walk_distance_m": 78,
+          "verdict": "tight", "reason": null
+        }
+      ]
+    },
+    {
+      "id": "j2",
+      "date": "2026-07-15",
+      "duration_s": 17760,
+      "num_changes": 1,
+      "verdict": "tight",
+      "legs": [
+        {
+          "mode": "TRAIN", "train_name": "ICE 77",
+          "origin": { "name": "Hamburg Hbf", "latitude": 53.5528, "longitude": 10.0067 },
+          "destination": { "name": "Frankfurt (Main) Hbf", "latitude": 50.1070, "longitude": 8.6638 },
+          "departure": "2026-07-15T09:02:00", "arrival": "2026-07-15T12:48:00",
+          "departure_platform": "7", "arrival_platform": "5",
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 492000
+        },
+        {
+          "mode": "TRAIN", "train_name": "ICE 595",
+          "origin": { "name": "Frankfurt (Main) Hbf", "latitude": 50.1070, "longitude": 8.6638 },
+          "destination": { "name": "Stuttgart Hbf", "latitude": 48.7838, "longitude": 9.1815 },
+          "departure": "2026-07-15T12:52:00", "arrival": "2026-07-15T13:58:00",
+          "departure_platform": "7", "arrival_platform": "16",
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 204000
+        }
+      ],
+      "transfers": [
+        {
+          "at_station": "Frankfurt (Main) Hbf", "relation_id": 2100003,
+          "arrival_platform": "5", "departure_platform": "7",
+          "layover_s": 240, "walk_time_s": 150, "walk_distance_m": 165,
+          "verdict": "tight", "reason": null
+        }
+      ]
+    },
+    {
+      "id": "j3",
+      "date": "2026-07-15",
+      "duration_s": 21840,
+      "num_changes": 2,
+      "verdict": "unknown",
+      "legs": [
+        {
+          "mode": "TRAIN", "train_name": "ICE 1651",
+          "origin": { "name": "Hamburg Hbf", "latitude": 53.5528, "longitude": 10.0067 },
+          "destination": { "name": "Kassel-Wilhelmshöhe", "latitude": 51.3130, "longitude": 9.4470 },
+          "departure": "2026-07-15T08:16:00", "arrival": "2026-07-15T10:22:00",
+          "departure_platform": "5", "arrival_platform": "2",
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 268000
+        },
+        {
+          "mode": "TRAIN", "train_name": "ICE 1551",
+          "origin": { "name": "Kassel-Wilhelmshöhe", "latitude": 51.3130, "longitude": 9.4470 },
+          "destination": { "name": "Frankfurt (Main) Hbf", "latitude": 50.1070, "longitude": 8.6638 },
+          "departure": "2026-07-15T10:30:00", "arrival": "2026-07-15T12:05:00",
+          "departure_platform": "2", "arrival_platform": null,
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 180000
+        },
+        {
+          "mode": "TRAIN", "train_name": "IC 2013",
+          "origin": { "name": "Frankfurt (Main) Hbf", "latitude": 50.1070, "longitude": 8.6638 },
+          "destination": { "name": "Stuttgart Hbf", "latitude": 48.7838, "longitude": 9.1815 },
+          "departure": "2026-07-15T12:35:00", "arrival": "2026-07-15T14:20:00",
+          "departure_platform": null, "arrival_platform": "8",
+          "departure_delay_s": 0, "arrival_delay_s": 0, "cancelled": false, "distance_m": 204000
+        }
+      ],
+      "transfers": [
+        {
+          "at_station": "Kassel-Wilhelmshöhe", "relation_id": 2100004,
+          "arrival_platform": "2", "departure_platform": "2",
+          "layover_s": 480, "walk_time_s": 0, "walk_distance_m": 0,
+          "verdict": "feasible", "reason": null
+        },
+        {
+          "at_station": "Frankfurt (Main) Hbf", "relation_id": null,
+          "arrival_platform": null, "departure_platform": null,
+          "layover_s": 1800, "walk_time_s": null, "walk_distance_m": null,
+          "verdict": "unknown", "reason": "no_platform_data"
+        }
+      ]
+    }
+  ]
+}
