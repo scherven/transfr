@@ -82,6 +82,25 @@ CREATE INDEX idx_osm_ways_platform_area_local_ref
     ON osm_ways ((tags->>'local_ref'))
     WHERE tags->>'railway' = 'platform' OR tags->>'public_transport' = 'platform';
 
+-- Compound platform refs: one platform serving several tracks is tagged
+-- ';'-joined ('3;4' = island platform, tracks 3 and 4) -- the norm for KR/JP
+-- island platforms, and ~4.9k times in EU. When the exact ref/local_ref lookups
+-- miss, the transfer resolver matches a single track number against the
+-- ';'-split tokens via array containment (see the compound attempts in
+-- core/search_context._find_platform_edges_near). GIN over the tokenized
+-- expression so that fallback is an index scan, not a seq scan of the whole
+-- ways table. Partial, like the platform-area indexes above. The split
+-- expression MUST stay byte-identical to _REF_TOKENS_SQL / _LOCAL_REF_TOKENS_SQL
+-- in search_context.py (and _ref_tokens()'s regex) or the planner won't use it.
+CREATE INDEX idx_osm_ways_ref_tokens
+    ON osm_ways USING GIN (regexp_split_to_array(tags->>'ref', '\s*;\s*'))
+    WHERE tags->>'railway' IN ('platform', 'platform_edge')
+       OR tags->>'public_transport' = 'platform';
+CREATE INDEX idx_osm_ways_local_ref_tokens
+    ON osm_ways USING GIN (regexp_split_to_array(tags->>'local_ref', '\s*;\s*'))
+    WHERE tags->>'railway' IN ('platform', 'platform_edge')
+       OR tags->>'public_transport' = 'platform';
+
 CREATE INDEX idx_osm_relations_tags_gin ON osm_relations USING GIN (tags);
 CREATE INDEX idx_osm_relations_name ON osm_relations ((tags->>'name'));
 CREATE INDEX idx_osm_relations_public_transport ON osm_relations ((tags->>'public_transport'));

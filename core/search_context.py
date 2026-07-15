@@ -9,6 +9,7 @@ strategy lives here, so a new algorithm in core/algo_*.py only has to
 implement *how to traverse* a graph, not *how to find* it.
 """
 
+import re
 from typing import Dict, List, Optional, Tuple
 
 from graph import (
@@ -85,13 +86,51 @@ def _track_ref_matches(track_ref: Optional[str], ref: str) -> bool:
 # only fall back to the broader (area) tags when the precise lookup finds nothing.
 _PLATFORM_AREA_SQL = "(tags->>'railway' = 'platform' OR tags->>'public_transport' = 'platform')"
 
+# Any platform feature (edge OR area), for the compound-ref fallback below. Must
+# match the partial predicate of the GIN token indexes in schema.sql verbatim so
+# the planner uses them.
+_ANY_PLATFORM_SQL = (
+    "(tags->>'railway' IN ('platform', 'platform_edge') "
+    "OR tags->>'public_transport' = 'platform')"
+)
+# SQL twin of _ref_tokens(): split ';'-joined refs into per-track tokens,
+# trimming whitespace around the ';'. Kept byte-identical to the GIN index
+# expressions in schema.sql (idx_osm_ways_ref_tokens / _local_ref_tokens) so the
+# `@> ARRAY[track]` containment lookup is an index scan, not a seq scan over the
+# whole ways table (EU has ~4.9k such compound platforms).
+_REF_TOKENS_SQL = r"regexp_split_to_array(tags->>'ref', '\s*;\s*')"
+_LOCAL_REF_TOKENS_SQL = r"regexp_split_to_array(tags->>'local_ref', '\s*;\s*')"
+
 
 def _is_platform_area(tags: Dict[str, str]) -> bool:
     return tags.get("railway") == "platform" or tags.get("public_transport") == "platform"
 
 
+# A platform serving several tracks is tagged with a ';'-joined ref OSM-style
+# ('3;4' = one island platform, tracks 3 and 4). This is the norm for KR/JP
+# island platforms and appears ~4.9k times in EU too, so a single track number
+# ("3") must match either side of the ';'. Whitespace adjacent to the ';' is
+# trimmed ('3; 4'), but an embedded space with NO ';' is preserved as one token
+# -- 'Steig 1' / 'Voie 2' are single labels, not "track 1"/"track 2", and must
+# never false-match the bare number. A plain ref yields a one-element list, so
+# single-ref stations are matched byte-for-byte as before. The split must stay
+# identical to the SQL one in _find_platform_edges_near (_REF_TOKENS_SQL) and the
+# GIN token indexes in schema.sql.
+_REF_SEPARATOR_RE = re.compile(r"\s*;\s*")
+
+
+def _ref_tokens(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    return [t for t in _REF_SEPARATOR_RE.split(value) if t]
+
+
+def _ref_token_matches(value: Optional[str], ref: str) -> bool:
+    return ref in _ref_tokens(value)
+
+
 def _ref_or_local_ref_matches(tags: Dict[str, str], ref: str) -> bool:
-    return tags.get("ref") == ref or tags.get("local_ref") == ref
+    return _ref_token_matches(tags.get("ref"), ref) or _ref_token_matches(tags.get("local_ref"), ref)
 
 
 def find_platform_edges(ways: Ways, ref: str) -> List[Tuple[int, List[int]]]:
@@ -108,7 +147,7 @@ def find_platform_edges(ways: Ways, ref: str) -> List[Tuple[int, List[int]]]:
     exact = [
         (way_id, info["nodes"])
         for way_id, info in ways.items()
-        if info["tags"].get("railway") == "platform_edge" and info["tags"].get("ref") == ref
+        if info["tags"].get("railway") == "platform_edge" and _ref_token_matches(info["tags"].get("ref"), ref)
     ]
     if exact:
         return exact
@@ -251,6 +290,13 @@ def _find_platform_edges_near(
         ("tags->>'railway' = 'platform_edge' AND tags->>'railway:track_ref' LIKE %s", f"%{str(ref).zfill(2)}%"),
         (f"{_PLATFORM_AREA_SQL} AND tags->>'ref' = %s", str(ref)),
         (f"{_PLATFORM_AREA_SQL} AND tags->>'local_ref' = %s", str(ref)),
+        # Compound refs: one platform serving several tracks tagged '3;4'. Tried
+        # only after the exact lookups miss, so single-ref stations resolve
+        # byte-for-byte as before; a bare track number matches a token via array
+        # containment (GIN-indexed, see schema.sql). ref before local_ref, edge
+        # and area together (a compound edge is as rare as it is precise).
+        (f"{_ANY_PLATFORM_SQL} AND {_REF_TOKENS_SQL} @> ARRAY[%s]", str(ref)),
+        (f"{_ANY_PLATFORM_SQL} AND {_LOCAL_REF_TOKENS_SQL} @> ARRAY[%s]", str(ref)),
     )
     for predicate_sql, param in attempts:
         hit = _candidates_near(predicate_sql, param)
