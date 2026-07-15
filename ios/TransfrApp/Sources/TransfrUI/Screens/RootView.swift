@@ -7,6 +7,7 @@ import TransfrCore
 /// to `TripModel` (sample ↔ live) and nothing here changes.
 public struct RootView: View {
     @State private var model: TripModel
+    @State private var settings = SettingsStore()
 
     /// Inject any `JourneyRepository`. Defaults to the bundled sample tier so the
     /// app is runnable with no server (the API is still in progress).
@@ -19,20 +20,26 @@ public struct RootView: View {
             InputView()
                 .navigationDestination(for: Route.self) { route in
                     switch route {
-                    case .results:
-                        ResultsView()
-                    case .journey:
-                        JourneyView()
-                    case .carousel(let start):
-                        CarouselView(startIndex: start)
-                    case .walk(let idx):
-                        WalkView(transferIndex: idx)
-                    case .settings:
-                        SettingsView()
+                    case .results:              ResultsView()
+                    case .journey:              JourneyView()
+                    case .carousel(let start):  CarouselView(startIndex: start)
+                    case .walk(let idx):        WalkView(transferIndex: idx)
+                    case .ar(let idx):          ARView(transferIndex: idx)
+                    case .live:                 LiveView()
+                    case .walkLookup:           WalkLookupView()
+                    case .settings:             SettingsView()
+                    case .attributions:         AttributionsView()
+                    case .advanced:             AdvancedView()
+                    case .stationWalk:          StationWalkView()
+                    case .nearestFacility:      NearestFacilityView()
+                    case .mapHealth:            MapHealthView()
+                    case .offlineRegions:       OfflineRegionsView()
                     }
                 }
         }
         .environment(model)
+        .environment(settings)
         .tint(Theme.accent)
+        .preferredColorScheme(settings.theme.colorScheme)
     }
 }

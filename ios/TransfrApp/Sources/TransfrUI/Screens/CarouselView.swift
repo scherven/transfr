@@ -16,9 +16,11 @@ struct CarouselView: View {
             TabView(selection: $index) {
                 ForEach(Array(transfers.enumerated()), id: \.offset) { i, t in
                     ScrollView {
-                        TransferDetailCard(transfer: t) {
-                            model.path.append(.walk(transferIndex: i))
-                        }
+                        TransferDetailCard(
+                            transfer: t,
+                            onOpenWalk: { model.path.append(.walk(transferIndex: i)) },
+                            onOpenAR: { model.path.append(.ar(transferIndex: i)) }
+                        )
                         .padding(20)
                     }
                     .tag(i)
@@ -53,6 +55,7 @@ struct CarouselView: View {
 struct TransferDetailCard: View {
     let transfer: Transfer
     var onOpenWalk: () -> Void
+    var onOpenAR: () -> Void
 
     private var v: Verdict { transfer.verdictKind }
 
@@ -177,12 +180,9 @@ struct TransferDetailCard: View {
             Button(action: onOpenWalk) {
                 Label("3D view", systemImage: "cube.transparent")
             }.buttonStyle(GhostButtonStyle())
-            Button {
-                // AR entry — RealityView route is a documented follow-up (§13.5).
-            } label: {
+            Button(action: onOpenAR) {
                 Label("AR", systemImage: "arkit")
             }.buttonStyle(PrimaryButtonStyle())
-            .disabled(true)
         }
     }
 }

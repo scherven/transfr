@@ -104,6 +104,14 @@ public extension Verdict {
     }
 }
 
+extension Color {
+    /// A fixed (non-dynamic) colour from a hex literal — for the AR view's camera
+    /// overlay, which is always dark regardless of app theme.
+    init(hex: UInt32, alpha: Double = 1) {
+        self.init(uiColor: UIColor(hex: hex, alpha: alpha))
+    }
+}
+
 extension UIColor {
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
         self.init(

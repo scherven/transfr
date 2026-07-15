@@ -1,0 +1,26 @@
+# systemd unit: the Cloudflare tunnel exposing the local API to the iOS app.
+#
+# TEMPLATE -- install.sh fills __USER__/__CLOUDFLARED__ and installs the rendered
+# copy to /etc/systemd/system/.
+#
+# This runs a QUICK tunnel (no account/domain). Its URL is random and CHANGES on
+# every restart -- fine while testing. Read the current URL from the journal:
+#     journalctl -u transfr-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+#
+# For a STABLE URL that survives restarts (what TestFlight needs), register a
+# named tunnel on a Cloudflare domain and swap ExecStart to:
+#     ExecStart=__CLOUDFLARED__ tunnel run <your-tunnel-name>
+[Unit]
+Description=transfr Cloudflare tunnel
+After=network-online.target transfr-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+ExecStart=__CLOUDFLARED__ tunnel --url http://localhost:5001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

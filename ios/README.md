@@ -124,16 +124,19 @@ unit-of-work (DESIGN.md §13.9).
 | `Screens/` | `RootView` (NavigationStack) → Input → Results → Journey → Carousel → Walk |
 | `Components/` | verdict badge, platform chip, panel, walk ring, button styles |
 
-### Screen coverage (this first cut)
+### Screen coverage
 
-Done: Input (type mode) → Results → Journey timeline → Transfer carousel → Walk
-(**Section** and **Levels** rendered with SwiftUI `Canvas`), plus Settings.
-Schematic-only for now: the walk views draw from each transfer's own fields; the
-hook to project real `viz_export` geometry is `WalkView.loadGeometry()`.
+**All 15 prototype screens** (DESIGN.md §3) are scaffolded and navigable: Plan
+(Type / Paste / Walk-only) → Connections → The connection → Transfers → Walk
+(Section / Levels / 3D) ⇄ AR; Live; Walk-lookup; and Settings → Advanced (Full
+station walk · Nearest facility · Map health · Offline & regions) / Attributions.
 
-Follow-ups (stubbed with in-app notes): rotatable **3D** (WKWebView→SceneKit,
-§13.4), **AR** (RealityView, §13.5), **Live** tracking / Live Activity (§13.7),
-and Input's *paste-link* / *walk-only* modes.
+What is **live-driven** vs **illustrative/stub** per screen is tracked in
+[`SUI_TODO.md`](SUI_TODO.md). In short: the journey spine (Connections → timeline →
+carousel) reads real `/journeys` data; the walk renderers are schematic pending
+`viz_export` projection; AR/Live/the Advanced tools are faithful **visual** builds
+on illustrative content; Settings persists for real (theme fully wired). The hook to
+project real geometry is `WalkView.loadGeometry()`.
 
 ## Points that need the API's attention
 

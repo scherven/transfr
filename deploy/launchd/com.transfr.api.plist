@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: the transfr FastAPI service under uvicorn.
+
+  This is a TEMPLATE. install.sh fills __REPO__/__HOME__ and writes the rendered
+  copy to ~/Library/LaunchAgents/. Edit this template, not the installed copy.
+
+  No secret lives in this plist. TRANSFR_API_KEY_FILE is only a *path*; the actual
+  key stays in the gitignored deploy/secrets/api_key, which the app reads at start
+  (api/config.py). uvicorn is invoked directly (not via a shell wrapper) because
+  macOS TCC blocks launchd from executing a shell script under ~/Documents.
+
+  KeepAlive => launchd restarts uvicorn whenever it exits (crash, DB blip, OS
+  reboot/login). The DB pool is lazy (api/db.py), so if Postgres isn't up yet the
+  process still boots and serves /health; DB routes recover once Postgres returns.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.transfr.api</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__REPO__/.venv/bin/uvicorn</string>
+        <string>api.main:app</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
+        <string>--port</string>
+        <string>5001</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>TRANSFR_API_KEY_FILE</key>
+        <string>__REPO__/deploy/secrets/api_key</string>
+        <key>TRANSFR_RATE_LIMIT</key>
+        <string>60/minute</string>
+        <key>PGHOST</key>
+        <string>localhost</string>
+        <key>PGPORT</key>
+        <string>5432</string>
+        <key>PGDATABASE</key>
+        <string>transfr_eu</string>
+        <key>PGUSER</key>
+        <string>__USER__</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/transfr/api.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/transfr/api.err.log</string>
+</dict>
+</plist>

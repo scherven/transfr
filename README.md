@@ -43,6 +43,88 @@ coordinate-based station resolver and the platform matcher need two index builds
     .venv/bin/python core/dbgen/build_station_index.py     # station_points (~333k rows)
     .venv/bin/python core/dbgen/build_platform_index.py    # station_stops + osm_nodes coord index (Tier 2)
 
+## beta deployment (iOS client, single always-on host)
+
+The API is exposed to the iOS app through a Cloudflare tunnel (no public host
+needed) on an always-on Mac, kept alive by launchd. Full reproducible setup:
+
+### access controls
+
+Two **opt-in** controls guard the exposed API — both are **off unless configured**,
+so local dev and the test suite (which set neither) are unaffected:
+
+| Env var | Meaning |
+|---------|---------|
+| `TRANSFR_API_KEY` | shared secret; the iOS build sends it as the `X-API-Key` header |
+| `TRANSFR_API_KEY_FILE` | path to read the secret from instead (keeps it out of the plist) |
+| `TRANSFR_RATE_LIMIT` | per-client-IP ceiling in slowapi syntax, e.g. `60/minute` |
+
+`/health` is always open (and rate-limit-exempt) so the tunnel and uptime checks
+can probe liveness; every data route returns `401` without the key once one is set,
+and `429` past the rate limit. Implemented in `api/security.py`; wired in `api/main.py`.
+
+### 1. one-time host setup
+
+    .venv/bin/pip install -r requirements.txt                 # pinned versions
+    .venv/bin/python core/dbgen/build_station_index.py        # station_points (~333k rows)
+    .venv/bin/python core/dbgen/build_platform_index.py       # station_stops + coord index
+    brew install cloudflared                                  # macOS; Linux: Cloudflare's apt/rpm repo
+
+Make sure Postgres (`transfr_eu`) starts on boot too — macOS `brew services start
+postgresql@<v>`, Linux `sudo systemctl enable --now postgresql`. The API tolerates
+it coming up late (lazy pool) but the data routes need it.
+
+### 2. install the auto-restart services
+
+Pick the folder for the host OS — both do the same thing (two auto-restarting
+services + generate the shared key), differing only in the init system:
+
+    deploy/launchd/install.sh          # macOS (launchd)      -> ~/Library/LaunchAgents/
+    sudo deploy/systemd/install.sh     # Linux  (systemd)     -> /etc/systemd/system/
+
+Both are idempotent (re-run after any code change or reboot). They:
+
+  * generate the shared API key **once** into `deploy/secrets/api_key`
+    (gitignored) and reuse it forever, so the shipped iOS build keeps working;
+  * install two services — the API (uvicorn on `127.0.0.1:5001`) and the
+    cloudflared quick tunnel — that restart on crash / DB blip / reboot. The API
+    binds to loopback only; cloudflared is the only thing that reaches it;
+  * print the API key and how to read the current tunnel URL.
+
+The key never enters the service definition: it passes only `TRANSFR_API_KEY_FILE`
+(a path), and the app reads the secret from that gitignored file at startup. (On
+macOS, uvicorn is invoked directly rather than via a wrapper because TCC blocks
+launchd from running a shell script under `~/Documents`; Linux has no such limit.)
+See `deploy/launchd/README.md` / `deploy/systemd/README.md` for day-to-day ops.
+
+### 3. get the URL + key for the app
+
+    cat deploy/secrets/api_key    # the X-API-Key value
+    # current tunnel URL --
+    #   macOS: grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/Library/Logs/transfr/tunnel.err.log | tail -1
+    #   Linux: journalctl -u transfr-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+
+The iOS app sends that key in an `X-API-Key` header on every request to that URL.
+
+### running by hand (dev, no service manager)
+
+    TRANSFR_API_KEY="$(openssl rand -hex 24)" TRANSFR_RATE_LIMIT=60/minute \
+        .venv/bin/uvicorn api.main:app --port 5001
+    cloudflared tunnel --url http://localhost:5001    # separate terminal
+
+### caveats
+
+> **Quick-tunnel URL changes on every restart.** Fine for testing (read it from
+> the log). For a URL stable enough to ship in TestFlight, register a **named
+> tunnel** on a Cloudflare domain (~$8/yr) and swap the tunnel plist's
+> `ProgramArguments` to `cloudflared tunnel run <name>` (documented inline).
+
+> **Web surface — deferred, not free.** The controls above suit a single-tenant
+> native client. CORS is still `*` (harmless for iOS, which doesn't do CORS) and
+> the API key is one shared secret, not per-user auth. Before any browser/web
+> client ships, tighten `TRANSFR_CORS_ORIGINS` and move to real per-user auth —
+> a shared key embedded in web JS is public.
+
 ## development
 
     .venv/bin/python -m pytest tests/ -q                       # offline (deterministic)

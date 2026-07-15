@@ -1,0 +1,33 @@
+# systemd unit: the transfr FastAPI service under uvicorn.
+#
+# TEMPLATE -- install.sh fills __REPO__/__USER__/__CLOUDFLARED__ and installs the
+# rendered copy to /etc/systemd/system/. Edit this template, not the installed copy.
+#
+# No secret lives in this unit: TRANSFR_API_KEY_FILE is only a path; the actual
+# key stays in the gitignored deploy/secrets/api_key, read by the app at startup
+# (api/config.py). Unlike macOS, Linux has no TCC, so running from anywhere is fine.
+#
+# Restart=always => systemd restarts uvicorn on any exit (crash, DB blip). The DB
+# pool is lazy (api/db.py), so the process still boots and serves /health if
+# Postgres isn't up yet; DB routes recover once Postgres returns.
+[Unit]
+Description=transfr API (uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__REPO__
+Environment=TRANSFR_API_KEY_FILE=__REPO__/deploy/secrets/api_key
+Environment=TRANSFR_RATE_LIMIT=60/minute
+Environment=PGHOST=localhost
+Environment=PGPORT=5432
+Environment=PGDATABASE=transfr_eu
+Environment=PGUSER=__USER__
+ExecStart=__REPO__/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 5001
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -39,8 +39,8 @@ public enum RepositoryError: Error, LocalizedError, Sendable {
 public struct LiveRepository: JourneyRepository {
     public var client: TransfrClient
 
-    public init(baseURL: URL, transport: Transport = URLSession.shared) {
-        self.client = TransfrClient(baseURL: baseURL, transport: transport)
+    public init(baseURL: URL, apiKey: String? = nil, transport: Transport = URLSession.shared) {
+        self.client = TransfrClient(baseURL: baseURL, transport: transport, apiKey: apiKey)
     }
 
     public func journeys(from: String, to: String, when: Date?) async throws -> JourneysResponse {

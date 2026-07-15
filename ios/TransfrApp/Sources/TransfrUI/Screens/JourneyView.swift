@@ -42,12 +42,11 @@ struct JourneyView: View {
     private var bottomBar: some View {
         HStack(spacing: 10) {
             Button {
-                // Live tracking is a documented follow-up (ActivityKit; DESIGN.md §13.7).
+                model.path.append(.live)
             } label: {
                 Label("Track live", systemImage: "dot.radiowaves.left.and.right")
             }
             .buttonStyle(GhostButtonStyle())
-            .disabled(true)
 
             Button {
                 model.path.append(.carousel(startIndex: 0))

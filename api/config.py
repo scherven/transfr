@@ -35,8 +35,33 @@ MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)
 # (each walk re-runs the platform search).
 MAX_WALKS_BATCH = _int("TRANSFR_MAX_WALKS_BATCH", 12)
 
-# CORS: comma-separated origins, or "*" for all (dev default).
+# CORS: comma-separated origins, or "*" for all (dev default). Irrelevant to the
+# native iOS client (CORS is a browser mechanism); tighten before any web surface.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("TRANSFR_CORS_ORIGINS", "*").split(",") if o.strip()]
+
+# Beta access controls (see api/security.py). Both opt-in: unset => disabled, so
+# dev and tests are unaffected and the deployment enables them explicitly.
+#   TRANSFR_API_KEY       shared secret the iOS build sends as the X-API-Key header.
+#   TRANSFR_API_KEY_FILE  alternatively, a path to read the secret from -- so the
+#                         key can live in a gitignored file (deploy/secrets/api_key)
+#                         and never be baked into the launchd plist.
+#   TRANSFR_RATE_LIMIT    per-IP ceiling in slowapi syntax, e.g. "60/minute".
+def _read_api_key() -> str:
+    key = os.environ.get("TRANSFR_API_KEY", "").strip()
+    if key:
+        return key
+    path = os.environ.get("TRANSFR_API_KEY_FILE", "").strip()
+    if path:
+        try:
+            with open(path) as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+    return ""
+
+
+API_KEY = _read_api_key()
+RATE_LIMIT = os.environ.get("TRANSFR_RATE_LIMIT", "").strip()
 
 # Connection pool bounds.
 POOL_MIN = _int("TRANSFR_POOL_MIN", 1)

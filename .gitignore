@@ -4,9 +4,11 @@ server-admin
 *.pyc
 *.crt
 secrets
+deploy/secrets/
 server.csr
 server.pem
 .venv
 core/viz_out/
 tests/fixtures/journeys
 ios/TransfrCore/.build
+ios/TransfrCore/.build_tmp

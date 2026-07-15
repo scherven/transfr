@@ -1,0 +1,57 @@
+# Generates TransfrApp.xcodeproj — a thin device/simulator app target around the
+# local Swift packages. The UI and models stay in TransfrApp/ (TransfrUI) and
+# TransfrCore/; this project is just the @main shell (App/TransfrMain.swift) plus
+# an app bundle to run on a simulator.
+#
+# Regenerate after changing this file:  xcodegen generate  (run in ios/)
+name: TransfrApp
+options:
+  bundleIdPrefix: com.transfr
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  # Only TransfrApp is declared. It vends TransfrUI and already depends on
+  # TransfrCore via `../TransfrCore` in its own Package.swift, so TransfrCore
+  # resolves transitively. Declaring it a second time here registers the same
+  # package under a different path and makes Xcode's resolver fail with
+  # "missing package product TransfrCore".
+  TransfrApp:
+    path: TransfrApp
+
+targets:
+  TransfrApp:
+    type: application
+    platform: iOS
+    sources:
+      - App
+    dependencies:
+      - package: TransfrApp
+        product: TransfrUI
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Transfr
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.transfr.app
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "6.0"
+        ENABLE_PREVIEWS: YES
+
+schemes:
+  TransfrApp:
+    build:
+      targets:
+        TransfrApp: all
+    run:
+      config: Debug

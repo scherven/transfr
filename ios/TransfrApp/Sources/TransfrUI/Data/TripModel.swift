@@ -85,11 +85,26 @@ public final class TripModel {
 }
 
 /// Value routes for the `NavigationStack`. Adding a destination is a new case —
-/// the §13.12 reason a navigation rethink stays cheap.
+/// the §13.12 reason a navigation rethink stays cheap. Covers all 15 prototype
+/// screens (DESIGN.md §3): the journey spine, the walk/AR pair, the verdict-free
+/// walk-lookup door, and the Settings → Advanced/Attributions subtrees.
 public enum Route: Hashable {
+    // Journey spine
     case results
     case journey
     case carousel(startIndex: Int)
     case walk(transferIndex: Int)
+    case ar(transferIndex: Int)
+    case live
+    // Second Plan door (§6.9)
+    case walkLookup
+    // Settings subtree
     case settings
+    case attributions
+    // Advanced hub (§6.10)
+    case advanced
+    case stationWalk
+    case nearestFacility
+    case mapHealth
+    case offlineRegions
 }

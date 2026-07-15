@@ -19,10 +19,22 @@ public enum TransfrClientError: Error, Sendable {
 public struct TransfrClient: Sendable {
     public var baseURL: URL
     public var transport: Transport
+    /// Shared secret sent as the `X-API-Key` header on every request. `nil` for an
+    /// unsecured local dev server; set it for the deployed (tunnelled) service,
+    /// which returns 401 without it (see `api/security.py`).
+    public var apiKey: String?
 
-    public init(baseURL: URL, transport: Transport = URLSession.shared) {
+    public init(baseURL: URL, transport: Transport = URLSession.shared, apiKey: String? = nil) {
         self.baseURL = baseURL
         self.transport = transport
+        self.apiKey = apiKey
+    }
+
+    /// Wrap a URL in a request carrying the auth header (if configured).
+    private func authorized(_ url: URL) -> URLRequest {
+        var req = URLRequest(url: url)
+        if let apiKey { req.setValue(apiKey, forHTTPHeaderField: "X-API-Key") }
+        return req
     }
 
     /// GET /journeys?from=&to=&time=&max= — the product endpoint. `time` is an
@@ -84,7 +96,7 @@ public struct TransfrClient: Sendable {
     /// trip so its transfers cache to the device together (DESIGN.md §13.9).
     public func walks(_ keys: [WalkKey]) async throws -> WalksResponse {
         let url = baseURL.appendingPathComponent("walks")
-        var req = URLRequest(url: url)
+        var req = authorized(url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = try TransfrJSON.encoder.encode(WalksRequest(keys: keys))
@@ -97,7 +109,7 @@ public struct TransfrClient: Sendable {
 
     private func get<T: Decodable>(_ url: URL?) async throws -> T {
         guard let url else { throw TransfrClientError.badURL }
-        let (data, response) = try await transport.data(for: URLRequest(url: url))
+        let (data, response) = try await transport.data(for: authorized(url))
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw TransfrClientError.badStatus(http.statusCode)
         }

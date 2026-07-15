@@ -26,6 +26,9 @@ from typing import List, Optional
 import requests
 from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi import _rate_limit_exceeded_handler
 
 from api import stations  # CSV autocomplete
 from ground_truth import find_shortest_path
@@ -34,6 +37,7 @@ from api import config, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
 from api.pipeline import plan_journeys
+from api.security import limiter, require_api_key
 from api.transfers import STATION_UNRESOLVED
 from api.walks import build_walk, build_walks
 
@@ -50,12 +54,24 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="transfr", version="0.1.0", lifespan=lifespan)
+
+# The API key gates every data route; /health stays open so the tunnel and any
+# uptime check can probe liveness without the secret. Attached per-route below
+# via this shared dependency list rather than app-wide, which would catch /health.
+_PROTECTED = [Depends(require_api_key)]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+# Rate limiting (no-op unless TRANSFR_RATE_LIMIT is set). The middleware applies
+# the configured default limit to every route; the handler turns an exceeded
+# limit into a 429 with Retry-After.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 def get_conn():
@@ -75,16 +91,17 @@ def _parse_when(time_str: Optional[str]) -> datetime:
 
 
 @app.get("/health")
+@limiter.exempt
 def health():
     return {"status": "ok"}
 
 
-@app.get("/stations", response_model=List[schemas.StationSuggestion])
+@app.get("/stations", response_model=List[schemas.StationSuggestion], dependencies=_PROTECTED)
 def get_stations(q: str = Query(min_length=2, description="station name prefix")):
     return stations.autocomplete_station(q, max_results=8)
 
 
-@app.get("/journeys", response_model=schemas.JourneysResponse)
+@app.get("/journeys", response_model=schemas.JourneysResponse, dependencies=_PROTECTED)
 def get_journeys(
     from_: str = Query(alias="from", min_length=1, description="origin station name"),
     to: str = Query(min_length=1, description="destination station name"),
@@ -102,7 +119,7 @@ def get_journeys(
         raise HTTPException(status_code=502, detail=f"journey provider error: {e}")
 
 
-@app.get("/transfer", response_model=schemas.PlatformWalkResponse)
+@app.get("/transfer", response_model=schemas.PlatformWalkResponse, dependencies=_PROTECTED)
 def get_transfer(
     lat: float,
     lon: float,
@@ -130,7 +147,7 @@ def get_transfer(
     )
 
 
-@app.get("/walk", response_model=schemas.WalkResult)
+@app.get("/walk", response_model=schemas.WalkResult, dependencies=_PROTECTED)
 def get_walk(
     response: Response,
     relation_id: int = Query(description="stop_area relation id (from a Transfer)"),
@@ -150,7 +167,7 @@ def get_walk(
     return result
 
 
-@app.post("/walks", response_model=schemas.WalksResponse)
+@app.post("/walks", response_model=schemas.WalksResponse, dependencies=_PROTECTED)
 def post_walks(req: schemas.WalksRequest, conn=Depends(get_conn)):
     """Batch prefetch: build every requested walk in one round trip so a selected
     journey's transfers cache to the device together. One bad key fails only

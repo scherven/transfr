@@ -81,7 +81,7 @@ Key properties inherited from the engine that the design must respect:
 
 ## 3. The prototype: what exists
 
-A single, coherent, click-through mobile prototype (not scattered mockups). 9 screens, all wired — every back chevron, button, the carousel swipe, the theme toggle, the settings controls, and the live countdown work.
+A single, coherent, click-through mobile prototype (not scattered mockups). 15 screens, all wired — every back chevron, button, the carousel swipe, the theme toggle, the settings controls, the live countdown, and the Advanced tools work.
 
 1. **Plan** — link-paste, type, or **walk-only** (§6.9); everything editable. Gear → Settings.
 2. **Connections** — journey list, verdict-first.
@@ -90,8 +90,14 @@ A single, coherent, click-through mobile prototype (not scattered mockups). 9 sc
 5. **Walk views** — the three §7.6 representations in one screen (section overview · per-level plans · rotatable 3D), coloured risers, turn-by-turn. The 3D is a live orthographic orbit (real geometry, drag to rotate) standing in for the embedded `viz_render` scene.
 6. **AR** — mocked camera with the path overlaid + step-off instruction.
 7. **Live** — map, moving position, countdown to next transfer.
-8. **Settings** — step-free, walking pace, makeable %, buffer, theme, units, Live Activity, auto-AR.
+8. **Settings** — step-free, walking pace, makeable %, buffer, theme, units, Live Activity, auto-AR; **Power tools → Advanced** and **About → Attributions**.
 9. **Walk lookup** — station + two platform refs → the walk view directly, verdict-free (the §6.9 door; Berlin Hbf 1→16 as the multi-level example).
+10. **Advanced** (hub) — power tools over the same `core/` engine (§6.10), reached from Settings.
+11. **Full station walk** — one platform → every other platform (distance · time · level Δ · step-free), with a source selector; **tap a row → the full walk view (§6.5)**.
+12. **Nearest facility** — nearest toilets / lift / exit / tickets / coffee / ATM / taxi from a platform, routed, from the OSM POI layer; **tap a facility → the full walk view**.
+13. **Map health** — per-database connected / stitchable / island connectivity (§6.10, §7.11), region selector + an all-databases comparison; not user-editable.
+14. **Offline & regions** — install / update / remove regional DBs (Europe, Korea, Japan), prefetch a station's 3D detail, storage & freshness.
+15. **Attributions** — data sources & licences, led by **Map data © OpenStreetMap contributors** (ODbL) (§6.11), reached from Settings.
 
 The **Hamburg → Stuttgart** ICE journey is the running example, with **Göttingen 7→8** (feasible, cross-platform) and **Mannheim 4→5** (tight; stairs → underpass → stairs) as the deliberate throughline — the change that's fine on paper but tight in practice, and therefore the one that justifies the 3D map and AR.
 
@@ -129,7 +135,7 @@ Inline SVG line icons, ~1.5–2.4 stroke, no fills — consistent weight with th
 
 ### 4.5 Layout & the phone frame
 
-- The prototype renders a **pixel iPhone frame** (Dynamic-Island status bar, home indicator) on a soft studio backdrop, with a **screen navigator** beside it (a labelled list of the 8 screens) so a reviewer can jump anywhere *or* walk the real flow. On narrow viewports the navigator becomes a horizontal strip and the phone fills the width.
+- The prototype renders a **pixel iPhone frame** (Dynamic-Island status bar, home indicator) on a soft studio backdrop, with a **screen navigator** beside it (a labelled list of the 15 screens, grouped with an *Advanced* section) so a reviewer can jump anywhere *or* walk the real flow. On narrow viewports the navigator becomes a horizontal strip and the phone fills the width.
 - Inside the phone: a fixed status bar, a clipped `viewport` holding the stacked screens, and a home bar. Each screen scrolls internally.
 - **Everything that looks editable is editable** — station names, times, the pasted link are real inputs/`contenteditable`. A prototype principle: don't show a field you can't touch. `[locked as prototype principle]`
 
@@ -140,7 +146,12 @@ Inline SVG line icons, ~1.5–2.4 stroke, no fills — consistent weight with th
 ```
 Plan ─┬▶ Connections ──▶ The connection ──▶ Transfers ──▶ 3D walk ⇄ AR
       │                       │                              ▲
-      ├▶ Settings             └▶ Live ──▶ (Preview) ──▶ Transfers
+      ├▶ Settings ─┬▶ Advanced ─┬▶ Full station walk ─┐      │
+      │            │            ├▶ Nearest facility ──┼──────┤  (tap → walk view)
+      │            │            ├▶ Map health         │      │
+      │            │            └▶ Offline & regions  │      │
+      │            └▶ Attributions                    │      │
+      │                       └▶ Live ──▶ (Preview) ──▶ Transfers
       │                                                      │
       └▶ Walk lookup (station + platform A + platform B) ────┘
 ```
@@ -149,7 +160,8 @@ Plan ─┬▶ Connections ──▶ The connection ──▶ Transfers ──�
 - **3D walk ⇄ AR** are two representations of the same transfer and toggle between each other.
 - **Live** is reachable directly (it's where the app spends most of its time) and deep-links into a transfer preview.
 - **Walk lookup** is a **second entry door on Plan** (§6.9): pick a station and two platform refs and jump *straight* to the walk view, bypassing the journey spine entirely. It reuses the exact walk screen the transfer path lands on; it just arrives there without a journey, layover, or verdict behind it.
-- **Settings** hangs off the home screen (gear) — not in the main flow.
+- **Settings** hangs off the home screen (gear) — not in the main flow. It also holds the two secondary areas: **Advanced** (§6.10) and **Attributions** (§6.11).
+- **Advanced** is a hub of power tools that answer *station* questions rather than *journey* questions (full station walk, nearest facility, map health, offline/regions). Its walk-producing tools (station walk, nearest facility) **rejoin the main flow at the walk view (§6.5)** — they reuse the exact screen the transfer path lands on, arriving without a journey.
 
 **Decision:** browsing (carousel) and doing (Live's single "next thing") are separate modes. The carousel is for pre-trip understanding; Live collapses to just the next action. `[provisional]`
 
@@ -198,6 +210,17 @@ A minimal, verdict-free door for "I just want to see the walk." A second tab/mod
   - **No boarding / step-off** (§7.3–7.4): no arriving train ⇒ no seat offset or sector to aim for.
 - **Reuses everything else:** step-free routing, walking-pace, units and theme (§7.9) all apply unchanged, since they live in `core/` routing + presentation, not in the verdict.
 - **Honest gaps still hold** (§7.5): an unmapped or `disconnected` platform pair reports *why* (`platform_not_found`, `disconnected`) rather than inventing a path — the same reasons the transfer path surfaces.
+
+### 6.10 Advanced (power tools)
+A hub reached from **Settings → Power tools**, holding tools that answer *station* questions instead of *journey* questions. All run on the same `viz_export` / pathfinder as a transfer walk — pointed at a different question, with no verdict or train.
+- **Full station walk** — pick a source platform; get distance / walk time / level Δ to **every** other platform (one pathfind per platform), sorted nearest-first, with a step-free marker per row (respecting the Settings step-free toggle). **Tapping any row opens the full walk view (§6.5)** for that pair — the same section / per-level / 3D screen a transfer lands on.
+- **Nearest facility** — category chips (toilets · lift · exit · tickets · coffee · ATM · taxi) → the nearest one **routed** from the current platform, plus every instance in the station ranked by distance. Facilities come from the OSM `amenity`/`shop` POI layer (`viz_export`); **tapping one opens the full walk view** to it. If a station maps none, it says so rather than guessing (§7.5).
+- **Map health** — see §7.11. Per-database connectivity (connected / stitchable / island) with a region selector and an all-databases comparison; purely diagnostic.
+- **Offline & regions** — install / update / remove regional databases (Europe, Korea, Japan; each built offline from an OSM extract via `extract_europe.sh`, so an installed region works with no network), prefetch a station's 3D detail cache for offline, and a storage/freshness panel. A not-installed region (Great Britain) demonstrates the download flow.
+- **Why here, not in the spine:** these are lookups a power user reaches for occasionally; folding them behind Settings keeps the Plan → verdict spine uncluttered while giving the walk engine a second life. `[provisional]`
+
+### 6.11 Attributions
+A required, plain **data-sources & licences** page reached from **Settings → About**. Leads with the hero credit **"Map data © OpenStreetMap contributors"** and the **ODbL** licence, because every map, platform, footway, level and facility in Transfr derives from OSM. Also lists Transitous/MOTIS (journeys, live delays, platform assignments), Deutsche Bahn IRIS (real-time platform/track), and coach-formation providers, plus a "built with `osmium`, no run-time tiles" note. `[locked — attribution is a licence obligation, not a design choice]`
 
 ---
 
@@ -262,6 +285,15 @@ A second, minimal entry point (§6.9): station + two platform refs → the walk 
 - **Reuse, not a new subsystem:** same resolver (the platform-ref resolution ladder from `formation_model`/transfer path), same `viz_export`, same three renderers, same Settings (step-free, pace, units). The only net-new surface is the input mode on Plan.
 - **Open:** whether the lookup should optionally accept a coach/seat to restore the step-off cue (§7.4) for a user who *does* know their train but doesn't want the full journey flow — a cheap add, deferred until the base lookup ships. See §11.
 
+### 7.11 Map health & stitching — diagnostic, cross-database, never user-editable  `[locked]`
+The Advanced **Map health** screen (§6.10) exposes, honestly, *why* a platform-to-platform walk can or can't be computed — the same three classes from the `disconnected-diagnosis` work:
+- **Connected** — the platforms share the pedestrian graph; full walks route end-to-end.
+- **Stitchable** — a pedestrian way's node lies *inside* a platform polygon but shares no node with it (e.g. Colmar A→E, a 3.9 m underpass gap). The system **bridges this automatically** in ETL; the screen flags it **amber** only to say the join is *inferred, not mapped* — a confidence signal.
+- **Island** — no pedestrian way exists between platforms at all (e.g. Seoul mainline: only tracks between islands). We fall back to a labelled straight-line estimate, never a fabricated path (§7.5).
+- **Stitching is a property of the map, not a user control.** An earlier draft offered a "add a manual bridge" button; **removed** — a traveller can't and shouldn't edit the graph. The screen is read-only.
+- **It spans databases, not one region.** A region selector (Europe / Korea / Japan) drives the survey + representative stations, and an *all-databases* strip compares them at a glance. This makes the coverage story (§9) visible rather than buried.
+- **Numbers are measured where possible.** `transfr_eu` (**71 / 5 / 24** over 1,401 sampled platforms) and `transfr_kr` (**2 / 5 / 93** over 899) come from `stitch_survey.py` sweeps; Japan's figure is illustrative until its sweep runs, and is labelled as such. The gulf between EU and KR is the honest headline: connectivity depends entirely on how well the local concourse is mapped in OSM.
+
 ---
 
 ## 8. Content & voice
@@ -279,7 +311,7 @@ A second, minimal entry point (§6.9): station + two platform refs → the walk 
 The design must degrade gracefully because the data is uneven — see memories `transitous-platform-coverage` and `new-api-architecture`:
 - **Platform data exists** in DE/CH/AT/BE/NL; **not** domestic FR/IT/ES. Transfr is only fully useful where platform data exists — this bounds the initial market and is why the app must handle `unknown` first-class.
 - **MOTIS omits one side's platform** on some legs even in DACH (`no_platform_data`) — asymmetric and common.
-- **OSM gaps:** some platforms are unmapped or not connected (a real "disconnected" result, e.g. Olten 9→12).
+- **OSM gaps:** some platforms are unmapped or not connected (a real "disconnected" result, e.g. Olten 9→12). Measured by `stitch_survey.py`: **`transfr_eu` 71 % connected / 5 % stitchable / 24 % island** (1,401 sampled platforms); **`transfr_kr` 2 / 5 / 93** (899). Connectivity tracks how well the concourse is mapped, not the country's size. Surfaced honestly in **Map health** (§6.10, §7.11).
 - **Name normalisation gap:** MOTIS station names differ across providers at an interchange; the reliable key is the DELFI/IFOPT stop-id, not the name. `core/` resolves by name — an open integration gap that affects link-import (§7 zero-input).
 
 ---
@@ -334,6 +366,10 @@ Detail and code-grounding for each in [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 | D19 | Reject the CSS stacked-plate "3D overview" | Not real geometry; illegible under rotation | locked |
 | D20 | Z = level, not elevation, stated honestly (×3 exaggeration) | OSM carries no usable indoor `ele`, per `VIZ.md` | locked |
 | D21 | Direct walk lookup (station + two platform refs), verdict-free, as a second Plan door | Walk view needs only a `viz_export` from two endpoints — no journey/layover; serves "just show the walk" nearly free (§6.9/§7.10) | provisional |
+| D22 | Advanced hub behind Settings for *station* (not journey) tools | Gives the walk engine a second life without cluttering the verdict spine (§6.10) | provisional |
+| D23 | Station-walk & nearest-facility rows open the real walk view (§6.5) | Reuse, not a new renderer — same `viz_export` seam as §7.6/§7.10; one 3D screen everywhere | locked |
+| D24 | Map health is read-only, cross-database, measured; no manual stitching | Stitching is a map property, not a user control; comparing DBs makes coverage (§9) visible (§7.11) | locked |
+| D25 | Attributions page leading with "Map data © OpenStreetMap contributors" (ODbL) | Licence obligation, not a design choice; all geometry derives from OSM (§6.11) | locked |
 
 ---
 

@@ -1,10 +1,16 @@
-psycopg2-binary
-requests
-flask
-flask-cors
-fastapi
-uvicorn[standard]
-httpx
-osmium
-pytest
-plotly
+# Pinned to the versions in the working .venv (pip freeze, 2026-07-15).
+# Live FastAPI service (api/) + core/ engine + test suite.
+psycopg2-binary==2.9.12
+requests==2.32.5
+fastapi==0.128.8
+uvicorn[standard]==0.39.0
+slowapi==0.1.10
+httpx==0.28.1
+osmium==4.3.1
+pytest==8.4.2
+plotly==6.9.0
+
+# Legacy Flask server (legacy/) only — dormant, not used by the live API and not
+# installed in the .venv. Uncomment + pin if you ever revive it.
+# flask
+# flask-cors

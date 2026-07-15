@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd agent: the Cloudflare tunnel exposing the local API to the iOS app.
+
+  TEMPLATE -- install.sh fills __CLOUDFLARED__ and __HOME__ and installs the
+  rendered copy to ~/Library/LaunchAgents/.
+
+  This runs a QUICK tunnel (no account/domain). Its URL is random and CHANGES on
+  every restart -- fine while testing, but read the current URL from the log:
+
+      grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/Library/Logs/transfr/tunnel.err.log | tail -1
+
+  For a STABLE URL that survives restarts (what TestFlight needs), register a
+  named tunnel on a Cloudflare domain and swap ProgramArguments to:
+      __CLOUDFLARED__  tunnel  run  <your-tunnel-name>
+  (A named tunnel stores its own creds, so no --url is needed.)
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.transfr.tunnel</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__CLOUDFLARED__</string>
+        <string>tunnel</string>
+        <string>--url</string>
+        <string>http://localhost:5001</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/transfr/tunnel.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/transfr/tunnel.err.log</string>
+</dict>
+</plist>
