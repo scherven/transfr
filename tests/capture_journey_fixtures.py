@@ -27,8 +27,8 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from journeys import PLAN_URL, _get_session  # noqa: E402
-from stations import resolve_station  # noqa: E402
+from api.journeys import PLAN_URL, _get_session  # noqa: E402
+from api.stations import resolve_station  # noqa: E402
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "journeys")
 

@@ -4,13 +4,19 @@ transfr HTTP API (FastAPI).
     .venv/bin/uvicorn api.main:app --port 5001
 
 Endpoints:
-  GET /health                                    liveness
-  GET /stations?q=                               station autocomplete (CSV-backed)
-  GET /journeys?from=&to=&time=&max=             journeys, each change of train
+  GET  /health                                   liveness
+  GET  /stations?q=                              station autocomplete (CSV-backed)
+  GET  /journeys?from=&to=&time=&max=            journeys, each change of train
                                                  assessed for walkability (the product)
-  GET /transfer?lat=&lon=&from_platform=&to_platform=
+  GET  /transfer?lat=&lon=&from_platform=&to_platform=
                                                  debug: platform-to-platform walk at
                                                  the station nearest a coordinate
+  GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
+                                                 one transfer's drawable walk geometry
+                                                 (viz_export); cacheable
+  POST /walks  {keys:[{relation_id,from_platform,to_platform,step_free}]}
+                                                 batch prefetch of a journey's walks
+                                                 in one round trip
 """
 
 from contextlib import asynccontextmanager
@@ -18,10 +24,10 @@ from datetime import datetime
 from typing import List, Optional
 
 import requests
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-import stations  # root-level CSV autocomplete
+from api import stations  # CSV autocomplete
 from ground_truth import find_shortest_path
 
 from api import config, schemas
@@ -29,6 +35,11 @@ from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
 from api.pipeline import plan_journeys
 from api.transfers import STATION_UNRESOLVED
+from api.walks import build_walk, build_walks
+
+# Walk geometry is deterministic given the DB, so it caches well. Not truly
+# immutable (a core/etl.py rebuild changes it), so a day, not forever.
+_WALK_CACHE_CONTROL = "public, max-age=86400"
 
 
 @asynccontextmanager
@@ -117,3 +128,36 @@ def get_transfer(
         walk_distance_m=result.get("walking_distance_meters"),
         reason=None if found else result.get("reason"),
     )
+
+
+@app.get("/walk", response_model=schemas.WalkResult)
+def get_walk(
+    response: Response,
+    relation_id: int = Query(description="stop_area relation id (from a Transfer)"),
+    from_platform: str = Query(min_length=1, description="arrival platform ref"),
+    to_platform: str = Query(min_length=1, description="departure platform ref"),
+    step_free: bool = Query(default=False, description="route without elevators"),
+    conn=Depends(get_conn),
+):
+    """One transfer's drawable walk geometry (the `viz_export` document). Keyed by
+    the triple a Transfer already carries, so the client just forwards them. The
+    result is deterministic given the DB, hence cacheable."""
+    key = schemas.WalkKey(relation_id=relation_id, from_platform=from_platform,
+                          to_platform=to_platform, step_free=step_free)
+    result = build_walk(conn, key)
+    if result.ok:
+        response.headers["Cache-Control"] = _WALK_CACHE_CONTROL
+    return result
+
+
+@app.post("/walks", response_model=schemas.WalksResponse)
+def post_walks(req: schemas.WalksRequest, conn=Depends(get_conn)):
+    """Batch prefetch: build every requested walk in one round trip so a selected
+    journey's transfers cache to the device together. One bad key fails only
+    itself (its `ok` is False); the batch still returns the rest."""
+    if len(req.keys) > config.MAX_WALKS_BATCH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"too many walk keys: {len(req.keys)} > {config.MAX_WALKS_BATCH}",
+        )
+    return build_walks(conn, req.keys)

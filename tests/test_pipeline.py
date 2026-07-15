@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
-import journeys  # noqa: E402
+from api import journeys  # noqa: E402
 import api.pipeline as P  # noqa: E402
 from api.pipeline import enrich, plan_journeys, rollup_verdict  # noqa: E402
 from api.transfers import (  # noqa: E402

@@ -164,3 +164,92 @@ def test_transfer_not_found_surfaces_reason(client, monkeypatch):
     r = client.get("/transfer", params={"lat": 50.0, "lon": 8.0, "from_platform": "1", "to_platform": "99"})
     assert r.status_code == 200
     assert r.json()["reason"] == "platform_not_found"
+
+
+# ---------------------------------------------------------------------------
+# /walk and /walks (walk geometry delivery)
+#
+# HTTP-contract only: build_walk/build_walks are stubbed so these assert routing,
+# validation, the cache header, and per-key isolation -- not the geometry (that's
+# test_walks.py, and the end-to-end DB path in test_walks.py's DB-gated test).
+# ---------------------------------------------------------------------------
+
+def _walk_result(relation_id=5688517, from_p="1", to_p="16", ok=True, found=True):
+    export = {"meta": {"station_name": "Berlin Hauptbahnhof"},
+              "path": {"found": found, "walking_time_seconds": 122.1}} if ok else None
+    return schemas.WalkResult(relation_id=relation_id, from_platform=from_p,
+                              to_platform=to_p, ok=ok, export=export,
+                              reason=None if ok else "no_geometry_for_platforms")
+
+
+def test_walk_found_sets_cache_header(client, monkeypatch):
+    monkeypatch.setattr(main, "build_walk", lambda conn, key: _walk_result())
+    r = client.get("/walk", params={"relation_id": 5688517, "from_platform": "1", "to_platform": "16"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["export"]["path"]["walking_time_seconds"] == 122.1
+    # Deterministic geometry ⇒ cacheable.
+    assert "max-age" in r.headers.get("cache-control", "")
+
+
+def test_walk_forwards_key_including_step_free(client, monkeypatch):
+    captured = {}
+
+    def _fake_build(conn, key):
+        captured["key"] = key
+        return _walk_result()
+
+    monkeypatch.setattr(main, "build_walk", _fake_build)
+    client.get("/walk", params={"relation_id": 42, "from_platform": "4",
+                                "to_platform": "5", "step_free": "true"})
+    k = captured["key"]
+    assert (k.relation_id, k.from_platform, k.to_platform, k.step_free) == (42, "4", "5", True)
+
+
+def test_walk_no_geometry_omits_cache_header(client, monkeypatch):
+    monkeypatch.setattr(main, "build_walk",
+                        lambda conn, key: _walk_result(ok=False))
+    r = client.get("/walk", params={"relation_id": 999999999, "from_platform": "1", "to_platform": "2"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False
+    # A failed build isn't worth caching.
+    assert "max-age" not in r.headers.get("cache-control", "")
+
+
+def test_walk_missing_params_is_422(client):
+    assert client.get("/walk", params={"relation_id": 1, "from_platform": "1"}).status_code == 422
+
+
+def test_walks_batch_returns_all_keys(client, monkeypatch):
+    monkeypatch.setattr(
+        main, "build_walks",
+        lambda conn, keys: schemas.WalksResponse(
+            walks=[_walk_result(from_p=k.from_platform, to_p=k.to_platform,
+                                ok=(k.relation_id > 0)) for k in keys]),
+    )
+    body = {"keys": [
+        {"relation_id": 5688517, "from_platform": "1", "to_platform": "16"},
+        {"relation_id": -1, "from_platform": "1", "to_platform": "2"},
+    ]}
+    r = client.post("/walks", json=body)
+    assert r.status_code == 200
+    walks = r.json()["walks"]
+    assert len(walks) == 2
+    assert walks[0]["ok"] is True and walks[1]["ok"] is False
+
+
+def test_walks_over_limit_is_413(client, monkeypatch):
+    from api import config
+    monkeypatch.setattr(config, "MAX_WALKS_BATCH", 2)
+    body = {"keys": [{"relation_id": i, "from_platform": "1", "to_platform": "2"} for i in range(3)]}
+    r = client.post("/walks", json=body)
+    assert r.status_code == 413
+
+
+def test_walks_empty_batch_is_ok(client, monkeypatch):
+    monkeypatch.setattr(main, "build_walks",
+                        lambda conn, keys: schemas.WalksResponse(walks=[]))
+    r = client.post("/walks", json={"keys": []})
+    assert r.status_code == 200
+    assert r.json() == {"walks": []}

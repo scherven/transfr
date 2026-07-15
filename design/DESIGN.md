@@ -341,13 +341,25 @@ Detail and code-grounding for each in [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 
 The eventual client is **SwiftUI + ARKit**. This section maps each design piece to concrete Apple frameworks. The architectural keystone: the `viz_export` JSON is a single `Codable` contract that feeds every walk renderer, so the three (soon four, with AR) representations never drift.
 
+> **Status (2026-07-15):** the shared logic package **`ios/TransfrCore`** exists — the `Codable` mirrors of `api/schemas.py` and `viz_export`, the `Verdict` worst-wins logic, the async API client, and a Swift Testing suite that decodes the Python engine's own goldens (9 tests green on the iOS Simulator). The SwiftUI app target is not yet scaffolded. See `ios/README.md`.
+
 ### 13.1 App shell & navigation
 - **SwiftUI** throughout. Screens are views; the prototype's screen router → **`NavigationStack`** (value-driven), whose default push/pop *is* the directional forward/back slide. The transfer carousel → **`TabView(.page)`** or a horizontal `ScrollView` with `.scrollTargetBehavior(.paging)`. Fluid page transitions → `matchedGeometryEffect`, and on iOS 18+ `.navigationTransition(.zoom)`.
 - State: one `@Observable` `TripModel` (Observation framework) holds the journey, its transfers, and live delays.
 
 ### 13.2 Data layer
-- An async/await **`URLSession`** client over the FastAPI. `Codable` structs mirror `api/schemas.py` (`Journey`, `Leg`, `Transfer`, `Place`). The verdict becomes `enum Verdict { case feasible, tight, infeasible, unknown(String) }`; the journey verdict is a worst-wins `reduce` (§7.1).
+- An async/await **`URLSession`** client over the FastAPI (`ios/TransfrCore/TransfrClient.swift`). `Codable` structs mirror `api/schemas.py` (`Journey`, `Leg`, `Transfer`, `Place`). The verdict is `enum Verdict { case feasible, tight, infeasible, unknown(String?) }`; the journey verdict is a worst-wins `rolledUp()` — a direct port of `api/pipeline.py:_VERDICT_RANK` (`infeasible < unknown < tight < feasible`, empty ⇒ feasible), not a guess (§7.1).
 - Near-term the app is a **thin client** over `/journeys` + `/transfer`; `core/` stays server-side. The pure, DB-independent modules (`boarding.py`, `formation_model.py`, ultimately the pathfinder) port cleanly to Swift value types later if on-device routing is wanted.
+
+**Data tiering — what lives where.** The routing brain is a 24 GB Postgres DB (73 M nodes / 16 M ways for EU; Korea separate). That does *not* go on device, and it should *not* be reimplemented in Swift — routing is per-station and its answer is already baked into `viz_export`. So:
+
+| Data | Size | On device? |
+|---|---|---|
+| EU/KR OSM routing DB | ~24 GB each | **No** — server-only, behind `/journeys` + `/transfer`. |
+| `stations.csv` (autocomplete) | 16 MB / 70 k rows | **Yes**, bundled — instant offline station search. |
+| Per-transfer `viz_export` JSON | KB–low-MB each | **Yes**, cached on trip-plan — the offline unit (§13.9). |
+
+The consequence: the phone never stores "all the data," it stores the *answers* for trips the user actually has. This is also what makes algorithm churn a non-event for the client (§13.11): the pathfinder can change freely behind the JSON contract without any Swift change.
 
 ### 13.3 The `viz_export` JSON — one contract, four renderers  *(the keystone)*
 Define `struct VizExport: Codable` matching the JSON (`meta`, `ways`, `path`, `transitions`, `details`, endpoints; coords as `SIMD3<Float>` in local-ENU metres). One decode drives all of:
@@ -374,8 +386,22 @@ Add a station or fix geometry once and every view updates — the reason to keep
 ### 13.8 Theming & type
 - Tokens → an **Asset Catalog** colour set per token with light/dark variants (or a `Theme` struct keyed to `ColorScheme`). SF Pro + SF Mono are system fonts — free (D5/D6). Tabular numerals → `.monospacedDigit()`; mono blocks → `.font(.system(.body, design: .monospaced))`. `@Environment(\.colorScheme)` drives the theme; Settings' Theme control writes an `@AppStorage` override.
 
-### 13.9 Offline
+### 13.9 Offline & connectivity
 - The per-transfer `viz_export` JSON is the offline unit (self-contained ENU geometry). Cache it to disk on trip-plan (`FileManager`), plus static route images via `MKMapSnapshotter`. Section, per-level, 3D and AR all render from the cache with no signal.
+
+**What needs a connection, and how we minimise it:**
+
+| Surface | Needs network? | Minimisation |
+|---|---|---|
+| Station autocomplete | No | Bundle `stations.csv` (§13.2); network only for a fresher list. |
+| Journey planning (`/journeys`) | **Yes** — realtime MOTIS/Transitous | Cache each plan result; reopening a planned trip is offline. |
+| Walk views (section/per-level/3D/AR) | No | Prefetch every transfer's `viz_export` at plan time. |
+| Boarding & step-off | No | Computed server-side, delivered in the plan payload. |
+| Step-free re-route | No, if prefetched | Fetch the `--no-elevators` variant alongside the default (one boolean ⇒ 2× exports). |
+| Verdict (initial + recompute) | No | `Verdict.rolledUp()` runs on cached/live data locally. |
+| Live re-assessment (delays) | **Yes** — realtime | Fails soft: `LiveMonitor` keeps the last verdicts (`api/live.py`); the trip stays usable, just not fresh. |
+
+**Net:** once a trip is planned with signal, the *entire experience for that trip* — verdict spine, all four walk views, boarding — works in airplane mode. Only *new* planning and *fresh* delays need the network, and both degrade gracefully. **Server-side lever:** add a `/journeys` mode that inlines (or bundles URLs for) each transfer's `viz_export`, so a plan prefetches in one round trip instead of N — worth wiring in `api/` before the client grows.
 
 ### 13.10 Design piece → framework
 
@@ -393,6 +419,14 @@ Add a station or fix geometry once and every view updates — the reason to keep
 | Position / map | CoreLocation + MapKit |
 | `viz_export` JSON | one `Codable` → 4 renderers |
 | API | `URLSession` async/await + `Codable` |
+
+### 13.11 Testing — anchor Swift to the Python engine's own outputs
+- **Structure:** keep models/decoding/verdict logic in the `TransfrCore` SwiftPM package (done) so it tests in seconds without a simulator; **Swift Testing** (`@Test`) for logic, XCTest for UI later.
+- **The valuable move — golden fixtures generated by the *same* contracts the server serves.** `ios/TransfrCore/Tests/generate_fixtures.py` builds the `/journeys`, `/stations`, `/transfer` goldens straight from the `api/schemas.py` **pydantic** models, and copies a real `core/viz_export.py` output (Berlin Hbf 1→16). The Swift suite decodes those and asserts the worst-wins rollup. So a server-side contract change fails a Swift decode *immediately* — the two can't silently diverge. This is why "the Python might change" is a non-issue: churn lives behind a fixture-guarded JSON seam.
+- **Run:** `xcodebuild test -scheme TransfrCore -destination 'platform=iOS Simulator,name=iPhone 16'` from `ios/TransfrCore`. (`swift test` currently trips over Homebrew headers in `/usr/local/include` on this machine — see `ios/README.md`.) Regenerate goldens with `.venv/bin/python ios/TransfrCore/Tests/generate_fixtures.py`.
+
+### 13.12 Rebuild vs. incremental
+The contract-first split (§13.2) is precisely what removes the teardown risk. **Algorithm changes** are absorbed server-side behind the JSON contract — zero Swift change. **Design/IA changes** are per-view SwiftUI rewrites, cheap and local. The only thing that would justify a real teardown is a fundamental navigation rethink — and `NavigationStack` value-routing lets even that be swapped destination-by-destination. Build thin now and you're never cornered; the trap to avoid is the opposite (porting the pathfinder into Swift, then having it churn under you).
 
 ---
 

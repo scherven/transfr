@@ -47,8 +47,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-import journeys
-from journeys import (
+from api import journeys
+from api.journeys import (
     _delay_seconds,
     _extract_leg,
     _extract_place,

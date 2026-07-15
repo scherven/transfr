@@ -9,3 +9,4 @@ server.pem
 .venv
 core/viz_out/
 tests/fixtures/journeys
+ios/TransfrCore/.build

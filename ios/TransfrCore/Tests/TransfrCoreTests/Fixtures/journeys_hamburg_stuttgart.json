@@ -1,0 +1,128 @@
+{
+  "origin": {
+    "id": "8002549",
+    "name": "Hamburg Hbf",
+    "latitude": 53.552736,
+    "longitude": 10.006909
+  },
+  "destination": {
+    "id": "8098096",
+    "name": "Stuttgart Hbf",
+    "latitude": 48.784084,
+    "longitude": 9.181635
+  },
+  "departure_time": "2026-07-16T08:00:00+02:00",
+  "journeys": [
+    {
+      "id": "j-hh-s-1",
+      "date": "2026-07-16",
+      "duration_s": 19560,
+      "num_changes": 2,
+      "verdict": "tight",
+      "legs": [
+        {
+          "mode": "TRANSIT",
+          "train_name": "ICE 571",
+          "origin": {
+            "id": "8002549",
+            "name": "Hamburg Hbf",
+            "latitude": null,
+            "longitude": null
+          },
+          "destination": {
+            "id": "8000128",
+            "name": "Göttingen",
+            "latitude": null,
+            "longitude": null
+          },
+          "departure": "2026-07-16T08:02:00+02:00",
+          "arrival": "2026-07-16T09:47:00+02:00",
+          "planned_departure": "2026-07-16T08:02:00+02:00",
+          "planned_arrival": "2026-07-16T09:47:00+02:00",
+          "departure_platform": "7",
+          "arrival_platform": "7",
+          "departure_delay_s": 0,
+          "arrival_delay_s": 0,
+          "cancelled": false,
+          "distance_m": 248000
+        },
+        {
+          "mode": "TRANSIT",
+          "train_name": "ICE 273",
+          "origin": {
+            "id": "8000128",
+            "name": "Göttingen",
+            "latitude": null,
+            "longitude": null
+          },
+          "destination": {
+            "id": "8000244",
+            "name": "Mannheim Hbf",
+            "latitude": null,
+            "longitude": null
+          },
+          "departure": "2026-07-16T09:55:00+02:00",
+          "arrival": "2026-07-16T12:19:00+02:00",
+          "planned_departure": "2026-07-16T09:55:00+02:00",
+          "planned_arrival": "2026-07-16T12:19:00+02:00",
+          "departure_platform": "8",
+          "arrival_platform": "4",
+          "departure_delay_s": 0,
+          "arrival_delay_s": 120,
+          "cancelled": false,
+          "distance_m": 331000
+        },
+        {
+          "mode": "TRANSIT",
+          "train_name": "ICE 592",
+          "origin": {
+            "id": "8000244",
+            "name": "Mannheim Hbf",
+            "latitude": null,
+            "longitude": null
+          },
+          "destination": {
+            "id": "8098096",
+            "name": "Stuttgart Hbf",
+            "latitude": null,
+            "longitude": null
+          },
+          "departure": "2026-07-16T12:24:00+02:00",
+          "arrival": "2026-07-16T13:03:00+02:00",
+          "planned_departure": "2026-07-16T12:24:00+02:00",
+          "planned_arrival": "2026-07-16T13:03:00+02:00",
+          "departure_platform": "5",
+          "arrival_platform": "16",
+          "departure_delay_s": 0,
+          "arrival_delay_s": 0,
+          "cancelled": false,
+          "distance_m": 72000
+        }
+      ],
+      "transfers": [
+        {
+          "at_station": "Göttingen",
+          "relation_id": 1234567,
+          "arrival_platform": "7",
+          "departure_platform": "8",
+          "layover_s": 480.0,
+          "walk_time_s": 42.0,
+          "walk_distance_m": 18.0,
+          "verdict": "feasible",
+          "reason": null
+        },
+        {
+          "at_station": "Mannheim Hbf",
+          "relation_id": 2345678,
+          "arrival_platform": "4",
+          "departure_platform": "5",
+          "layover_s": 300.0,
+          "walk_time_s": 181.0,
+          "walk_distance_m": 95.0,
+          "verdict": "tight",
+          "reason": null
+        }
+      ]
+    }
+  ]
+}

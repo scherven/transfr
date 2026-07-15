@@ -1,0 +1,66 @@
+"""
+Build the drawable walk geometry for one transfer, on demand.
+
+`/journeys` returns the verdict spine; this turns a transfer's already-resolved
+`(relation_id, from_ref, to_ref)` into the `core/viz_export.py` document the
+Swift client's four walk renderers (section / per-level / 3D / AR) draw from.
+
+Kept as a thin, DB-taking wrapper around `viz_export.export` so it is:
+  * consistent with the verdict -- it uses the SAME settings assess_transfer's
+    pathfind used (astar, no stitch), so a default walk's `walking_time_seconds`
+    equals the Transfer's `walk_time_s`. `step_free=True` deliberately routes a
+    different (elevator-free) path, so its time may differ;
+  * never fatal -- `viz_export.export` raises `SystemExit` when a relation has no
+    resolvable coordinates; we catch that (and anything else) and return a typed
+    `WalkResult(ok=False, reason=...)` rather than 500 the request;
+  * details-free -- the landmarks/POI layer needs the full planet extract and is
+    only for the "nearest facility" feature, never for a transfer walk.
+"""
+
+from __future__ import annotations
+
+from typing import List
+
+from viz_export import export  # resolved via api/__init__ sys.path setup
+
+from api import schemas
+
+# Match assess_transfer's pathfind so geometry and verdict never disagree.
+_ALGORITHM = "astar"
+
+WALK_BUILD_FAILED = "walk_build_failed"
+NO_GEOMETRY = "no_geometry_for_platforms"
+
+
+def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
+    """Produce one walk's viz_export, degrading to a typed reason on failure."""
+    base = dict(
+        relation_id=key.relation_id,
+        from_platform=key.from_platform,
+        to_platform=key.to_platform,
+        step_free=key.step_free,
+    )
+    try:
+        doc = export(
+            conn,
+            key.relation_id,
+            key.from_platform,
+            key.to_platform,
+            algorithm=_ALGORITHM,
+            details=False,
+            stitch=False,
+            avoid_elevators=key.step_free,
+        )
+    except SystemExit:
+        # export() raises SystemExit("no coordinates resolved ...") when the
+        # relation/refs don't yield geometry -- a data gap, not a server error.
+        return schemas.WalkResult(**base, ok=False, reason=NO_GEOMETRY)
+    except Exception:  # noqa: BLE001 -- one bad key must not fail a batch
+        return schemas.WalkResult(**base, ok=False, reason=WALK_BUILD_FAILED)
+
+    return schemas.WalkResult(**base, ok=True, export=doc)
+
+
+def build_walks(conn, keys: List[schemas.WalkKey]) -> schemas.WalksResponse:
+    """Batch: build every key in order. Isolated failures stay per-key."""
+    return schemas.WalksResponse(walks=[build_walk(conn, k) for k in keys])

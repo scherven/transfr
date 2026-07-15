@@ -27,7 +27,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
-from boarding import find_path_from_seat  # noqa: E402
+from seat import find_path_from_seat  # noqa: E402
 from formation_model import PlatformSectorMap  # noqa: E402
 from live_sources import (  # noqa: E402
     Departure,

@@ -1560,7 +1560,7 @@
 
               <div class="set-h">All databases · connectivity</div>
               <div class="set-card" style="margin-bottom:8px">
-                <div class="mhcmp"><span class="cl">EU</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:46;background:var(--go)"></div><div style="flex-grow:15;background:var(--tight)"></div><div style="flex-grow:39;background:var(--miss)"></div></div><span class="cv mono">46%</span></div>
+                <div class="mhcmp"><span class="cl">EU</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:71;background:var(--go)"></div><div style="flex-grow:5;background:var(--tight)"></div><div style="flex-grow:24;background:var(--miss)"></div></div><span class="cv mono">71%</span></div>
                 <div class="mhcmp"><span class="cl">JP</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:61;background:var(--go)"></div><div style="flex-grow:16;background:var(--tight)"></div><div style="flex-grow:23;background:var(--miss)"></div></div><span class="cv mono">61%</span></div>
                 <div class="mhcmp"><span class="cl">KR</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:2;background:var(--go)"></div><div style="flex-grow:5;background:var(--tight)"></div><div style="flex-grow:93;background:var(--miss)"></div></div><span class="cv mono">2%</span></div>
                 <div style="display:flex;gap:12px;font-size:10px;color:var(--ink-3);margin-top:10px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--go);margin-right:4px"></i>connected</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--tight);margin-right:4px"></i>stitchable</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--miss);margin-right:4px"></i>island</span></div>
@@ -1568,7 +1568,7 @@
 
               <div class="walk-hint" style="padding:12px 4px 0">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-                Only <span class="mono">transfr_kr</span> is a measured survey (<span class="mono">stitch_survey.py</span>: 2 / 5 / 93); EU &amp; JP figures are illustrative until their sweeps finish. Health is intrinsic to each map — nothing here is user-editable.
+                <span class="mono">transfr_eu</span> (71 / 5 / 24, 1,401 platforms) and <span class="mono">transfr_kr</span> (2 / 5 / 93, 899) are measured <span class="mono">stitch_survey.py</span> sweeps; JP is illustrative until its sweep finishes. Health is intrinsic to each map — nothing here is user-editable.
               </div>
             </div>
           </section>
@@ -2029,7 +2029,7 @@
     bad:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>'
   };
   var MH = {
-    Europe:{db:"transfr_eu", n:"52,400 platforms", s:[46,15,39], cards:[
+    Europe:{db:"transfr_eu", n:"1,401 sampled", s:[71,5,24], cards:[
       ["ok","Connected — full walks available","Berlin Hbf, Hamburg Hbf, most DACH majors: every platform shares the pedestrian graph, so any platform pair routes end-to-end."],
       ["warn","Stitchable — auto-bridged","Colmar A→E: a 3.9 m underpass gap the footway leaves open. The system bridges it automatically; amber flags that the join is inferred, not mapped."]]},
     Korea:{db:"transfr_kr", n:"899 platforms", s:[2,5,93], cards:[

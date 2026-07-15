@@ -27,7 +27,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
-from boarding import (  # noqa: E402
+from seat import (  # noqa: E402
     PlatformGeometry,
     find_path_from_seat,
     resolve_alighting_point,

@@ -1,0 +1,16 @@
+[
+  {
+    "id": "8002549",
+    "name": "Hamburg Hbf",
+    "latitude": 53.552736,
+    "longitude": 10.006909,
+    "country": "DE"
+  },
+  {
+    "id": "8098096",
+    "name": "Stuttgart Hbf",
+    "latitude": 48.784084,
+    "longitude": 9.181635,
+    "country": "DE"
+  }
+]

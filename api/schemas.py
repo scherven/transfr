@@ -7,9 +7,9 @@ journey-level `verdict` rolled up from them. `verdict`/`reason` values are the
 constants in api/transfers.py.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Place(BaseModel):
@@ -89,3 +89,56 @@ class PlatformWalkResponse(BaseModel):
     walk_time_s: Optional[float] = None
     walk_distance_m: Optional[float] = None
     reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Walk geometry (viz_export) delivery -- /walk and /walks
+#
+# A journey's verdict spine comes from /journeys; the drawable per-transfer walk
+# geometry (section / per-level / 3D / AR) is fetched separately so /journeys
+# stays lean and each walk is independently cacheable. A walk is keyed by the
+# exact triple assess_transfer already resolves on every Transfer -- relation_id
+# + arrival_platform + departure_platform -- so the client just echoes those.
+# ---------------------------------------------------------------------------
+
+
+class WalkKey(BaseModel):
+    """Identifies one platform-to-platform walk. These three fields are exactly
+    what a Transfer already carries, so the client forwards them verbatim.
+    `step_free` requests the elevator-free variant (a different route, hence a
+    different walk time than the verdict's)."""
+
+    relation_id: int
+    from_platform: str
+    to_platform: str
+    step_free: bool = False
+
+
+class WalkResult(BaseModel):
+    """One walk's geometry, or a reason it couldn't be built. `export` is the
+    full `core/viz_export.py` document (mirrored by `VizExport` on the Swift
+    side); it is passed through untyped here because it is a large, already-
+    tested geometry payload -- modelling it twice buys nothing.
+
+    Two failure levels: `ok=False` means no export could be produced at all
+    (bad relation / unresolvable platforms); `ok=True` with `export.path.found
+    == false` means the export exists but the two platforms don't connect
+    (a real, drawable 'no route' state)."""
+
+    relation_id: int
+    from_platform: str
+    to_platform: str
+    step_free: bool = False
+    ok: bool
+    reason: Optional[str] = None
+    export: Optional[Dict[str, Any]] = None
+
+
+class WalksRequest(BaseModel):
+    """Batch prefetch: one round trip for a selected journey's transfers."""
+
+    keys: List[WalkKey] = Field(default_factory=list)
+
+
+class WalksResponse(BaseModel):
+    walks: List[WalkResult]

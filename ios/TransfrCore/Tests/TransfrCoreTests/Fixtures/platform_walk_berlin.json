@@ -1,0 +1,12 @@
+{
+  "lat": 52.525,
+  "lon": 13.369,
+  "relation_id": 5688517,
+  "station": "Berlin Hbf",
+  "from_platform": "1",
+  "to_platform": "16",
+  "found": true,
+  "walk_time_s": 122.0,
+  "walk_distance_m": 107.0,
+  "reason": null
+}

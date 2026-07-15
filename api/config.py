@@ -30,6 +30,11 @@ BUFFER_S = _float("TRANSFR_BUFFER_S", 60.0)
 DEFAULT_MAX_JOURNEYS = _int("TRANSFR_MAX_JOURNEYS", 5)
 MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)
 
+# Upper bound on walks requested in one POST /walks batch. A journey rarely has
+# more than a handful of transfers; this caps the per-request pathfinding work
+# (each walk re-runs the platform search).
+MAX_WALKS_BATCH = _int("TRANSFR_MAX_WALKS_BATCH", 12)
+
 # CORS: comma-separated origins, or "*" for all (dev default).
 CORS_ORIGINS = [o.strip() for o in os.environ.get("TRANSFR_CORS_ORIGINS", "*").split(",") if o.strip()]
 

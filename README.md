@@ -40,8 +40,8 @@ platform transfer is walkable within the layover (`feasible` / `tight` /
 It reads the `core/` `transfr_eu` database (PG* env vars, see `core/db.py`). The
 coordinate-based station resolver and the platform matcher need two index builds:
 
-    .venv/bin/python core/build_station_index.py     # station_points (~333k rows)
-    .venv/bin/python core/build_platform_index.py    # station_stops + osm_nodes coord index (Tier 2)
+    .venv/bin/python core/dbgen/build_station_index.py     # station_points (~333k rows)
+    .venv/bin/python core/dbgen/build_platform_index.py    # station_stops + osm_nodes coord index (Tier 2)
 
 ## development
 

@@ -1,5 +1,5 @@
 r"""
-Pure unit tests for core/boarding.py -- no database needed.
+Pure unit tests for core/boarding/seat.py -- no database needed.
 
 These prove the seat-aware boarding layer end to end on a small, fully
 hand-computable synthetic station, the same way test_dijkstra.py proves the
@@ -30,7 +30,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
-from boarding import (  # noqa: E402
+from seat import (  # noqa: E402
     START,
     PlatformGeometry,
     TrainFormation,

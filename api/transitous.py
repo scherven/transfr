@@ -10,7 +10,7 @@ being one change of train.
 from datetime import datetime
 from typing import Any, Dict, List, Tuple
 
-import journeys as _journeys
+from api import journeys as _journeys
 
 WALKING = "walking"  # journeys.py lowercases modes and labels every non-transit leg this
 
