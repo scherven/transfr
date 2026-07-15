@@ -1,6 +1,8 @@
 # transfr
 can you really make that transfer?
 
+Map data (c) [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+
 ## algorithm
 
 from stop location:
@@ -30,7 +32,7 @@ platform transfer is walkable within the layover (`feasible` / `tight` /
 `infeasible` / `unknown`+reason).
 
     .venv/bin/uvicorn api.main:app --port 5001
-
+    
     # then, e.g.
     curl 'localhost:5001/journeys?from=Frankfurt&to=Z%C3%BCrich%20HB'
     curl 'localhost:5001/transfer?lat=48.0732&lon=7.3470&from_platform=A&to_platform=B'
