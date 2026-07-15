@@ -1,25 +1,24 @@
 """
 Render a viz JSON (see core/viz_export.py) as an interactive 3D Plotly scene.
 
-Deliberately bare -- no axes, grid, or plot background -- but structured so the
-station reads at a glance:
+Deliberately bare -- no axes, grid, or plot background, and NONE of the station's
+wider mapped web of walkways, platforms and other stairs/escalators/elevators the
+search merely looked at. Only what is *walk-relevant* is drawn:
 
-  * translucent reference planes, one per OSM `level`, labelled, so you can see
-    which floor each way and each stretch of the path sits on;
-  * vertical circulation split by type -- stairs, escalator, elevator, ramp --
-    each its own colour, because "which one do I take between floors" is the
-    whole question a transfer view exists to answer;
-  * the chosen path drawn thick and on top, with its start/end platforms marked;
-  * when the export carries a details layer, the handful of *named* stores/places
-    nearest the path as small labelled cubes (a `--details` export), so you can
-    orient by what you'd actually see. Fixtures a traveller doesn't navigate by
-    (ATMs, toilets, taxi stands, info booths) and unnamed building parts are
-    dropped; the names are dodged in the view plane so none overlap.
+  * the chosen route, thick, with its turns, and its start/end platforms marked;
+  * how you change floors along it -- each level change drawn as a riser coloured
+    by what you actually take (stairs / escalator / elevator / ramp) and labelled,
+    because "which one do I take between floors" is the decision the view exists
+    to answer;
+  * the named shops the walk passes, drawn with their real OSM footprint (a low
+    extruded prism; a small marker where OSM has only a point), so you orient by
+    what you'd actually see -- fixtures nobody navigates by (ATMs, toilets, taxi
+    stands, info booths) and shops off the walked route are dropped, and the names
+    are dodged in the view plane so none overlap;
+  * faint reference planes at the floors the walk uses, labelled, so the vertical
+    structure reads.
 
-The view is framed on the path: context ways are cropped to a margin around the
-route (--margin) so the local transfer structure fills the screen instead of a
-station's full-length platform tails swamping it. The export keeps the full
-geometry; only the render crops.
+The view is framed on the path (--margin sets how much breathing room around it).
 
 The vertical axis is the OSM `level` tag scaled to a nominal per-floor height,
 NOT real elevation -- OSM does not carry usable indoor elevations (verified: no
@@ -49,25 +48,12 @@ END_COLOR = "#e03131"
 # (Plotly 3D lines can't dash).
 STITCH_COLOR = "#f03e3e"
 
-# Context ways grouped by semantic kind. Order == draw order (later on top), so
-# vertical circulation stays visible over flat floor where they overlap.
-# (group_key, colour, line width, legend label)
-GROUPS = [
-    ("walkway", "rgba(150,152,162,0.34)", 2, "walkway"),
-    ("platform", "rgba(64,74,96,0.55)", 4, "platform"),
-    ("ramp", "#2f9e44", 4, "ramp"),
-    ("stairs", "#7048e8", 5, "stairs"),
-    ("escalator", "#1098ad", 5, "escalator"),
-    ("elevator", "#e64980", 6, "elevator"),
-]
-VERTICAL_KINDS = {"platform", "ramp", "stairs", "escalator", "elevator"}
-
 PLANE_FILL = "rgb(120,128,148)"   # opacity applied separately on the mesh
 PLANE_EDGE = "rgba(120,128,148,0.35)"
 PLANE_LABEL = "#6a7280"
 
-# Colours for the path's level-change risers, keyed by connector kind (matches
-# GROUPS). "vertical" = a level change at a node with nothing saying how.
+# Colours for the path's level-change risers, keyed by the connector kind you
+# take. "vertical" = a level change at a node with nothing saying how.
 KIND_COLOR = {"stairs": "#7048e8", "escalator": "#1098ad", "elevator": "#e64980",
               "ramp": "#2f9e44", "vertical": "#495057"}
 
@@ -116,13 +102,9 @@ LANDMARK_COLOR = {
 }
 
 
-def _group_key(way):
-    return way["kind"] if way["kind"] in VERTICAL_KINDS else "walkway"
-
-
 def _focus_window(data, margin):
-    """(x0, x1, y0, y1) to crop context to: a margin around the path if there is
-    one, else the full drawn footprint."""
+    """(x0, x1, y0, y1) the scene is framed to: a margin around the path if there
+    is one, else the full drawn footprint."""
     path = data["path"]
     if path.get("found") and path.get("points"):
         xs = [p[0] for p in path["points"]]
@@ -134,48 +116,18 @@ def _focus_window(data, margin):
     return (min(xs) - margin, max(xs) + margin, min(ys) - margin, max(ys) + margin)
 
 
-def _clip_runs(points, win):
-    """Split a polyline into the contiguous runs that fall inside win, so a
-    430 m platform contributes only the stretch near the path."""
-    x0, x1, y0, y1 = win
-    runs, cur = [], []
-    for p in points:
-        if x0 <= p[0] <= x1 and y0 <= p[1] <= y1:
-            cur.append(p)
-        elif len(cur) >= 2:
-            runs.append(cur)
-            cur = []
-        else:
-            cur = []
-    if len(cur) >= 2:
-        runs.append(cur)
-    return runs
-
-
-def _batch_lines(runs, exag):
-    xs, ys, zs = [], [], []
-    for pts in runs:
-        for x, y, z in pts:
-            xs.append(x)
-            ys.append(y)
-            zs.append(z * exag)
-        xs.append(None)
-        ys.append(None)
-        zs.append(None)
-    return xs, ys, zs
-
-
 def _level_label(v):
     return f"L{int(v)}" if float(v).is_integer() else f"L{v:g}"
 
 
-def _add_level_planes(fig, data, win, exag):
-    """A faint slab + labelled outline at each level, sized to the focus window.
-    This is what makes the vertical structure legible."""
-    meta = data["meta"]
-    levels = meta.get("levels_present") or []
+def _add_level_planes(fig, data, win, exag, levels):
+    """A faint slab + labelled outline at each of `levels`, sized to the focus
+    window -- the reference that makes the walk's vertical structure legible.
+    Only the floors the walk actually uses are passed in, so empty and
+    connector-interpolated levels don't add ghost planes."""
     if not levels:
         return
+    meta = data["meta"]
     x0, x1, y0, y1 = win
     floor = meta.get("floor_height_m", 4.0)
 
@@ -479,21 +431,16 @@ def build_figure(data, exag: float, margin: float) -> go.Figure:
     win = _focus_window(data, margin)
     fig = go.Figure()
 
-    _add_level_planes(fig, data, win, exag)
-
-    grouped = {}
-    for w in data["ways"]:
-        key = _group_key(w)
-        for run in _clip_runs(w["points"], win):
-            grouped.setdefault(key, []).append(run)
-    for key, color, width, label in GROUPS:
-        runs = grouped.get(key)
-        if not runs:
-            continue
-        xs, ys, zs = _batch_lines(runs, exag)
-        fig.add_trace(go.Scatter3d(x=xs, y=ys, z=zs, mode="lines",
-                                   line=dict(color=color, width=width),
-                                   hoverinfo="skip", name=label))
+    # Only the walk itself is drawn -- the route, how you change floors, and the
+    # shops you pass -- NOT the station's full mapped web of walkways, platforms
+    # and every other stair/escalator/elevator the search merely looked at. So
+    # the reference planes are limited to the floors the walk actually touches.
+    floor = meta.get("floor_height_m", 4.0) or 4.0
+    if path.get("found") and path.get("points"):
+        walked_levels = sorted({round(p[2] / floor) for p in path["points"]})
+    else:
+        walked_levels = [lv for lv in (meta.get("levels_present") or []) if float(lv).is_integer()]
+    _add_level_planes(fig, data, win, exag, walked_levels)
 
     avoid_pts = []   # path's own label anchors, so landmark names dodge them
     if path.get("found"):

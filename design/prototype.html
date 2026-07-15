@@ -432,6 +432,11 @@
   .poi-row .pn small{display:block;font-size:10.5px;color:var(--ink-3);margin-top:1px}
   .poi-row .pd{font-family:var(--mono);font-size:12px;font-weight:620;text-align:right;flex:0 0 auto}
   .poi-row.nearest{border-color:var(--accent);background:var(--accent-soft)}
+  /* tappable walk rows -> open the full 3D walk view */
+  .mrow:not(.src),.poi-row{cursor:pointer;transition:border-color .15s,transform .15s}
+  .mrow:not(.src):hover,.poi-row:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .walk-go{width:16px;height:16px;flex:0 0 auto;color:var(--ink-3)}
+  .walk-go svg{width:16px;height:16px}
   /* region / db cards */
   .rgn{padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:14px;margin-bottom:9px}
   .rgn-top{display:flex;align-items:center;gap:11px;margin-bottom:11px}
@@ -452,6 +457,9 @@
   .hstat.ok .hdot{background:var(--go)} .hstat.warn .hdot{background:var(--tight)} .hstat.bad .hdot{background:var(--miss)}
   .hstat .ht{font-size:13px;font-weight:600;line-height:1.35}
   .hstat .hs{font-size:11.5px;color:var(--ink-2);margin-top:3px;line-height:1.45}
+  .mhcmp{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+  .mhcmp .cl{width:24px;font-size:11px;font-weight:640;color:var(--ink-2);font-family:var(--mono)}
+  .mhcmp .cv{width:36px;text-align:right;font-size:11.5px;font-weight:620;color:var(--go)}
 
   /* ---------- SETTINGS ---------- */
   .set-h{font-size:10.5px;font-weight:680;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:14px 2px 8px}
@@ -1347,11 +1355,64 @@
               </div>
 
               <div class="set-h">Power tools</div>
-              <button class="set-row arow" data-go="advanced" style="margin-bottom:0">
+              <button class="set-row arow" data-go="advanced">
                 <span class="set-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l7 4v5c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V7z"/><path d="M9.5 12l1.8 1.8L15 10"/></svg></span>
                 <div class="set-tx"><div class="set-nm">Advanced</div><div class="set-sb">Station walks · nearest facilities · offline data · map health</div></div>
                 <span class="chevr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 6l6 6-6 6"/></svg></span>
               </button>
+
+              <div class="set-h">About</div>
+              <button class="set-row arow" data-go="about" style="margin-bottom:0">
+                <span class="set-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+                <div class="set-tx"><div class="set-nm">Attributions &amp; data sources</div><div class="set-sb">Map data © OpenStreetMap contributors · licences</div></div>
+                <span class="chevr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 6l6 6-6 6"/></svg></span>
+              </button>
+            </div>
+          </section>
+
+          <!-- ========== ATTRIBUTIONS ========== -->
+          <section class="screen" id="s-about">
+            <div class="scr">
+              <div class="topbar">
+                <button class="chev" data-go="settings" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
+                <div><h2>Attributions</h2><div class="sub">Data sources &amp; licences</div></div>
+              </div>
+
+              <div class="set-card" style="margin-bottom:14px;border-color:var(--accent);background:var(--accent-soft)">
+                <div style="display:flex;align-items:center;gap:11px;margin-bottom:9px">
+                  <span class="set-ic" style="background:var(--accent);color:#fff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a7 7 0 0 0-7 7c0 5 7 13 7 13s7-8 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/></svg></span>
+                  <div class="set-nm" style="font-size:15px">Map data © OpenStreetMap contributors</div>
+                </div>
+                <div class="set-sb" style="line-height:1.5">Every station map, platform, footway, level and facility in Transfr is derived from OpenStreetMap, available under the <b>Open Database License (ODbL)</b>. © OpenStreetMap contributors.</div>
+              </div>
+
+              <div class="set-h">Data sources</div>
+              <div class="set-row" style="flex-direction:column;align-items:stretch;gap:4px">
+                <div class="set-nm">OpenStreetMap</div>
+                <div class="set-sb">Base map, platforms, walkways, levels, facilities. © OpenStreetMap contributors, ODbL. <span class="mono">openstreetmap.org/copyright</span></div>
+              </div>
+              <div class="set-row" style="flex-direction:column;align-items:stretch;gap:4px">
+                <div class="set-nm">Transitous · MOTIS</div>
+                <div class="set-sb">Journeys, live delays and platform assignments, via the open Transitous routing service (MOTIS). Community open data.</div>
+              </div>
+              <div class="set-row" style="flex-direction:column;align-items:stretch;gap:4px">
+                <div class="set-nm">Deutsche Bahn · IRIS</div>
+                <div class="set-sb">Real-time platform and track changes for German stations, via DB's public IRIS feed.</div>
+              </div>
+              <div class="set-row" style="flex-direction:column;align-items:stretch;gap:4px;margin-bottom:0">
+                <div class="set-nm">Coach-formation providers</div>
+                <div class="set-sb">Train coach order &amp; sector maps from the operators' formation APIs (DB Wagenreihung and equivalents), where published.</div>
+              </div>
+
+              <div class="set-h">Built with</div>
+              <div class="set-row" style="margin-bottom:0">
+                <div class="set-tx"><div class="set-sb" style="line-height:1.5">Regions are extracted offline from the OSM planet with <span class="mono">osmium</span>; routing runs on the local <span class="mono">core/</span> pathfinder. No map tiles are fetched at run time — an installed region is fully self-contained.</div></div>
+              </div>
+
+              <div class="walk-hint" style="padding:14px 4px 0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l9 5v10l-9 5-9-5V7z"/></svg>
+                ODbL requires that any public use of this data keep the “© OpenStreetMap contributors” credit and share adaptations alike.
+              </div>
             </div>
           </section>
 
@@ -1427,7 +1488,7 @@
 
               <div class="walk-hint" style="padding:12px 4px 0">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="4.5" r="2"/><path d="M7 9h10M12 9v6M9 20l3-6 3 6"/></svg>
-                The <b style="color:var(--go)">green figure</b> marks a step-free reachable platform (Step-free routes is on in Settings). One pathfind per platform from the source — same walk cost the transfer verdict uses.
+                <b>Tap any platform</b> to see the walk as a full 3D view — section, per-level plans, rotatable 3D. The <b style="color:var(--go)">green figure</b> marks a step-free reachable platform (Step-free routes is on in Settings). One pathfind per platform from the source — same walk cost the transfer verdict uses.
               </div>
             </div>
           </section>
@@ -1470,7 +1531,7 @@
 
               <div class="walk-hint" style="padding:14px 4px 0">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-                Facilities come from OSM <span class="mono">amenity</span>/<span class="mono">shop</span> tags in the station's detail layer. If a station has none mapped, we say so rather than guess.
+                <b>Tap a facility</b> to walk to it in full 3D — section, levels, rotatable. Facilities come from OSM <span class="mono">amenity</span>/<span class="mono">shop</span> tags in the station's detail layer. If a station has none mapped, we say so rather than guess.
               </div>
             </div>
           </section>
@@ -1480,46 +1541,34 @@
             <div class="scr">
               <div class="topbar">
                 <button class="chev" data-go="advanced" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
-                <div><h2>Map health</h2><div class="sub">Colmar · rel 6365739</div></div>
+                <div><h2>Map health</h2><div class="sub">Across your databases</div></div>
               </div>
 
-              <div class="hstat warn">
-                <span class="hdot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4"><path d="M12 8v5M12 16h.01"/></svg></span>
-                <div><div class="ht">Stitchable — one gap, fixable</div><div class="hs">Platforms A and E don't share a graph node, so a walk between them can't be computed <b>yet</b>. The underpass <i>is</i> mapped — its footway just ends inside the platform polygon without a shared point.</div></div>
+              <div class="set-sb" style="margin:0 2px 8px">Database</div>
+              <div class="sseg" id="mhRegion" style="margin-bottom:14px">
+                <button class="on">Europe</button><button>Korea</button><button>Japan</button>
               </div>
 
-              <div class="walk-stats" style="margin:2px 0 12px">
-                <div class="tstat"><span class="k">Gap</span><span class="v">3.9 m</span></div>
-                <div class="tstat"><span class="k">Fix</span><span class="v">1 edge</span></div>
-                <div class="tstat"><span class="k">Then A→E</span><span class="v">229 m</span></div>
+              <div class="set-card" style="margin-bottom:14px">
+                <div class="set-sb" id="mhCap" style="margin-bottom:2px"></div>
+                <div class="zbar" id="mhBar" style="margin-top:12px"></div>
+                <div id="mhLeg" style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-3);margin-top:7px"></div>
               </div>
 
-              <button class="set-row arow" data-adv-stitch style="margin-bottom:14px">
-                <span class="set-ic" style="background:var(--accent);color:#fff"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 12h8M8 12a3 3 0 0 1-3-3V7a3 3 0 0 1 6 0M16 12a3 3 0 0 0 3-3V7a3 3 0 0 0-6 0"/></svg></span>
-                <div class="set-tx"><div class="set-nm">Add a manual bridge</div><div class="set-sb">Stitch footway node 12165806573 → platform node 676088026 (3.9 m)</div></div>
-                <span class="chevr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 6l6 6-6 6"/></svg></span>
-              </button>
+              <div class="set-h">Representative stations</div>
+              <div id="mhCards"></div>
 
-              <div class="set-h">Across the loaded map</div>
+              <div class="set-h">All databases · connectivity</div>
               <div class="set-card" style="margin-bottom:8px">
-                <div class="set-sb" style="margin-bottom:2px">Platform-to-platform connectivity · <span class="mono">transfr_kr</span> · 899 platforms</div>
-                <div class="zbar" style="margin-top:12px">
-                  <div style="flex-grow:2;background:var(--go)"></div>
-                  <div style="flex-grow:5;background:var(--tight)"></div>
-                  <div style="flex-grow:93;background:var(--miss)"></div>
-                </div>
-                <div style="display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-3);margin-top:7px">
-                  <span><b style="color:var(--go)">2%</b> connected</span><span><b style="color:var(--tight)">5%</b> stitchable</span><span><b style="color:var(--miss)">93%</b> island</span>
-                </div>
+                <div class="mhcmp"><span class="cl">EU</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:46;background:var(--go)"></div><div style="flex-grow:15;background:var(--tight)"></div><div style="flex-grow:39;background:var(--miss)"></div></div><span class="cv mono">46%</span></div>
+                <div class="mhcmp"><span class="cl">JP</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:61;background:var(--go)"></div><div style="flex-grow:16;background:var(--tight)"></div><div style="flex-grow:23;background:var(--miss)"></div></div><span class="cv mono">61%</span></div>
+                <div class="mhcmp"><span class="cl">KR</span><div class="zbar" style="flex:1;margin:0"><div style="flex-grow:2;background:var(--go)"></div><div style="flex-grow:5;background:var(--tight)"></div><div style="flex-grow:93;background:var(--miss)"></div></div><span class="cv mono">2%</span></div>
+                <div style="display:flex;gap:12px;font-size:10px;color:var(--ink-3);margin-top:10px"><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--go);margin-right:4px"></i>connected</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--tight);margin-right:4px"></i>stitchable</span><span><i style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--miss);margin-right:4px"></i>island</span></div>
               </div>
 
-              <div class="hstat bad">
-                <span class="hdot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
-                <div><div class="ht">Island — concourse unmapped</div><div class="hs">Seoul mainline (rel 10854766): every platform is its own island and OSM holds <b>only tracks</b> between them — no footway to route on. We show a labelled straight-line estimate, never a fake path.</div></div>
-              </div>
-              <div class="hstat ok">
-                <span class="hdot"><svg viewBox="0 0 24 24" fill="none" stroke-width="2.6"><path d="M5 12l4 4 10-10"/></svg></span>
-                <div><div class="ht">Connected — full walks available</div><div class="hs">Berlin Hbf, Hamburg Hbf, most DACH majors: every platform shares the pedestrian graph, so any platform pair routes end-to-end.</div></div>
+              <div class="walk-hint" style="padding:12px 4px 0">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+                Only <span class="mono">transfr_kr</span> is a measured survey (<span class="mono">stitch_survey.py</span>: 2 / 5 / 93); EU &amp; JP figures are illustrative until their sweeps finish. Health is intrinsic to each map — nothing here is user-editable.
               </div>
             </div>
           </section>
@@ -1529,7 +1578,7 @@
             <div class="scr">
               <div class="topbar">
                 <button class="chev" data-go="advanced" data-back><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M15 18l-6-6 6-6"/></svg></button>
-                <div><h2>Offline &amp; regions</h2><div class="sub">2 regions · 1.9 GB on device</div></div>
+                <div><h2>Offline &amp; regions</h2><div class="sub">3 regions · 2.6 GB on device</div></div>
               </div>
 
               <div class="set-h">Regions</div>
@@ -1553,10 +1602,19 @@
               </div>
               <div class="rgn">
                 <div class="rgn-top">
-                  <span class="set-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg></span>
-                  <div class="rgn-nm">Japan<small>transfr_jp · not installed</small></div>
+                  <span class="set-ic" style="background:var(--go-soft);color:var(--go)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12l4 4 10-10"/></svg></span>
+                  <div class="rgn-nm">Japan<small>transfr_jp · OSM 2026-07-08</small></div>
+                  <span class="badge go">Installed</span>
                 </div>
-                <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-bottom:11px"><span>~0.7 GB estimated</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-bottom:11px"><span>0.7 GB · 9,200 stations</span><span>Standby</span></div>
+                <div class="rgn-acts"><button class="btn-s">Update</button><button class="btn-s danger">Remove</button></div>
+              </div>
+              <div class="rgn">
+                <div class="rgn-top">
+                  <span class="set-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M8 11l4 4 4-4M5 21h14"/></svg></span>
+                  <div class="rgn-nm">Great Britain<small>transfr_gb · not installed</small></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--ink-3);margin-bottom:11px"><span>~0.6 GB estimated</span></div>
                 <div class="rgn-acts"><button class="btn-s primary" data-adv-dl>Download</button></div>
               </div>
 
@@ -1572,10 +1630,10 @@
 
               <div class="set-h">Storage</div>
               <div class="set-card" style="margin-bottom:8px">
-                <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px"><span>On this device</span><span class="mono" style="font-weight:640">1.9 GB</span></div>
-                <div class="meter"><i style="width:63%"></i></div>
+                <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:8px"><span>On this device</span><span class="mono" style="font-weight:640">2.6 GB</span></div>
+                <div class="meter"><i style="width:71%"></i></div>
                 <div style="display:flex;flex-direction:column;gap:6px;margin-top:11px;font-size:11.5px;color:var(--ink-2)">
-                  <div style="display:flex;justify-content:space-between"><span>Region databases</span><span class="mono">1.9 GB</span></div>
+                  <div style="display:flex;justify-content:space-between"><span>Region databases</span><span class="mono">2.6 GB</span></div>
                   <div style="display:flex;justify-content:space-between"><span>Station detail cache · 42 stations</span><span class="mono">146 MB</span></div>
                 </div>
                 <button class="btn-s danger" style="width:100%;margin-top:12px">Clear detail cache</button>
@@ -1697,7 +1755,7 @@
 
     <!-- NAVIGATOR -->
     <nav class="navigator" id="navigator">
-      <div class="nav-h">Prototype · 14 screens</div>
+      <div class="nav-h">Prototype · 15 screens</div>
       <button class="nav-item on" data-nav="input"><span class="ni-n">01</span><span class="ni-t">Plan a trip<div class="ni-d">link · type · walk-only</div></span></button>
       <button class="nav-item" data-nav="results"><span class="ni-n">02</span><span class="ni-t">Connections<div class="ni-d">verdict at a glance</div></span></button>
       <button class="nav-item" data-nav="journey"><span class="ni-n">03</span><span class="ni-t">The connection<div class="ni-d">timeline + transfers</div></span></button>
@@ -1713,6 +1771,7 @@
       <button class="nav-item" data-nav="nearest"><span class="ni-n">12</span><span class="ni-t">Nearest facility<div class="ni-d">toilets · lifts · exits</div></span></button>
       <button class="nav-item" data-nav="maphealth"><span class="ni-n">13</span><span class="ni-t">Map health<div class="ni-d">connected · stitchable · island</div></span></button>
       <button class="nav-item" data-nav="dbmanage"><span class="ni-n">14</span><span class="ni-t">Offline &amp; regions<div class="ni-d">download · prefetch · storage</div></span></button>
+      <button class="nav-item" data-nav="about"><span class="ni-n">15</span><span class="ni-t">Attributions<div class="ni-d">© OpenStreetMap · licences</div></span></button>
       <div class="nav-note">Tap a screen, or move through the phone itself — every <b>back</b> chevron and button is wired.</div>
     </nav>
   </div>
@@ -1724,7 +1783,7 @@
 
 <script>
 (function(){
-  var order = ["input","results","journey","carousel","walk","ar","live","settings","advanced","stationwalk","nearest","maphealth","dbmanage","walklookup"];
+  var order = ["input","results","journey","carousel","walk","ar","live","settings","advanced","stationwalk","nearest","maphealth","dbmanage","about","walklookup"];
   function idx(n){ return order.indexOf(n); }
 
   function setNav(id){
@@ -1963,6 +2022,49 @@
     });
   }
 
+  /* ---------- ADVANCED: map health (per database) ---------- */
+  var MH_IC = {
+    ok:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.6"><path d="M5 12l4 4 10-10"/></svg>',
+    warn:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.4"><path d="M12 8v5M12 16h.01"/></svg>',
+    bad:'<svg viewBox="0 0 24 24" fill="none" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+  };
+  var MH = {
+    Europe:{db:"transfr_eu", n:"52,400 platforms", s:[46,15,39], cards:[
+      ["ok","Connected — full walks available","Berlin Hbf, Hamburg Hbf, most DACH majors: every platform shares the pedestrian graph, so any platform pair routes end-to-end."],
+      ["warn","Stitchable — auto-bridged","Colmar A→E: a 3.9 m underpass gap the footway leaves open. The system bridges it automatically; amber flags that the join is inferred, not mapped."]]},
+    Korea:{db:"transfr_kr", n:"899 platforms", s:[2,5,93], cards:[
+      ["bad","Island — concourse unmapped","Seoul mainline (rel 10854766): platforms are separate islands with only tracks between them. We show a labelled straight-line estimate, never a fake path."],
+      ["warn","Stitchable — building perimeter","Busan 5→8 routes along the station-building outline — the hall is the real path, but the geometry is approximate with no vertical cost."]]},
+    Japan:{db:"transfr_jp", n:"18,600 platforms", s:[61,16,23], cards:[
+      ["ok","Connected — dense mapping","Shinjuku, Tōkyō, Ōsaka: concourses and passages are mapped in full, so even the largest interchanges route platform-to-platform."],
+      ["warn","Stitchable — fare-gate lines","Some private-rail ↔ JR interchanges are auto-bridged across the paid-area boundary; amber because that join is inferred."]]}
+  };
+  var mhReg=document.getElementById("mhRegion"), mhCap=document.getElementById("mhCap"),
+      mhBar=document.getElementById("mhBar"), mhLeg=document.getElementById("mhLeg"),
+      mhCards=document.getElementById("mhCards");
+  function renderMH(key){
+    var d=MH[key]; if(!d||!mhCap) return;
+    mhCap.innerHTML='Platform-to-platform connectivity · <span class="mono">'+d.db+'</span> · '+d.n;
+    mhBar.innerHTML='<div style="flex-grow:'+d.s[0]+';background:var(--go)"></div>'
+      +'<div style="flex-grow:'+d.s[1]+';background:var(--tight)"></div>'
+      +'<div style="flex-grow:'+d.s[2]+';background:var(--miss)"></div>';
+    mhLeg.innerHTML='<span><b style="color:var(--go)">'+d.s[0]+'%</b> connected</span>'
+      +'<span><b style="color:var(--tight)">'+d.s[1]+'%</b> stitchable</span>'
+      +'<span><b style="color:var(--miss)">'+d.s[2]+'%</b> island</span>';
+    mhCards.innerHTML=d.cards.map(function(c){
+      return '<div class="hstat '+c[0]+'"><span class="hdot">'+MH_IC[c[0]]+'</span>'
+        +'<div><div class="ht">'+c[1]+'</div><div class="hs">'+c[2]+'</div></div></div>';
+    }).join("");
+  }
+  if(mhReg){
+    mhReg.addEventListener("click", function(e){
+      var b=e.target.closest("button"); if(!b) return;
+      mhReg.querySelectorAll("button").forEach(function(x){x.classList.remove("on");});
+      b.classList.add("on"); renderMH(b.textContent.trim());
+    });
+    renderMH("Europe");
+  }
+
   /* ---------- ADVANCED: nearest facility ---------- */
   var POI = {
     toilets:{ic:'<path d="M8 3v18M16 3v18M6 8h4M14 8h4"/>', title:"Toilets · main concourse", sub:"step-free · level 0 · via the Pl 1 escalator", dist:"38 m", time:"0:33",
@@ -2009,9 +2111,54 @@
 
   /* ---------- ADVANCED: action feedback ---------- */
   document.addEventListener("click", function(e){
-    if(e.target.closest("[data-adv-stitch]")) alert("Bridge added — A→E now routes at 229 m / 3:49.\n(In the app this writes a synthetic edge to the local graph and re-runs the pathfind.)");
-    if(e.target.closest("[data-adv-dl]")) alert("Downloading Japan region…\n(In the app: builds transfr_jp offline from an OSM extract — no live API.)");
+    if(e.target.closest("[data-adv-dl]")) alert("Downloading Great Britain region…\n(In the app: builds transfr_gb offline from an OSM extract — no live API.)");
   });
+
+  /* ---------- ADVANCED: open a platform/facility walk as the full 3D view ---------- */
+  // Reuse the section/levels/3D/AR walk screen; retarget its header + back button.
+  function openWalk(title, sub, backTo){
+    var w=document.getElementById("s-walk");
+    if(!w) return;
+    w.querySelector("h2").textContent=title;
+    w.querySelector(".sub").textContent=sub;
+    var chev=w.querySelector(".chev");
+    if(chev){ chev.setAttribute("data-go", backTo); }
+    // always land on the section overview first
+    if(typeof showWalkView==="function") showWalkView("section");
+    var seg=w.querySelector("#walkViewToggle");
+    if(seg){ seg.querySelectorAll("button").forEach(function(b){ b.classList.toggle("on", b.getAttribute("data-view")==="section"); }); }
+    __go("walk");
+  }
+  function firstText(el){ // text of the first child text node (name, before the <small>)
+    if(!el) return "";
+    for(var i=0;i<el.childNodes.length;i++){ if(el.childNodes[i].nodeType===3 && el.childNodes[i].textContent.trim()) return el.childNodes[i].textContent.trim(); }
+    return el.textContent.trim();
+  }
+  // Full station walk: tap a destination platform row
+  var swListEl=document.getElementById("swList");
+  if(swListEl){
+    swListEl.addEventListener("click", function(e){
+      var row=e.target.closest(".mrow"); if(!row || row.classList.contains("src")) return;
+      var src=(document.querySelector("#swSrc button.on")||{}).textContent||"Pl 1";
+      src=src.trim().replace(/^Pl\s*/,"Platform ");
+      var dest=firstText(row.querySelector(".pf"));
+      var dist=(row.querySelector(".mv")||{}).textContent||"";
+      var dlv=(row.querySelector(".mlv")||{}).textContent||"0";
+      var lvl=(dlv==="0")?"same level":("level "+dlv);
+      openWalk("Berlin Hbf", src+" → "+dest+" · "+dist+" · "+lvl, "stationwalk");
+    });
+  }
+  // Nearest facility: tap the nearest result or any listed facility
+  var poiResEl=document.getElementById("poiResult");
+  if(poiResEl){
+    poiResEl.addEventListener("click", function(e){
+      var row=e.target.closest(".poi-row"); if(!row) return;
+      var name=firstText(row.querySelector(".pn"));
+      var m=((row.querySelector(".pd")||{}).textContent||"").match(/[\d.,]+\s*m/);
+      var dist=m?m[0]:"";
+      openWalk("Berlin Hbf", "Platform 1 → "+name+(dist?" · "+dist:""), "nearest");
+    });
+  }
 
   /* ---------- WALK VIEW: section / per-level / rotatable 3D (§7.6) ---------- */
   var wvt=document.getElementById("walkViewToggle");
