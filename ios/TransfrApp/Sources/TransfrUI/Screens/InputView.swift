@@ -19,6 +19,16 @@ struct InputView: View {
     @State private var fromPlatform = "1"
     @State private var toPlatform = "16"
 
+    /// Station-autocomplete state, shared across the From/To/Station fields — one
+    /// focused field owns the suggestion list at a time.
+    enum Field: Hashable { case from, to, station }
+    @FocusState private var focused: Field?
+    @State private var suggestions: [StationSuggestion] = []
+    @State private var searchTask: Task<Void, Never>?
+
+    /// Departure-time editor presented as a sheet (the "Depart" chip is the trigger).
+    @State private var showDepartPicker = false
+
     var body: some View {
         @Bindable var model = model
         ScrollView {
@@ -41,10 +51,14 @@ struct InputView: View {
         }
         .background(Theme.paper.ignoresSafeArea())
         .safeAreaInset(edge: .bottom) { cta }
+        .sheet(isPresented: $showDepartPicker) { departureSheet }
         .navigationBarBackButtonHidden(true)
         .task {
             // Opt-in (TRANSFR_AUTOPLAN=1): jump straight to live results on launch.
-            if AppConfig.autoplanOnLaunch, model.load == .idle { await model.plan() }
+            if AppConfig.autoplanOnLaunch, model.load == .idle {
+                await model.plan()
+                if let j = model.journeys.first { model.select(j); model.path.append(.walk(transferIndex: 0)) } // TEMP verify
+            }
         }
     }
 
@@ -67,7 +81,7 @@ struct InputView: View {
         return VStack(alignment: .leading, spacing: 14) {
             Panel(padding: 6) {
                 VStack(spacing: 0) {
-                    fieldRow(dot: Theme.accent, label: "From", text: $model.origin) {
+                    fieldRow(dot: Theme.accent, label: "From", field: .from, text: $model.origin) {
                         Button {
                             withAnimation(.snappy) { model.swapEndpoints() }
                         } label: {
@@ -77,11 +91,14 @@ struct InputView: View {
                         }
                     }
                     Divider().overlay(Theme.line).padding(.leading, 44)
-                    fieldRow(dot: Theme.miss, label: "To", text: $model.destination) { EmptyView() }
+                    fieldRow(dot: Theme.miss, label: "To", field: .to, text: $model.destination) { EmptyView() }
                 }
             }
+            if focused == .from || focused == .to { suggestionList }
             HStack(spacing: 10) {
-                chip(key: "Depart", value: departLabel)
+                Button { focused = nil; showDepartPicker = true } label: {
+                    chip(key: "Depart", value: departLabel, tappable: true)
+                }.buttonStyle(.plain)
                 chip(key: "Travellers", value: "1 adult")
                 Spacer(minLength: 0)
             }
@@ -91,7 +108,7 @@ struct InputView: View {
     }
 
     private func fieldRow<Trailing: View>(
-        dot: Color, label: String, text: Binding<String>,
+        dot: Color, label: String, field: Field, text: Binding<String>,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 12) {
@@ -101,6 +118,14 @@ struct InputView: View {
                 TextField(label, text: text)
                     .font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
                     .textInputAutocapitalization(.words).autocorrectionDisabled()
+                    .focused($focused, equals: field)
+                    .submitLabel(.search)
+                    .onChange(of: text.wrappedValue) { _, new in
+                        if focused == field { scheduleSearch(new) }
+                    }
+                    .onChange(of: focused) { _, now in
+                        if now == field { scheduleSearch(text.wrappedValue) }
+                    }
             }
             Spacer(minLength: 0)
             trailing()
@@ -150,8 +175,9 @@ struct InputView: View {
     private var walkMode: some View {
         VStack(alignment: .leading, spacing: 14) {
             Panel(padding: 6) {
-                fieldRow(dot: Theme.accent, label: "Station", text: $lookupStation) { EmptyView() }
+                fieldRow(dot: Theme.accent, label: "Station", field: .station, text: $lookupStation) { EmptyView() }
             }
+            if focused == .station { suggestionList }
             HStack(spacing: 8) {
                 platformField("From platform", $fromPlatform)
                 Image(systemName: "arrow.right").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink3)
@@ -178,21 +204,122 @@ struct InputView: View {
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line, lineWidth: 1))
     }
 
+    // MARK: - Autocomplete
+
+    /// Debounced station lookup for the focused field. Under two characters we show
+    /// nothing; a cancelled task supersedes the last keystroke so results never race.
+    private func scheduleSearch(_ query: String) {
+        searchTask?.cancel()
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { suggestions = []; return }
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(180))
+            if Task.isCancelled { return }
+            let results = await model.stations(matching: q)
+            if Task.isCancelled { return }
+            suggestions = results
+        }
+    }
+
+    /// Commit a suggestion to whichever field is focused, then dismiss the list.
+    private func pick(_ s: StationSuggestion) {
+        @Bindable var model = model
+        switch focused {
+        case .from:    model.origin = s.name
+        case .to:      model.destination = s.name
+        case .station: lookupStation = s.name
+        case nil:      break
+        }
+        searchTask?.cancel()
+        suggestions = []
+        focused = nil
+    }
+
+    @ViewBuilder private var suggestionList: some View {
+        if !suggestions.isEmpty {
+            Panel(padding: 0) {
+                VStack(spacing: 0) {
+                    ForEach(Array(suggestions.prefix(6).enumerated()), id: \.offset) { i, s in
+                        if i > 0 { Divider().overlay(Theme.line).padding(.leading, 44) }
+                        Button { pick(s) } label: { suggestionRow(s) }
+                            .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func suggestionRow(_ s: StationSuggestion) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "mappin.circle.fill")
+                .font(.system(size: 18)).foregroundStyle(Theme.ink3)
+                .frame(width: 20)
+            Text(s.name).font(.system(size: 15, weight: .medium)).foregroundStyle(Theme.ink)
+            Spacer(minLength: 8)
+            if let c = s.country, !c.isEmpty {
+                Text(c).font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(Theme.ink3)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+
     // MARK: - Shared
 
-    private func chip(key: String, value: String) -> some View {
+    private func chip(key: String, value: String, tappable: Bool = false) -> some View {
         HStack(spacing: 6) {
             Text(key).font(.system(size: 12)).foregroundStyle(Theme.ink3)
             Text(value).font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.ink)
+            if tappable {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.ink3)
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 9)
         .background(Capsule().fill(Theme.panel))
         .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
     }
 
+    /// "Today · 08:34", "Tomorrow · 09:10", or "Wed 16 · 09:10" once the picker
+    /// moves off today, so the chip always reads back the real departure.
     private var departLabel: String {
-        let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "HH:mm"
-        return "Today · \(f.string(from: model.departure))"
+        let cal = Calendar.current
+        let t = DateFormatter(); t.locale = Locale(identifier: "en_GB"); t.dateFormat = "HH:mm"
+        let time = t.string(from: model.departure)
+        if cal.isDateInToday(model.departure) { return "Today · \(time)" }
+        if cal.isDateInTomorrow(model.departure) { return "Tomorrow · \(time)" }
+        let d = DateFormatter(); d.locale = Locale(identifier: "en_GB"); d.dateFormat = "EEE d"
+        return "\(d.string(from: model.departure)) · \(time)"
+    }
+
+    /// Date + time editor. Departure is unrestricted (past allowed) so the
+    /// prototype's default 08:34-today anchor stays valid even after that time.
+    private var departureSheet: some View {
+        @Bindable var model = model
+        return NavigationStack {
+            VStack(spacing: 16) {
+                DatePicker("Departure", selection: $model.departure)
+                    .datePickerStyle(.graphical)
+                    .tint(Theme.accent)
+                Button { model.departure = Date() } label: {
+                    Label("Leave now", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 14, weight: .semibold))
+                }
+                .buttonStyle(.plain).foregroundStyle(Theme.accent)
+                Spacer(minLength: 0)
+            }
+            .padding(20)
+            .background(Theme.paper.ignoresSafeArea())
+            .navigationTitle("Departure")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showDepartPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private var ctaLabel: String { mode == .walk ? "Show walk" : "Find connections" }

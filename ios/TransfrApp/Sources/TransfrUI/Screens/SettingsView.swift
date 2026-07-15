@@ -67,6 +67,7 @@ struct SettingsView: View {
             }
             .padding(20)
         }
+        .scrollBounceBehavior(.basedOnSize)
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)

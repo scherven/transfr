@@ -378,6 +378,17 @@ def export(
         if endpoint_ids:
             cur.execute("SELECT id, tags->>'level' AS lvl FROM osm_nodes WHERE id = ANY(%s)", (list(endpoint_ids),))
             for row in cur.fetchall():
+                # Only a node that ACTUALLY carries a single `level` tag is a
+                # reliable per-node orientation signal. An untagged node has no
+                # level of its own: parse_levels(None) returns [0.0], the ground
+                # default meant for whole (outdoor) ways, NOT a claim that this
+                # node sits at L0. Trusting it here pins an untagged connector
+                # endpoint to the ground plane and makes the interpolation yo-yo
+                # to L0 -- e.g. Berlin Hbf 2->4, whose -1/-1.3/-1.7/-2 stepped
+                # staircase rendered spurious "vertical" jumps up to L0 and back.
+                # A node explicitly tagged level=0 (lvl == "0") is truthy and kept.
+                if not row["lvl"]:
+                    continue
                 lv = parse_levels(row["lvl"])
                 if len(lv) == 1:
                     node_levels[row["id"]] = lv[0]

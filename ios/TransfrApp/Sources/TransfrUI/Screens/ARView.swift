@@ -8,10 +8,19 @@ import TransfrCore
 /// flagged as the hard v2 frontier in `ios/SUI_TODO.md`.
 struct ARView: View {
     @Environment(TripModel.self) private var model
+    @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
     let transferIndex: Int
 
     private var transfer: Transfer? { model.transfers[safe: transferIndex] }
+
+    // Distance badge, in the user's units (the number and unit render separately).
+    private var imperial: Bool { settings.units == .imperial }
+    private var distanceMeters: Double { transfer?.walkDistanceM ?? 78 }
+    private var distanceValue: Int {
+        Int((imperial ? distanceMeters * 3.28084 : distanceMeters).rounded())
+    }
+    private var distanceUnit: String { imperial ? "ft" : "m" }
 
     var body: some View {
         ZStack {
@@ -50,8 +59,8 @@ struct ARView: View {
                         .background(Capsule().fill(Color(hex: 0x4EA6FF).opacity(0.85)))
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(Int(transfer?.walkDistanceM ?? 78))").font(.system(size: 30, weight: .bold, design: .monospaced))
-                        Text("m to go · \(Fmt.walkTime(transfer?.walkTimeS ?? 78))").font(.system(size: 13))
+                        Text("\(distanceValue)").font(.system(size: 30, weight: .bold, design: .monospaced))
+                        Text("\(distanceUnit) to go · \(Fmt.walkTime(transfer?.walkTimeS ?? 78))").font(.system(size: 13))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 8)

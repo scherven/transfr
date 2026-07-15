@@ -53,6 +53,7 @@ struct CarouselView: View {
 /// The full transfer card: ring, platform move, boarding guidance, level note,
 /// stats, and the 3D / AR entry buttons.
 struct TransferDetailCard: View {
+    @Environment(SettingsStore.self) private var settings
     let transfer: Transfer
     var onOpenWalk: () -> Void
     var onOpenAR: () -> Void
@@ -166,7 +167,7 @@ struct TransferDetailCard: View {
 
     private var stats: some View {
         HStack {
-            StatCell(key: "Distance", value: Fmt.meters(transfer.walkDistanceM))
+            StatCell(key: "Distance", value: Fmt.distance(transfer.walkDistanceM, imperial: settings.units == .imperial))
             StatCell(key: "Walk", value: Fmt.walkTime(transfer.walkTimeS))
             if let spare = transfer.spareSeconds {
                 StatCell(key: "Spare", value: Fmt.duration(Int(spare)),

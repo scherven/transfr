@@ -44,8 +44,12 @@ enum Fmt {
         return t < 90 ? "\(t) s" : "\(t / 60)m \(String(format: "%02d", t % 60))s"
     }
 
-    static func meters(_ m: Double?) -> String {
+    /// Distance in the user's units — "120 m" metric, "394 ft" imperial. Walk
+    /// distances here are platform-to-platform (short), so feet reads better than
+    /// miles across the whole range; the caller passes `imperial` from Settings.
+    static func distance(_ m: Double?, imperial: Bool = false) -> String {
         guard let m, m > 0 else { return "—" }
+        if imperial { return "\(Int((m * 3.28084).rounded())) ft" }
         return "\(Int(m.rounded())) m"
     }
 

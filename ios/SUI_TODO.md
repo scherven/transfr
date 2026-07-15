@@ -18,14 +18,14 @@ driven by the real `api/` service (and the live-delay feed).
 
 | # | Screen | File | Status | Note |
 |---|--------|------|--------|------|
-| 1 | Plan / Input | `InputView.swift` | 🟠 | Type mode plans live; **paste-link has no parser**; walk-only jumps to the static lookup. No autocomplete. |
+| 1 | Plan / Input | `InputView.swift` | 🟠 | Type mode plans live; **station autocomplete** 🟢 & **editable departure** 🟢 now wired; **paste-link has no parser**; walk-only jumps to the static lookup. |
 | 2 | Connections | `ResultsView.swift` | 🟢 | Fully from `/journeys`. |
 | 3 | The connection | `JourneyView.swift` | 🟢 | Legs/transfers/delays from live data. |
 | 4 | Transfers (carousel) | `CarouselView.swift` | 🟠 | Core stats live; **boarding module is illustrative** (§3 below). |
 | 5 | Walk views | `WalkView.swift` | 🟢 | Section / Levels / **3D** all project real `viz_export` geometry (`WalkGeometryViews.swift`); turn-by-turn from real `transitions`. Schematic only stands in for the sample tier. |
 | 6 | AR | `ARView.swift` | 🔴 | Mocked camera. Real ARKit/RealityKit is v2 (§7.7). |
 | 7 | Live | `LiveView.swift` | 🔴 | Map + countdown are illustrative; no CoreLocation/live feed. |
-| 8 | Settings | `SettingsView.swift` | 🟠 | Persisted & real, but **preferences don't affect routing yet** (§6). Theme 🟢. |
+| 8 | Settings | `SettingsView.swift` | 🟠 | Persisted & real; Theme 🟢 and **step-free now rides `/walk` requests** 🟢; makeable-%, pace, buffer, units still don't affect routing (§6). |
 | 9 | Walk lookup | `WalkLookupView.swift` | 🔴 | Static Berlin 1→16; doesn't resolve the typed station/platforms. |
 | 10 | Advanced (hub) | `AdvancedView.swift` | 🟢 | Pure navigation; nothing to wire. |
 | 11 | Full station walk | `StationWalkView.swift` | 🔴 | Static Berlin platform list; no per-platform pathfind. |
@@ -38,13 +38,19 @@ driven by the real `api/` service (and the live-delay feed).
 
 ## 1. Trip input — `InputView.swift`
 
-- 🟡 **Station autocomplete is not in the UI.** `repo.stations()` exists at every
-  layer but the From/To (and walk-only station) fields are plain `TextField`s — no
-  suggestion list, no debounce, no select-to-fill. Origin/destination go to the
-  server as raw strings. **Needed:** a suggestions dropdown, ideally over a bundled
-  `stations.csv` for instant offline hits (§13.2), resolving to a station id.
-- 🔴 **Departure time is not editable.** The "Depart" chip is display-only; no
-  picker. `TripModel.departure` is hard-defaulted to today 08:34.
+- 🟢 **Station autocomplete is wired.** From/To and the walk-only station field
+  share one debounced (180 ms, 2-char min) suggestion dropdown over
+  `repo.stations()` → `TripModel.stations(matching:)`; tapping a row fills the
+  focused field. Still sends the station **name** as the query string, not a
+  resolved id — `StationSuggestion.id` is optional and the sample seed carries
+  none, so the name→stop-id normalisation gap (§9) is unchanged; a bundled
+  `stations.csv` for instant offline hits (§13.2) is still the follow-up.
+- 🟢 **Departure time is editable.** The "Depart" chip opens a sheet with a
+  graphical date+time `DatePicker` bound to `TripModel.departure` (plus a "Leave
+  now" shortcut); the chip label now reflects Today / Tomorrow / "Wed 16".
+  **Design decision:** left *unrestricted* (past times allowed) so the 08:34-today
+  default stays valid even once the wall clock passes it. `plan()` already forwards
+  `departure` to `/journeys?time=`.
 - 🔴 **"Travellers" chip is decorative.**
 - 🔴 **Paste-link mode has no parser.** The UI/field exist, but nothing turns a
   Google/Apple Maps / DB Navigator link into an itinerary. 🚧 also needs the
@@ -96,14 +102,24 @@ driven by the real `api/` service (and the live-delay feed).
 
 Persisted and real, but the preferences are **not yet applied**:
 - 🟢 **Theme** — fully wired to `.preferredColorScheme`.
-- 🟠 **Step-free** — not sent on walk requests. Should set `WalkKey.stepFree` (and a
-  routing profile server-side) on every walk/verdict.
-- 🟠 **Makeable %** — doesn't re-verdict. Could recompute verdicts client-side from
-  `layover_s`/`walk_time_s` against the threshold (the one setting that can act
-  offline).
+- 🟢 **Step-free** — now rides every `/walk` request: `WalkView` reads
+  `settings.stepFree` into `WalkKey(transfer:stepFree:)` and re-keys its geometry
+  fetch (`.task(id: settings.stepFree)`) so the toggle refetches the elevator-free
+  variant. Still **not** applied to the verdict/journey routing profile server-side
+  (needs the server to accept a step-free profile) — the walk geometry is the
+  client-actionable half.
+- 🟠 **Makeable %** — doesn't re-verdict. Could recompute client-side from
+  `layover_s`/`walk_time_s`, but **deferred as not-a-quick-win:** a safe re-verdict
+  must not override the server's honest `unknown`/`infeasible` (and the boarding
+  buffer factors into feasibility too), and it would have to transform the cached
+  response or every verdict display site. That's a product-semantics pass, not
+  mechanical wiring — worth doing deliberately.
 - 🟠 **Walking pace / boarding buffer** — display only; should scale walk time /
   feed the server's buffer check.
-- 🟠 **Units** — always metric; no metric↔imperial conversion in `Fmt`.
+- 🟠 **Units** — always metric; no metric↔imperial conversion in `Fmt`. **Deferred
+  deliberately:** the target regions (DACH/BeNeLux/KR) are all metric, and a clean
+  build means threading `settings.units` through the ~4 `Fmt.meters` call sites (or
+  introducing global state) — low payoff for a true quick win.
 - 🔴 **Live Activity / auto-AR lead** — toggles persist but nothing consumes them.
 
 ## 7. Advanced tools — Station walk / Nearest facility / Map health / Offline
@@ -159,8 +175,9 @@ The spine is done — this is a punch-list, not a teardown:
 ## Suggested order
 
 1. ~~Render fetched `viz_export` in Section/Levels (§2)~~ — **done** (+3D, +live repo §9).
-2. Station autocomplete + editable departure time (§1).
-3. Apply Settings that can act client-side: step-free on walk keys, makeable-% re-verdict, units (§6).
+2. ~~Station autocomplete + editable departure time (§1)~~ — **done**.
+3. Apply Settings that can act client-side: ~~step-free on walk keys~~ **done**;
+   makeable-% re-verdict + units still open (§6 — both deferred with reasons above).
 4. Batch prefetch + `CachingRepository` (§8) — offline + speed.
 5. Real walk-lookup / station-walk / nearest-facility off `viz_export` (§1, §7). 🚧 some need endpoints.
 6. Boarding data from the plan payload (§3) — 🚧 server first.

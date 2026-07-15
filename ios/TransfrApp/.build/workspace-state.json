@@ -1,0 +1,27 @@
+{
+  "object" : {
+    "artifacts" : [
+
+    ],
+    "dependencies" : [
+      {
+        "basedOn" : null,
+        "packageRef" : {
+          "identity" : "transfrcore",
+          "kind" : "fileSystem",
+          "location" : "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrCore",
+          "name" : "TransfrCore"
+        },
+        "state" : {
+          "name" : "fileSystem",
+          "path" : "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrCore"
+        },
+        "subpath" : "transfrcore"
+      }
+    ],
+    "prebuilts" : [
+
+    ]
+  },
+  "version" : 7
+}

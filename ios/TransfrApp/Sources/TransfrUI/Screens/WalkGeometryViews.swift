@@ -74,7 +74,7 @@ struct WalkScene {
 
     /// Turn-by-turn derived from the real `transitions` + endpoints — replaces the
     /// synthesized copy the schematic uses.
-    func turnByTurn() -> [WalkStep] {
+    func turnByTurn(imperial: Bool = false) -> [WalkStep] {
         var steps: [WalkStep] = [
             WalkStep(icon: "figure.walk", color: Theme.go,
                      title: "Step off on Platform \(startRef)",
@@ -92,7 +92,7 @@ struct WalkScene {
         let arrive = WalkStep(icon: "checkmark", color: Theme.accent,
                               title: "Board on Platform \(endRef)",
                               sub: found
-                                ? "\(Fmt.meters(export.path.walkingDistanceMeters)) · \(Fmt.walkTime(export.path.walkingTimeSeconds))"
+                                ? "\(Fmt.distance(export.path.walkingDistanceMeters, imperial: imperial)) · \(Fmt.walkTime(export.path.walkingTimeSeconds))"
                                 : "these platforms aren't connected on the map")
         steps.append(arrive)
         return steps

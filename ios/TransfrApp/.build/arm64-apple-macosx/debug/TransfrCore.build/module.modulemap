@@ -1,0 +1,4 @@
+module TransfrCore {
+    header "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrCore.build/TransfrCore-Swift.h"
+    requires objc
+}

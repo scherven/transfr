@@ -47,6 +47,12 @@ public final class TripModel {
         }
     }
 
+    /// Station autocomplete for the input fields. Fails soft to an empty list —
+    /// suggestions are progressive enhancement, never a blocking error.
+    public func stations(matching query: String) async -> [StationSuggestion] {
+        (try? await repo.stations(query: query)) ?? []
+    }
+
     public func select(_ journey: Journey) {
         selected = journey
         path.append(.journey)

@@ -9,6 +9,7 @@ import TransfrCore
 /// are documented follow-ups.
 struct WalkView: View {
     @Environment(TripModel.self) private var model
+    @Environment(SettingsStore.self) private var settings
     let transferIndex: Int
 
     @State private var mode: Mode = .section
@@ -26,6 +27,7 @@ struct WalkView: View {
 
     private var transfer: Transfer? { model.transfers[safe: transferIndex] }
     private var hasLevelChange: Bool { (transfer?.verdictKind ?? .feasible) != .feasible }
+    private var imperial: Bool { settings.units == .imperial }
 
     var body: some View {
         ScrollView {
@@ -41,14 +43,16 @@ struct WalkView: View {
         .navigationTitle(transfer?.atStation ?? "Walk")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
-        .task { await loadGeometry() }
+        // Re-keyed on `stepFree` so flipping the preference refetches the
+        // elevator-free variant (a different route, hence different geometry).
+        .task(id: settings.stepFree) { await loadGeometry() }
     }
 
     private var principal: some View {
         VStack(spacing: 1) {
             Text(transfer?.atStation ?? "Walk").font(.system(size: 16, weight: .semibold))
             if let t = transfer {
-                Text("Platform \(t.arrivalPlatform ?? "?") → \(t.departurePlatform ?? "?") · \(Fmt.meters(t.walkDistanceM)) · \(Fmt.walkTime(t.walkTimeS))")
+                Text("Platform \(t.arrivalPlatform ?? "?") → \(t.departurePlatform ?? "?") · \(Fmt.distance(t.walkDistanceM, imperial: imperial)) · \(Fmt.walkTime(t.walkTimeS))")
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.ink3)
             }
         }
@@ -178,7 +182,7 @@ struct WalkView: View {
     private var statsRow: some View {
         HStack {
             StatCell(key: "Walk time", value: Fmt.walkTime(transfer?.walkTimeS))
-            StatCell(key: "Distance", value: Fmt.meters(transfer?.walkDistanceM))
+            StatCell(key: "Distance", value: Fmt.distance(transfer?.walkDistanceM, imperial: imperial))
             StatCell(key: "Levels", value: levelsStat)
         }
     }
@@ -215,7 +219,7 @@ struct WalkView: View {
     /// Derived from the real `transitions` when geometry is present; the synthesized
     /// walkthrough only stands in for the sample tier / off-path lookups.
     private var currentSteps: [WalkStep] {
-        if let scene { return scene.turnByTurn() }
+        if let scene { return scene.turnByTurn(imperial: imperial) }
         return schematicSteps
     }
 
@@ -247,7 +251,8 @@ struct WalkView: View {
     /// `ok == false`, so `scene` stays nil and the schematic stands.
     private func loadGeometry() async {
         defer { loading = false }
-        guard let t = transfer, let key = WalkKey(transfer: t) else { return }
+        guard let t = transfer,
+              let key = WalkKey(transfer: t, stepFree: settings.stepFree) else { return }
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s
