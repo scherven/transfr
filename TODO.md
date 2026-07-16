@@ -190,12 +190,15 @@ Persisted and real, but several preferences are **not yet applied**:
   **Add:** let the user query a single station.
 - 🔴 **Offline & regions** (`OfflineRegionsView`) — static cards; no real region
   download, prefetch, or storage accounting. 🚧 device-side + packaging work.
-- 🟠 **3D station map** (branch `station-map-3d`, in HTML prototype) — Concept A exploded
-  model carrying a real walk; **every platform is now server-labelled + level-lifted**
-  (`viz_export` emits `Way.ref` + `Way.level`, lifts geometry from the graph). Walk view
-  shows **only walk-relevant connectors** (the stairs/escalators/lifts the path uses); a
-  full station-map (browse, no walk) should show all. **Next:** port into `TransfrUI`
-  (extend `IsoGeometryCanvas`), wire to live `/walk`.
+- 🟢 **3D station map** (branch `station-map-3d`) — the old static iso viewer is replaced
+  everywhere by the interactive `IsoGeometryCanvas`: drag-rotate, pinch/button **zoom**,
+  left-edge **level tabs**, **every platform labelled + lifted** (server `Way.ref`/`Way.level`),
+  and **only walk-relevant connectors** on a walk (`Way.walkRelevant`; browse shows all).
+  New **Station map (3D)** screen (`StationMapView`, browse mode) in the Advanced hub — search
+  a station, rotate/zoom its layout. **Follow-ups:** (a) browse coverage is the touched-pool of
+  one cross-station `/walk`, so far platforms can be missing — add a radius/station-geometry
+  endpoint for full coverage; (b) reach the map from a transfer too; (c) not yet visually
+  verified in-sim (build + prototype-parity only — UI snapshot tests are Xcode-only here).
 - 🔴 **[deferred] Bring back POIs on the station map** — facility pins (food / ATM /
   toilets / lift) are intentionally hidden on the walk view for now to cut clutter. The
   data already exists (`viz_export` `details` layer, same as **Nearest facility** above);
