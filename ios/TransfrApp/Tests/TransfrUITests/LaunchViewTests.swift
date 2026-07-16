@@ -62,4 +62,50 @@ struct LaunchViewTests {
         #expect(state.reveal.values.allSatisfy { $0 == 0 })
         #expect(state.pen == LaunchGeometry.start)
     }
+
+    // MARK: fly-to-title hand-off
+
+    /// After the end pose the mark flies up: `landProgress` runs 0 (at `hold`,
+    /// centred) → 1 (at `flyEnd`, landed), monotonically, and never overshoots.
+    @Test func landProgressRunsHoldToFlyEnd() {
+        #expect(LaunchGeometry.landProgress(at: LaunchPhase.hold) == 0)
+        #expect(LaunchGeometry.landProgress(at: LaunchPhase.hold - 1) == 0)   // still centred at the end pose
+        #expect(LaunchGeometry.landProgress(at: LaunchPhase.flyEnd) == 1)
+        #expect(LaunchGeometry.landProgress(at: LaunchPhase.flyEnd + 1) == 1)
+        let a = LaunchGeometry.landProgress(at: LaunchPhase.hold + 0.15)
+        let b = LaunchGeometry.landProgress(at: LaunchPhase.hold + 0.40)
+        #expect(a > 0 && a < b && b < 1)
+    }
+
+    /// At the landing the finished wordmark aspect-fits *and* centres on the app
+    /// title's frame — the geometry that makes the crossfade read as one mark.
+    @Test func landedMarkAspectFitsAndCentersOnTitle() {
+        let target = CGRect(x: 20, y: 120, width: 160, height: 42)
+        let landed = LaunchGeometry.stageToView(fit: .identity, target: target, landProgress: 1)
+        let box = LaunchGeometry.wordmarkStageBounds.applying(landed)
+        #expect(abs(box.midX - target.midX) < 0.5)          // centred…
+        #expect(abs(box.midY - target.midY) < 0.5)
+        #expect(box.width <= target.width + 0.5)            // …fits inside…
+        #expect(box.height <= target.height + 0.5)
+        #expect(box.width >= target.width - 0.5 || box.height >= target.height - 0.5)  // …touching one axis
+    }
+
+    /// With no target (anchor not yet resolved) the mark stays put — the fly is a
+    /// no-op and the launch still falls through to its centred pose.
+    @Test func noTargetLeavesMarkCentred() {
+        let fit = CGAffineTransform(translationX: 12, y: 34).scaledBy(x: 0.9, y: 0.9)
+        #expect(LaunchGeometry.stageToView(fit: fit, target: nil, landProgress: 1) == fit)
+    }
+
+    /// A mid-fly frame rasterises when a target is supplied (the lerped transform
+    /// projects with no NaNs/crash).
+    @Test func rendersMidFly() throws {
+        let view = LaunchMark(t: LaunchPhase.hold + LaunchPhase.fly / 2,
+                              targetRect: CGRect(x: 20, y: 120, width: 160, height: 42))
+            .frame(width: 393, height: 852)
+            .background(Theme.paper)
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 2
+        #expect(try #require(renderer.uiImage).pngData().map { $0.count > 1000 } == true)
+    }
 }

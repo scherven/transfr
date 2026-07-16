@@ -25,6 +25,8 @@ enum LaunchPhase {
     static let writeEnd: Double = 2.05   // pen finishes
     static let settle: Double = 2.22     // red-dot "plant" as it lands
     static let hold: Double = 3.05       // finished wordmark — the END POSE
+    static let fly: Double = 0.55        // the end pose flies up onto the app title
+    static let flyEnd: Double = 3.60     // hold + fly — the hand-off to InputView
     /// Reduced-motion: how long to show the static end pose before revealing the app.
     static let reduceHold: Double = 0.8
 }
@@ -98,6 +100,54 @@ enum LaunchGeometry {
         CGAffineTransform(translationX: center.x - CGFloat(cam.scale) * cam.focus.x,
                           y: center.y - CGFloat(cam.scale) * cam.focus.y)
             .scaledBy(x: CGFloat(cam.scale), y: CGFloat(cam.scale))
+    }
+
+    // MARK: fly-to-title (the hand-off to InputView)
+
+    /// After the end pose, the finished mark travels from screen-centre up onto the
+    /// app's "transfr" title. 0 at `hold` (centred), 1 at `flyEnd` (landed).
+    static func landProgress(at t: Double) -> Double {
+        if t <= LaunchPhase.hold { return 0 }
+        if t >= LaunchPhase.flyEnd { return 1 }
+        return smooth((t - LaunchPhase.hold) / LaunchPhase.fly)
+    }
+
+    /// The finished wordmark's tight bounding box in STAGE (360x440) coords at the
+    /// end pose — every stroke (incl. its round cap width) plus the two brand dots.
+    /// This is the box we map onto the InputView title so the landing lines up.
+    static let wordmarkStageBounds: CGRect = {
+        let m = localToStage(camera(at: LaunchPhase.hold))
+        let halfStroke = CGFloat(strokeWidth) / 2 * CGFloat(scaleB)
+        var box = CGRect.null
+        for stroke in LaunchStroke.allCases {
+            box = box.union(stroke.path.applying(m).boundingRect.insetBy(dx: -halfStroke, dy: -halfStroke))
+        }
+        let r = CGFloat(dotRadius) * CGFloat(scaleB)
+        for centre in [greenCenter, rest] {
+            let p = centre.applying(m)
+            box = box.union(CGRect(x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r))
+        }
+        return box
+    }()
+
+    /// The stage->view transform for the current frame: the aspect-fit `fit` while
+    /// centred, lerped toward "the wordmark box aspect-fits onto `target`" as the
+    /// mark flies up. Uniform scale throughout, so `.trim`/stroking stay correct.
+    static func stageToView(fit: CGAffineTransform, target: CGRect?, landProgress p: Double) -> CGAffineTransform {
+        guard let target, p > 0 else { return fit }
+        let box = wordmarkStageBounds
+        let s = min(target.width / box.width, target.height / box.height)
+        let ox = target.midX - box.width * s / 2 - box.minX * s
+        let oy = target.midY - box.height * s / 2 - box.minY * s
+        let landed = CGAffineTransform(a: s, b: 0, c: 0, d: s, tx: ox, ty: oy)
+        return lerpAffine(fit, landed, CGFloat(p))
+    }
+
+    /// Component-wise lerp of two translate+scale transforms (no rotation/shear).
+    static func lerpAffine(_ A: CGAffineTransform, _ B: CGAffineTransform, _ u: CGFloat) -> CGAffineTransform {
+        CGAffineTransform(a: A.a + (B.a - A.a) * u, b: A.b + (B.b - A.b) * u,
+                          c: A.c + (B.c - A.c) * u, d: A.d + (B.d - A.d) * u,
+                          tx: A.tx + (B.tx - A.tx) * u, ty: A.ty + (B.ty - A.ty) * u)
     }
 
     // MARK: the pen's ordered journey (draw a stroke, or travel between them)
@@ -265,6 +315,10 @@ struct TransformedStroke: Shape {
 
 struct LaunchMark: View {
     let t: Double
+    /// When set (from RootView), the finished mark flies up and aspect-fits onto
+    /// this rect — the InputView "transfr" title's frame, in the same full-screen
+    /// coordinate space this view fills.
+    var targetRect: CGRect? = nil
     var ink: Color = Theme.accent
     var green: Color = Theme.go
     var red: Color = Theme.miss
@@ -273,15 +327,21 @@ struct LaunchMark: View {
         let cam = LaunchGeometry.camera(at: t)
         let state = LaunchGeometry.writeState(at: LaunchGeometry.writeProgress(at: t))
         let pop = LaunchGeometry.dotPop(at: t)
+        let landP = LaunchGeometry.landProgress(at: t)
         GeometryReader { geo in
-            let fit = min(geo.size.width / LaunchGeometry.stage.width,
-                          geo.size.height / LaunchGeometry.stage.height)
+            // Centre the stage in the screen with a small inset (the old padding);
+            // then it flies onto `targetRect` as the launch hands off to the app.
+            let inset: CGFloat = 24
+            let fit = min(max(geo.size.width - 2 * inset, 1) / LaunchGeometry.stage.width,
+                          max(geo.size.height - 2 * inset, 1) / LaunchGeometry.stage.height)
             let ox = (geo.size.width - LaunchGeometry.stage.width * fit) / 2
             let oy = (geo.size.height - LaunchGeometry.stage.height * fit) / 2
-            let stageToView = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: fit, y: fit)
+            let fitTransform = CGAffineTransform(translationX: ox, y: oy).scaledBy(x: fit, y: fit)
+            let stageToView = LaunchGeometry.stageToView(fit: fitTransform, target: targetRect, landProgress: landP)
+            let viewScale = stageToView.a   // uniform (b == c == 0)
             let transform = LaunchGeometry.localToStage(cam).concatenating(stageToView)
-            let lineWidth = CGFloat(LaunchGeometry.strokeWidth) * CGFloat(cam.scale) * fit
-            let dotScale = CGFloat(cam.scale) * fit
+            let lineWidth = CGFloat(LaunchGeometry.strokeWidth) * CGFloat(cam.scale) * viewScale
+            let dotScale = CGFloat(cam.scale) * viewScale
             let style = StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
             ZStack {
                 // the leading "t" — always fully drawn
@@ -318,34 +378,43 @@ struct LaunchMark: View {
 /// reduced motion by showing the static end pose and skipping the animation.
 public struct LaunchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The InputView title's frame (full-screen coords) the finished mark flies onto.
+    private let targetRect: CGRect?
     private let onFinished: () -> Void
     @State private var startDate = Date()
     @State private var didFinish = false
 
-    public init(onFinished: @escaping () -> Void) {
+    public init(targetRect: CGRect? = nil, onFinished: @escaping () -> Void) {
+        self.targetRect = targetRect
         self.onFinished = onFinished
     }
 
     public var body: some View {
-        ZStack {
-            Theme.paper.ignoresSafeArea()
-            Group {
+        // Fills the screen (no padding) so the mark's coordinate space matches the
+        // resolved `targetRect`; the inset that keeps the mark off the edges lives
+        // inside LaunchMark's fit.
+        GeometryReader { geo in
+            ZStack {
+                Theme.paper
                 if reduceMotion {
-                    LaunchMark(t: LaunchPhase.hold)   // static end pose, no motion
+                    // Static end pose already parked on the title, so the reveal is
+                    // an in-place crossfade rather than any motion.
+                    LaunchMark(t: LaunchPhase.flyEnd, targetRect: targetRect)
                 } else {
                     TimelineView(.animation) { timeline in
-                        let t = min(timeline.date.timeIntervalSince(startDate), LaunchPhase.hold)
-                        LaunchMark(t: t)
+                        let t = min(timeline.date.timeIntervalSince(startDate), LaunchPhase.flyEnd)
+                        LaunchMark(t: t, targetRect: targetRect)
                     }
                 }
             }
-            .padding(24)
+            .frame(width: geo.size.width, height: geo.size.height)
         }
+        .ignoresSafeArea()
         .accessibilityElement()
         .accessibilityLabel("transfr")
         .onAppear {
             startDate = Date()
-            let delay = reduceMotion ? LaunchPhase.reduceHold : LaunchPhase.hold
+            let delay = reduceMotion ? LaunchPhase.reduceHold : LaunchPhase.flyEnd
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { finish() }
         }
     }
@@ -354,5 +423,15 @@ public struct LaunchView: View {
         guard !didFinish else { return }
         didFinish = true
         onFinished()
+    }
+}
+
+/// InputView publishes its "transfr" title frame under this key; RootView resolves
+/// it and hands it to `LaunchView` as the fly-to-title target. First writer wins —
+/// there is only ever the one title.
+struct WordmarkAnchorKey: PreferenceKey {
+    static let defaultValue: Anchor<CGRect>? = nil
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+        value = value ?? nextValue()
     }
 }

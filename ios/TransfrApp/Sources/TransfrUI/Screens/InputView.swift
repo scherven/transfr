@@ -57,7 +57,8 @@ struct InputView: View {
                 header
                 Text("transfr")
                     .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(Theme.ink)
+                    .foregroundStyle(Theme.accent)   // the launch mark's end colour
+                    .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
                     .padding(.top, 4)
 
                 SegmentedControl(options: Mode.allCases, selection: $mode) { $0.label }

@@ -22,41 +22,45 @@ public struct RootView: View {
     }
 
     public var body: some View {
-        ZStack {
-            NavigationStack(path: $model.path) {
-                InputView()
-                    .navigationDestination(for: Route.self) { route in
-                        switch route {
-                        case .results:              ResultsView()
-                        case .journey:              JourneyView()
-                        case .preparingWalks(let start): PreparingWalksView(startIndex: start)
-                        case .carousel(let start):  CarouselView(startIndex: start)
-                        case .walk(let idx):        WalkView(transferIndex: idx)
-                        case .ar(let idx):          ARView(transferIndex: idx)
-                        case .live:                 LiveView()
-                        case .walkLookup:           WalkLookupView()
-                        case .settings:             SettingsView()
-                        case .attributions:         AttributionsView()
-                        case .advanced:             AdvancedView()
-                        case .stationWalk:          StationWalkView()
-                        case .nearestFacility:      NearestFacilityView()
-                        case .mapHealth:            MapHealthView()
-                        case .offlineRegions:       OfflineRegionsView()
-                        }
+        NavigationStack(path: $model.path) {
+            InputView()
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .results:              ResultsView()
+                    case .journey:              JourneyView()
+                    case .preparingWalks(let start): PreparingWalksView(startIndex: start)
+                    case .carousel(let start):  CarouselView(startIndex: start)
+                    case .walk(let idx):        WalkView(transferIndex: idx)
+                    case .ar(let idx):          ARView(transferIndex: idx)
+                    case .live:                 LiveView()
+                    case .walkLookup:           WalkLookupView()
+                    case .settings:             SettingsView()
+                    case .attributions:         AttributionsView()
+                    case .advanced:             AdvancedView()
+                    case .stationWalk:          StationWalkView()
+                    case .nearestFacility:      NearestFacilityView()
+                    case .mapHealth:            MapHealthView()
+                    case .offlineRegions:       OfflineRegionsView()
                     }
-            }
-            .environment(model)
-            .environment(settings)
-            .environment(location)
-            .tint(Theme.accent)
-
-            if showLaunch {
-                LaunchView {
-                    withAnimation(.easeOut(duration: 0.35)) { showLaunch = false }
                 }
-                .transition(.opacity)
-                .zIndex(1)
+        }
+        .environment(model)
+        .environment(settings)
+        .environment(location)
+        .tint(Theme.accent)
+        // The launch overlay reads InputView's "transfr" title frame (published as
+        // a bounds anchor) so the finished mark can fly up and settle onto it —
+        // then a crossfade reveals the identical (blue) title underneath.
+        .overlayPreferenceValue(WordmarkAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if showLaunch {
+                    LaunchView(targetRect: anchor.map { proxy[$0] }) {
+                        withAnimation(.easeOut(duration: 0.35)) { showLaunch = false }
+                    }
+                    .transition(.opacity)
+                }
             }
+            .ignoresSafeArea()
         }
         .preferredColorScheme(settings.theme.colorScheme)
     }
