@@ -261,7 +261,7 @@ struct TransferCard: View {
 
     private var title: String {
         switch v {
-        case .feasible:   return "Cross-platform · comfortable"
+        case .feasible:   return "Comfortable"
         case .tight:      return "Tight — move promptly"
         case .infeasible: return "Very likely to miss"
         case .unknown:    return "No platform data here"

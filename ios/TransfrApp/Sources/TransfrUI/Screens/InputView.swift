@@ -12,7 +12,7 @@ struct InputView: View {
 
     enum Mode: String, CaseIterable, Identifiable { case type, paste, walk
         var id: String { rawValue }
-        var label: String { switch self { case .type: "Type it"; case .paste: "Paste link"; case .walk: "Walk only" } }
+        var label: String { switch self { case .type: "Plan"; case .paste: "Paste link"; case .walk: "Walk only" } }
         var icon: String { switch self { case .type: "text.alignleft"; case .paste: "link"; case .walk: "figure.walk" } }
     }
     @State private var mode: Mode = .type
@@ -130,8 +130,6 @@ struct InputView: View {
 
     private var header: some View {
         HStack {
-            Text("PLAN A TRIP").font(.system(size: 11, weight: .semibold)).tracking(0.8)
-                .foregroundStyle(Theme.ink3)
             Spacer()
             NavigationLink(value: Route.settings) {
                 Image(systemName: "gearshape").foregroundStyle(Theme.ink2)
@@ -160,8 +158,6 @@ struct InputView: View {
                 chip(key: "Travellers", value: "1 adult")
                 Spacer(minLength: 0)
             }
-            Label("Tap any field to edit.", systemImage: "pencil")
-                .font(.system(size: 13)).foregroundStyle(Theme.ink3)
         }
     }
 

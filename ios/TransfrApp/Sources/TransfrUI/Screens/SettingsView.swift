@@ -105,7 +105,7 @@ struct SettingsView: View {
                 }
                 .font(.system(size: 10.5)).foregroundStyle(Theme.ink3).padding(.top, 6)
 
-                (Text("On an 8-min connection, that's up to ")
+                (Text("On an 8 minute connection, that's up to ")
                  + Text(s.makeableExample).font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.ink)
                  + Text(" of walking before it's flagged."))
                     .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).padding(.top, 10)
