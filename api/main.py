@@ -17,6 +17,9 @@ Endpoints:
   GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
                                                  station, nearest first; degrades to a
                                                  typed reason when the POI layer is absent
+  GET  /station-health?lat=&lon=                 one station's platform-connectivity
+                                                 breakdown (connected/stitchable/island
+                                                 over every pair); the Map-health tool
   GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
                                                  one transfer's drawable walk geometry
                                                  (viz_export); cacheable
@@ -46,6 +49,7 @@ from api.db import close_pool, connection, init_pool
 from api.facilities import build_facilities
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
+from api.station_health import build_station_health
 from api.transfers import STATION_UNRESOLVED
 from api.walks import build_walk, build_walks
 
@@ -209,6 +213,17 @@ def get_facilities(
     with `reason="no_poi_layer"` rather than guessing. With `from_platform`, each
     facility also carries a routed walk to its nearest platform."""
     return build_facilities(conn, lat, lon, category, from_platform=from_platform)
+
+
+@app.get("/station-health", response_model=schemas.StationHealthResponse, dependencies=_PROTECTED)
+def get_station_health(lat: float, lon: float, conn=Depends(get_conn)):
+    """One station's platform-connectivity breakdown for the Map-health tool: the
+    station nearest (lat, lon), with every unordered platform pair bucketed
+    connected / stitchable / island (two find_shortest_path passes each -- plain,
+    then with stitch bridges). A very large station is sampled to bound the pair
+    count (see api/station_health.py); `found=False` when nothing resolves near
+    the coordinate."""
+    return build_station_health(conn, lat, lon)
 
 
 @app.get("/walk", response_model=schemas.WalkResult, dependencies=_PROTECTED)

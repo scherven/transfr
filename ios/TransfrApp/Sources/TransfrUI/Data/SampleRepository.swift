@@ -57,6 +57,33 @@ public struct SampleRepository: JourneyRepository {
                                         found: true, platforms: refs)
     }
 
+    public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+        try? await Task.sleep(for: .milliseconds(160))
+        // No DB offline, so synthesize a plausible, mostly-connected breakdown from
+        // the nearest seed station's platform count — enough for the Map-health
+        // query panel to render its bar + examples without the live service.
+        let nearest = Self.stationSeed.min {
+            hypot(($0.latitude ?? 0) - lat, ($0.longitude ?? 0) - lon)
+            < hypot(($1.latitude ?? 0) - lat, ($1.longitude ?? 0) - lon)
+        }
+        let name = nearest?.name ?? ""
+        let platforms = name.hasPrefix("Berlin") ? 14 : 8
+        let total = platforms * (platforms - 1) / 2
+        let stitchable = total >= 6 ? 2 : 0
+        let island = total >= 10 ? 1 : 0
+        let connected = total - stitchable - island
+        func pct(_ n: Int) -> Double { total > 0 ? (Double(n) / Double(total) * 1000).rounded() / 10 : 0 }
+        let examples = [
+            StationHealthPair(fromPlatform: "1", toPlatform: "2", kind: "stitchable"),
+            StationHealthPair(fromPlatform: "9", toPlatform: "12", kind: "island"),
+        ]
+        return StationHealthResponse(
+            lat: lat, lon: lon, relationId: 0, station: name, found: true,
+            platformCount: platforms, connected: connected, stitchable: stitchable, island: island,
+            connectedPct: pct(connected), stitchablePct: pct(stitchable), islandPct: pct(island),
+            sampled: false, examples: examples)
+    }
+
     public func walk(for key: WalkKey) async throws -> WalkResult {
         // No bundled geometry in the sample tier — the walk screen falls back to
         // its schematic rendering (see WalkView). ok == false is an honest "no

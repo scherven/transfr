@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transfr — loading screen animation (preview)</title>
+<style>
+  /* ============================================================
+     Transfr loading-screen animation — SELF-CONTAINED PREVIEW.
+     Phase 1 deliverable: a look-and-feel proof for human approval.
+     No external assets. Designed to map cleanly onto a SwiftUI
+     launch screen later (see the SwiftUI notes at the bottom of
+     the <script> — every phase has a simple analogue).
+     Brand colours are taken verbatim from design/prototype.html.
+     ============================================================ */
+
+  :root{
+    --sans: ui-sans-serif, -apple-system, "SF Pro Display", "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+    /* page chrome (the surface AROUND the phone) */
+    --page:#E4E9F1;
+    --page-ink:#55607A;
+    --page-ink-strong:#0E1626;
+    --ctl:#FFFFFF;
+    --ctl-line:rgba(14,22,38,.12);
+
+    /* the launch canvas (near-white "paper") */
+    --paper:#F6F8FC;
+    --paper-line:rgba(14,22,38,.06);
+  }
+  :root[data-theme="dark"]{
+    --page:#05070D;
+    --page-ink:#98A4BC;
+    --page-ink-strong:#EAF0FA;
+    --ctl:#131A28;
+    --ctl-line:rgba(255,255,255,.12);
+
+    --paper:#0A0E17;
+    --paper-line:rgba(255,255,255,.06);
+  }
+
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; font-family:var(--sans); color:var(--page-ink);
+    background:var(--page);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:22px; padding:34px 18px;
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    transition:background .3s ease;
+  }
+
+  /* the "phone" holding the launch screen */
+  .phone{
+    position:relative;
+    width:min(340px, 86vw);
+    aspect-ratio: 360 / 440;
+    border-radius:40px;
+    background:var(--paper);
+    box-shadow:
+      0 40px 80px -30px rgba(8,16,34,.55),
+      0 10px 30px -18px rgba(8,16,34,.45),
+      inset 0 0 0 1px var(--paper-line);
+    overflow:hidden;
+    transition:background .3s ease;
+  }
+  :root[data-theme="dark"] .phone{
+    box-shadow:
+      0 40px 80px -30px rgba(0,0,0,.8),
+      0 10px 30px -18px rgba(0,0,0,.6),
+      inset 0 0 0 1px var(--paper-line);
+  }
+  .phone svg{ display:block; width:100%; height:100%; }
+
+  /* stroked letterforms + the two brand dots */
+  .ink{ fill:none; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* ---- controls ---- */
+  .cap{ font-size:13px; letter-spacing:.01em; text-align:center; max-width:44ch; line-height:1.5; }
+  .cap b{ color:var(--page-ink-strong); font-weight:640; }
+  .controls{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center; }
+  button.ctl, label.ctl{
+    font-family:var(--sans); font-size:13px; font-weight:560; color:var(--page-ink-strong);
+    background:var(--ctl); border:1px solid var(--ctl-line); border-radius:11px;
+    padding:9px 14px; cursor:pointer; display:inline-flex; align-items:center; gap:8px;
+    transition:transform .15s ease, border-color .15s ease;
+    user-select:none;
+  }
+  button.ctl:hover, label.ctl:hover{ transform:translateY(-1px); border-color:#0A63F0; }
+  label.ctl input{ accent-color:#0A63F0; margin:0; }
+  .controls .sep{ width:1px; height:22px; background:var(--ctl-line); }
+</style>
+</head>
+<body>
+
+  <div class="phone" aria-label="Transfr loading screen animation preview">
+    <svg id="stage" viewBox="0 0 360 440" role="img" aria-label="The Transfr t expands and the red dot writes out ‘ransfr’.">
+      <!-- CAMERA: one transform drives Phase A (zoom on the icon) -> Phase B (dolly out to the wordmark). -->
+      <g id="cam">
+        <!-- WORD: everything lives in one local coordinate space (the wordmark's own space). -->
+        <g id="word">
+
+          <!-- No white icon tile: the "t" sits directly on the app background. -->
+
+          <!-- ===== the leading "t" (a faithful, scaled copy of favicon.svg) — always shown ===== -->
+          <path id="tBar"  class="ink" d="M13,24 L43,24"/>
+          <path id="tStem" class="ink" d="M28,10 L28,48 Q28,58 43,58"/>
+
+          <!-- ===== "ransfr" — revealed stroke-by-stroke as the pen (red dot) passes ===== -->
+          <path id="r1"    class="ink" d="M58,58 L58,30 Q58,26 66,26 Q74,26 76,34"/>
+          <path id="a"     class="ink" d="M110,52 Q110,58 100,58 Q84,58 84,42 Q84,26 100,26 Q110,26 110,32 L110,58"/>
+          <path id="n"     class="ink" d="M126,58 L126,30 Q126,26 139,26 Q152,26 152,30 L152,58"/>
+          <path id="s"     class="ink" d="M187,32 Q182,26 176,26 Q166,26 166,35 Q166,42 177,42 Q188,42 188,49 Q188,58 178,58 Q170,58 166,53"/>
+          <path id="fstem" class="ink" d="M209,58 L209,18 Q209,9 215,9 Q222,9 222,14"/>
+          <path id="fbar"  class="ink" d="M201,26 L220,26"/>
+          <path id="r2"    class="ink" d="M234,58 L234,30 Q234,26 242,26 Q250,26 253,33"/>
+
+          <!-- invisible "pen-up" travel paths (used only to move the dot smoothly between strokes) -->
+          <path id="m1" fill="none" stroke="none" d="M43,58 L58,58"/>
+          <path id="m2" fill="none" stroke="none" d="M76,34 L110,52"/>
+          <path id="m3" fill="none" stroke="none" d="M110,58 L126,58"/>
+          <path id="m4" fill="none" stroke="none" d="M152,58 L187,32"/>
+          <path id="m5" fill="none" stroke="none" d="M166,53 L209,58"/>
+          <path id="m6" fill="none" stroke="none" d="M222,14 L201,26"/>
+          <path id="m7" fill="none" stroke="none" d="M220,26 L234,58"/>
+
+          <!-- the two brand dots -->
+          <circle id="greenDot" cx="28" cy="10" r="6.5" fill="#0FA968"/>
+          <circle id="redDot"   cx="43" cy="58" r="6.5" fill="#E0402F"/>
+        </g>
+      </g>
+    </svg>
+  </div>
+
+  <div class="cap">
+    <b>Loading screen</b> — the favicon <b>t</b> opens into the wordmark; the red dot writes out
+    <b>“ransfr”</b> and comes to rest at the end of the <b>r</b>. Loops for review.
+  </div>
+
+  <div class="controls">
+    <button class="ctl" id="replay">↺ Replay</button>
+    <label class="ctl"><input type="checkbox" id="loop" checked> Loop</label>
+    <div class="sep"></div>
+    <button class="ctl" id="theme">◐ Theme</button>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ---------- brand colours (verbatim from design/prototype.html) ---------- */
+  const TILE = { az:"#0A63F0", gr:"#0FA968", rd:"#E0402F" };
+  const BG = {
+    light: { az:"#0A63F0", gr:"#0FA968", rd:"#E0402F" },
+    dark:  { az:"#4EA6FF", gr:"#2FD39A", rd:"#FF6A5E" },
+  };
+
+  /* ---------- timeline (seconds) ---------- */
+  const T = {
+    A:     0.35,   // hold on the favicon icon
+    B:     0.95,   // camera dolly (icon -> wordmark) finishes
+    Cs:    0.90,   // writing starts (slight overlap with the dolly)
+    Ce:    2.05,   // writing finishes
+    settle:2.22,   // red-dot "plant" at rest
+    hold:  3.05,   // hold the finished wordmark
+    fade:  3.35,   // fade out (loop only)
+    cycle: 3.60,   // loop period
+  };
+
+  /* ---------- camera (Phase A -> Phase B), all in wordmark-local units ---------- */
+  const C  = { x:180, y:220 };   // stage centre
+  const Pt = { x:28,  y:34  };   // the t's optical centre (Phase A focus)
+  const Wc = { x:134, y:33  };   // the whole wordmark's centre (Phase B focus)
+  const Sa = 2.60;               // icon scale (Phase A)
+  const Sb = 1.20;               // wordmark scale (Phase B)
+
+  const START = { x:43, y:58 };  // red dot's home: the t's bottom-right tip (as in favicon)
+  const REST  = { x:253, y:33 }; // red dot's destination: the terminal of the final r
+  const DOT_R = 6.5;
+
+  /* ---------- the pen's ordered journey: draw a stroke, or travel (move) ---------- */
+  const PLAN = [
+    {id:"m1", draw:false}, {id:"r1", draw:true},
+    {id:"m2", draw:false}, {id:"a",  draw:true},
+    {id:"m3", draw:false}, {id:"n",  draw:true},
+    {id:"m4", draw:false}, {id:"s",  draw:true},
+    {id:"m5", draw:false}, {id:"fstem", draw:true},
+    {id:"m6", draw:false}, {id:"fbar",  draw:true},
+    {id:"m7", draw:false}, {id:"r2", draw:true},
+  ];
+
+  const $ = (id)=>document.getElementById(id);
+  const stage = $("stage"), cam = $("cam");
+  const greenDot = $("greenDot"), redDot = $("redDot");
+  const inkEls = ["tBar","tStem","r1","a","n","s","fstem","fbar","r2"].map($);
+  const drawEls = ["r1","a","n","s","fstem","fbar","r2"].map($);
+
+  /* measure every path once, then apportion the writing timeline by stroke length
+     (travel moves are discounted so the pen skips between letters briskly). */
+  let seq = [], totalW = 0;
+  function measure(){
+    PLAN.forEach(p=>{ const el=$(p.id); p.el=el; p.len=el.getTotalLength(); });
+    drawEls.forEach(el=>{
+      el._len = el.getTotalLength();
+      el.style.strokeDasharray = el._len;
+      el.style.strokeDashoffset = el._len;   // start hidden
+      el.style.strokeWidth = 8;
+    });
+    $("tBar").style.strokeWidth = 8; $("tStem").style.strokeWidth = 8;
+    totalW = PLAN.reduce((s,p)=> s + (p.draw ? p.len : 0.5*p.len), 0);
+    let cum = 0;
+    seq = PLAN.map(p=>{
+      const w = p.draw ? p.len : 0.5*p.len;
+      const o = { el:p.el, len:p.len, draw:p.draw, f0:cum/totalW };
+      cum += w; o.f1 = cum/totalW; return o;
+    });
+  }
+
+  /* ---------- helpers ---------- */
+  const clamp = (v,a,b)=> v<a?a : v>b?b : v;
+  const lerp  = (a,b,u)=> a + (b-a)*u;
+  const smooth = (u)=>{ u=clamp(u,0,1); return u*u*(3-2*u); };            // ease-in-out (camera)
+  const easeWrite = (u)=>{ u=clamp(u,0,1); return -(Math.cos(Math.PI*u)-1)/2; }; // ease-in-out sine (pen)
+
+  function hexToRgb(h){ return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)]; }
+  function mix(h1,h2,u){
+    const a=hexToRgb(h1), b=hexToRgb(h2);
+    const c=a.map((v,i)=>Math.round(lerp(v,b[i],clamp(u,0,1))));
+    return "rgb("+c[0]+","+c[1]+","+c[2]+")";
+  }
+
+  function currentTheme(){
+    const attr = document.documentElement.getAttribute("data-theme");
+    if(attr) return attr;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+
+  function setCam(s, fx, fy){
+    const tx = C.x - s*fx, ty = C.y - s*fy;
+    cam.setAttribute("transform", "translate("+tx+","+ty+") scale("+s+")");
+  }
+  function setReveal(el, frac){ el.style.strokeDashoffset = el._len*(1-clamp(frac,0,1)); }
+  function setDot(x,y){ redDot.setAttribute("cx",x); redDot.setAttribute("cy",y); }
+
+  /* place the pen + reveal ink for a global writing progress p in [0,1] */
+  function applyWrite(p){
+    if(p<=0){ drawEls.forEach(e=>setReveal(e,0)); setDot(START.x,START.y); return; }
+    if(p>=1){ drawEls.forEach(e=>setReveal(e,1)); setDot(REST.x,REST.y);  return; }
+    for(const sg of seq){
+      if(p>=sg.f1){ if(sg.draw) setReveal(sg.el,1); }
+      else if(p<sg.f0){ if(sg.draw) setReveal(sg.el,0); }
+      else {
+        const local = (p-sg.f0)/(sg.f1-sg.f0);
+        const pt = sg.el.getPointAtLength(local*sg.len);
+        setDot(pt.x, pt.y);
+        if(sg.draw) setReveal(sg.el, local);
+      }
+    }
+  }
+
+  /* ---------- the master frame ---------- */
+  function frame(t, theme){
+    const on = BG[theme];
+
+    // 1) CAMERA — hold on the icon, then dolly out to the wordmark.
+    let s, fx, fy;
+    if(t <= T.A){ s=Sa; fx=Pt.x; fy=Pt.y; }
+    else if(t < T.B){
+      const u = smooth((t-T.A)/(T.B-T.A));
+      s = lerp(Sa,Sb,u); fx = lerp(Pt.x,Wc.x,u); fy = lerp(Pt.y,Wc.y,u);
+      // a small "expand" pulse as the mark opens up into the wordmark
+      const b = (t-T.A)/0.26;
+      if(b<1) s *= 1 + 0.075*Math.sin(Math.PI*clamp(b,0,1));
+    } else { s=Sb; fx=Wc.x; fy=Wc.y; }
+    setCam(s, fx, fy);
+
+    // 2) COLOUR — the mark uses the theme's on-background triple throughout.
+    //    (No white icon tile; the "t" sits directly on the app background, so it
+    //    must be legible on the paper in both light and dark.)
+    const col = on;
+    inkEls.forEach(e=> e.style.stroke = col.az);
+    greenDot.setAttribute("fill", col.gr);
+    redDot.setAttribute("fill", col.rd);
+
+    // 4) WRITING — the red dot traces "ransfr".
+    let p = 0;
+    if(t>=T.Ce) p = 1;
+    else if(t>T.Cs) p = easeWrite((t-T.Cs)/(T.Ce-T.Cs));
+    applyWrite(p);
+
+    // 5) SETTLE — a small "plant" of the red dot as it lands on the final r.
+    let pop = 1;
+    if(t>T.Ce && t<T.settle) pop = 1 + 0.18*Math.sin(Math.PI*clamp((t-T.Ce)/(T.settle-T.Ce),0,1));
+    redDot.setAttribute("r", DOT_R*pop);
+
+    // 6) FADE (loop only) — a clean handoff before the next cycle.
+    if(t>=T.fade) stage.style.opacity = 0;
+    else if(t>T.hold) stage.style.opacity = clamp(1-(t-T.hold)/(T.fade-T.hold),0,1);
+    else stage.style.opacity = 1;
+  }
+
+  /* ---------- driver ---------- */
+  let startMs = performance.now();
+  let looping = true;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  function tick(now){
+    const theme = currentTheme();
+    const elapsed = (now - startMs)/1000;
+    // loop wraps time; single-play clamps to the "hold" pose.
+    const t = looping ? (elapsed % T.cycle) : Math.min(elapsed, T.hold);
+    frame(t, theme);
+    requestAnimationFrame(tick);
+  }
+
+  function renderStatic(){                 // reduced-motion / no-JS-motion pose
+    frame(T.hold, currentTheme());
+  }
+
+  function boot(){
+    measure();
+    if(reduce.matches){ renderStatic(); }
+    else { requestAnimationFrame(tick); }
+  }
+
+  /* ---------- controls ---------- */
+  $("replay").addEventListener("click", ()=>{ startMs = performance.now(); if(reduce.matches) renderStatic(); });
+  $("loop").addEventListener("change", (e)=>{ looping = e.target.checked; startMs = performance.now(); });
+  $("theme").addEventListener("click", ()=>{
+    const next = currentTheme()==="dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", next);
+  });
+
+  if(document.readyState === "complete" || document.readyState === "interactive") boot();
+  else window.addEventListener("DOMContentLoaded", boot);
+
+  /* ============================================================
+     SwiftUI mapping (for the later fold-in step):
+       • CAMERA  -> a scale + offset on the mark canvas, animated
+                    with .animation(...) between two states.
+       • INK REVEAL -> Shape + .trim(from:0,to:progress) per stroke
+                    (SwiftUI's exact analogue of strokeDashoffset).
+       • RED-DOT PEN -> sample the active Path with
+                    Path.trimmedPath(...).currentPoint / a point-on-path
+                    helper, driven by the same progress value.
+       • Phases keyed off one TimelineView clock (or withAnimation steps).
+       • Colours are the app's Color assets (light/dark variants above).
+     ============================================================ */
+})();
+</script>
+</body>
+</html>
