@@ -26,7 +26,7 @@ public final class TripModel {
     // Results. `response` is the live source of truth: `/journeys?assess=false`
     // fills it with `pending` transfers, then `streamVerdicts` replaces each with
     // its real assessment in place, so every screen reading it updates as the
-    // walks land. `selected` is an INDEX into it (not a copy) for the same reason
+    // verdicts land. `selected` is an INDEX into it (not a copy) for the same reason
     // — a streamed verdict must reach the open timeline.
     public var response: JourneysResponse?
     public var selectedIndex: Int?
@@ -128,7 +128,7 @@ public final class TripModel {
 
     /// Pick a journey. Lands on its timeline straight away when its verdicts are
     /// already in; otherwise routes through the transition screen so the still-
-    /// streaming walks are shown filling in, then advances to the timeline.
+    /// streaming verdicts are shown filling in, then advances to the timeline.
     public func select(_ journey: Journey) {
         selectedIndex = response?.journeys.firstIndex(where: { $0.id == journey.id })
         path.append(selectedHasPendingWalks ? .preparingWalks : .journey)

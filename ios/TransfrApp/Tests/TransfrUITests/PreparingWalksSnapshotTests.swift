@@ -87,9 +87,9 @@ final class PreparingWalksSnapshotTests: XCTestCase {
         XCTAssertGreaterThan(data.count, 1000, "suspiciously small render")
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("preparing_walks.png")
         try data.write(to: url)
-        // Also print base64 so the render survives the sim's ephemeral tmp.
-        print("PREPARING_WALKS_B64_BEGIN")
-        print(data.base64EncodedString())
-        print("PREPARING_WALKS_B64_END")
+let attachment = XCTAttachment(data: data, uniformTypeIdentifier: "public.png")
+attachment.name = "preparing_walks"
+attachment.lifetime = .keepAlways
+add(attachment)
     }
 }

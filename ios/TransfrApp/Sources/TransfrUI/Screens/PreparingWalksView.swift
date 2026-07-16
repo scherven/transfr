@@ -5,7 +5,7 @@ import TransfrCore
 ///
 /// Progressive load: `/journeys?assess=false` returns the itineraries instantly
 /// with `pending` transfers, and the real verdicts stream in behind the list via
-/// `/assess`. When you pick a journey whose walks are still resolving, this screen
+/// `/assess`. When you pick a journey whose verdicts are still streaming, this screen
 /// stands in — it shows each change of train filling in live (spinner → verdict +
 /// walk time) and slides on to the timeline the moment they're all in. When the
 /// verdicts already landed (the common, fast case), `select` skips straight past
