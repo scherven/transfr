@@ -96,19 +96,12 @@
 
   <div class="phone" aria-label="Transfr loading screen animation preview">
     <svg id="stage" viewBox="0 0 360 440" role="img" aria-label="The Transfr t expands and the red dot writes out ‘ransfr’.">
-      <defs>
-        <filter id="tileShadow" x="-40%" y="-40%" width="180%" height="180%">
-          <feDropShadow dx="0" dy="4" stdDeviation="5" flood-color="#0b1630" flood-opacity="0.16"/>
-        </filter>
-      </defs>
-
       <!-- CAMERA: one transform drives Phase A (zoom on the icon) -> Phase B (dolly out to the wordmark). -->
       <g id="cam">
         <!-- WORD: everything lives in one local coordinate space (the wordmark's own space). -->
         <g id="word">
 
-          <!-- favicon tile (fades out as the icon "opens" into the wordmark) -->
-          <rect id="tile" x="-8" y="-2" width="72" height="72" rx="16" fill="#ffffff" filter="url(#tileShadow)"/>
+          <!-- No white icon tile: the "t" sits directly on the app background. -->
 
           <!-- ===== the leading "t" (a faithful, scaled copy of favicon.svg) — always shown ===== -->
           <path id="tBar"  class="ink" d="M13,24 L43,24"/>
@@ -157,9 +150,6 @@
   "use strict";
 
   /* ---------- brand colours (verbatim from design/prototype.html) ---------- */
-  // On the white favicon tile the mark is ALWAYS the light triple (an app icon
-  // does not theme-shift). Once the tile is gone, the ink settles to the
-  // theme's on-background triple. In light mode the two are identical.
   const TILE = { az:"#0A63F0", gr:"#0FA968", rd:"#E0402F" };
   const BG = {
     light: { az:"#0A63F0", gr:"#0FA968", rd:"#E0402F" },
@@ -201,7 +191,7 @@
   ];
 
   const $ = (id)=>document.getElementById(id);
-  const stage = $("stage"), cam = $("cam"), tile = $("tile"), phone = document.querySelector(".phone");
+  const stage = $("stage"), cam = $("cam");
   const greenDot = $("greenDot"), redDot = $("redDot");
   const inkEls = ["tBar","tStem","r1","a","n","s","fstem","fbar","r2"].map($);
   const drawEls = ["r1","a","n","s","fstem","fbar","r2"].map($);
@@ -279,23 +269,16 @@
     else if(t < T.B){
       const u = smooth((t-T.A)/(T.B-T.A));
       s = lerp(Sa,Sb,u); fx = lerp(Pt.x,Wc.x,u); fy = lerp(Pt.y,Wc.y,u);
-      // a small "expand" pulse right as the tile dissolves (the mark opening up)
+      // a small "expand" pulse as the mark opens up into the wordmark
       const b = (t-T.A)/0.26;
       if(b<1) s *= 1 + 0.075*Math.sin(Math.PI*clamp(b,0,1));
     } else { s=Sb; fx=Wc.x; fy=Wc.y; }
     setCam(s, fx, fy);
 
-    // 2) TILE — fade out as the icon opens.
-    tile.style.opacity = t<T.A ? 1 : clamp(1-(t-T.A)/0.30, 0, 1);
-
-    // 3) COLOUR — on the tile the mark is the light triple; off it, the theme triple.
-    //    (Identical in light mode; a gentle azure lift in dark mode.)
-    let col;
-    if(t<=T.A) col = TILE;
-    else if(t<T.B){
-      const u = clamp((t-T.A)/(T.B-T.A),0,1);
-      col = { az:mix(TILE.az,on.az,u), gr:mix(TILE.gr,on.gr,u), rd:mix(TILE.rd,on.rd,u) };
-    } else col = on;
+    // 2) COLOUR — the mark uses the theme's on-background triple throughout.
+    //    (No white icon tile; the "t" sits directly on the app background, so it
+    //    must be legible on the paper in both light and dark.)
+    const col = on;
     inkEls.forEach(e=> e.style.stroke = col.az);
     greenDot.setAttribute("fill", col.gr);
     redDot.setAttribute("fill", col.rd);
