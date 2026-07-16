@@ -14,6 +14,15 @@ public final class TripModel {
     public var destination: String = "Stuttgart Hbf"
     public var departure: Date = TripModel.defaultDeparture()
 
+    // Current-location origin (design/route-maps.html §3). `usingCurrentLocation`
+    // drives the "From" field's location treatment and the route map's live origin
+    // dot; `originUserEdited` guards the first-launch default from clobbering a
+    // station the user has typed.
+    public var usingCurrentLocation = false
+    public var originUserEdited = false
+    /// The station the user's coordinate resolved to (shown under "Current location").
+    public var locationName: String?
+
     // Results
     public var response: JourneysResponse?
     public var selected: Journey?
@@ -24,6 +33,23 @@ public final class TripModel {
 
     // Navigation stack (value routes)
     public var path: [Route] = []
+
+    /// The verdict-free walk-only lookup (§6.9): a resolved station + two of its
+    /// platforms, set when "Show walk" is tapped and read by `WalkLookupView` to
+    /// fetch that walk's geometry. `relationId == 0` marks the sample tier (no
+    /// real geometry), so the lookup falls back to a schematic.
+    public struct WalkLookup: Hashable, Sendable {
+        public var station: String
+        public var relationId: Int
+        public var fromPlatform: String
+        public var toPlatform: String
+
+        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String) {
+            self.station = station; self.relationId = relationId
+            self.fromPlatform = fromPlatform; self.toPlatform = toPlatform
+        }
+    }
+    public var walkLookup: WalkLookup?
 
     private let repo: JourneyRepository
 
@@ -47,10 +73,31 @@ public final class TripModel {
         }
     }
 
+    /// Resolve a coordinate to the nearest station and set it as the origin. Keeps
+    /// `origin` a plain station name (what `/journeys` queries), but flags the trip
+    /// as location-sourced so the field and the route map show the "you" treatment.
+    /// Returns false (leaving state untouched) if nothing resolved near the point.
+    @discardableResult
+    public func useCurrentLocation(lat: Double, lon: Double) async -> Bool {
+        guard let resp = try? await repo.platforms(lat: lat, lon: lon),
+              resp.found, let name = resp.station, !name.isEmpty else { return false }
+        origin = name
+        locationName = name
+        usingCurrentLocation = true
+        return true
+    }
+
     /// Station autocomplete for the input fields. Fails soft to an empty list —
     /// suggestions are progressive enhancement, never a blocking error.
     public func stations(matching query: String) async -> [StationSuggestion] {
         (try? await repo.stations(query: query)) ?? []
+    }
+
+    /// Resolve a picked station's coordinate to its platforms (+ relation id) so
+    /// the walk-only door's pickers can adapt to it. Fails soft to nil — the UI
+    /// then keeps its free-form platform fields.
+    public func stationPlatforms(lat: Double, lon: Double) async -> StationPlatformsResponse? {
+        try? await repo.platforms(lat: lat, lon: lon)
     }
 
     public func select(_ journey: Journey) {

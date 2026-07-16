@@ -18,7 +18,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
 import api.walks as walks  # noqa: E402
-from api import schemas  # noqa: E402
+from api import config, schemas  # noqa: E402
 from api.walks import NO_GEOMETRY, WALK_BUILD_FAILED, build_walk, build_walks  # noqa: E402
 
 DB = pytest.mark.skipif(
@@ -54,10 +54,10 @@ def test_build_walk_forwards_settings_matching_the_verdict(monkeypatch):
 
     monkeypatch.setattr(walks, "export", _fake_export)
     build_walk(conn=None, key=_key(from_p="4", to_p="5", step_free=True))
-    # Same algorithm/no-stitch as assess_transfer; details off; step_free -> avoid_elevators.
+    # Same algorithm/stitch as assess_transfer; details off; step_free -> avoid_elevators.
     assert captured["ref_1"] == "4" and captured["ref_2"] == "5"
     assert captured["algorithm"] == "astar"
-    assert captured["stitch"] is False
+    assert captured["stitch"] == config.STITCH_BRIDGES
     assert captured["details"] is False
     assert captured["avoid_elevators"] is True
 
@@ -110,9 +110,10 @@ def test_build_walk_real_berlin_matches_verdict_walk():
     assert r.export["meta"]["station_name"] == "Berlin Hauptbahnhof"
 
     # The default walk must equal the verdict path: assess_transfer uses
-    # find_shortest_path(algorithm="astar") with no stitch/avoid, and build_walk
-    # feeds export() the same, so the two times can't disagree in the UI.
-    gt = find_shortest_path(conn, 5688517, "1", "16", algorithm="astar")
+    # find_shortest_path(algorithm="astar", stitch per config.STITCH_BRIDGES) and
+    # build_walk feeds export() the same, so the two times can't disagree in the UI.
+    gt = find_shortest_path(conn, 5688517, "1", "16", algorithm="astar",
+                            use_stitch_bridges=config.STITCH_BRIDGES)
     assert r.export["path"]["walking_time_seconds"] == gt["walking_time_seconds"]
 
     # The step-free variant is a *different* route (routes around the elevator),

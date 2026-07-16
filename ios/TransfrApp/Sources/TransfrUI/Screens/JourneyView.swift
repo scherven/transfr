@@ -12,9 +12,15 @@ struct JourneyView: View {
     var body: some View {
         ScrollView {
             if let journey {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(rows(for: journey)) { row in
-                        TimelineRow(row: row)
+                VStack(alignment: .leading, spacing: 16) {
+                    RouteMapView(journey: journey, fromCurrent: model.usingCurrentLocation)
+                        .frame(height: 200)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.line, lineWidth: 1))
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows(for: journey)) { row in
+                            TimelineRow(row: row)
+                        }
                     }
                 }
                 .padding(20)
@@ -83,7 +89,13 @@ struct JourneyView: View {
 
     private func rows(for j: Journey) -> [RowItem] {
         var out: [RowItem] = []
-        guard let first = j.legs.first else { return out }
+        // Live /journeys interleaves access/transfer WALK legs (mode "walking",
+        // trainName nil); build the timeline from the transit legs only, so
+        // transfer i sits between transit leg i and i+1 and no name/platform reads
+        // off a walk leg (the ARView/LiveView pattern). A direct trip would
+        // otherwise show the leading access walk's nil name as "—".
+        let trains = j.legs.filter { $0.trainName != nil }
+        guard let first = trains.first else { return out }
 
         // Origin
         out.append(RowItem(kind: .station, time: Fmt.time(first.departure),
@@ -95,8 +107,8 @@ struct JourneyView: View {
 
         // Each transfer sits between leg i and leg i+1.
         for (i, t) in j.transfers.enumerated() {
-            let arriving = j.legs[safe: i]
-            let departing = j.legs[safe: i + 1]
+            let arriving = trains[safe: i]
+            let departing = trains[safe: i + 1]
             out.append(RowItem(kind: .transfer,
                                time: Fmt.time(arriving?.arrival),
                                delay: Fmt.delay(arriving?.arrivalDelayS),
@@ -112,8 +124,9 @@ struct JourneyView: View {
             }
         }
 
-        // Destination
-        if let last = j.legs.last {
+        // Destination — the last transit leg (its arrivalPlatform is the real
+        // arrival platform; a trailing access walk carries none).
+        if let last = trains.last {
             out.append(RowItem(kind: .terminal, time: Fmt.time(last.arrival),
                                station: last.destination.name,
                                platform: last.arrivalPlatform.map { "Arrives Pl \($0)" },

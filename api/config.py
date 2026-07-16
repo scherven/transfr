@@ -26,6 +26,16 @@ def _int(name: str, default: int) -> int:
 # comfortably "feasible" rather than "tight".
 BUFFER_S = _float("TRANSFR_BUFFER_S", 60.0)
 
+# Enable opt-in synthetic stitch bridges (core/dbgen/build_stitch_bridges.py) on
+# every production walk -- BOTH the verdict pathfind (assess_transfer, /transfer)
+# and the drawable geometry (viz_export via /walk, /walks) -- so a stitched
+# transfer is judged feasible and its walk draws identically (the geometry==verdict
+# invariant in api/walks.py). Recovers class-1 "connector ends inside the platform
+# polygon" disconnects (e.g. Colmar A->E). A no-op on a DB whose `synthetic_bridges`
+# table was never built (SearchContext._load_stitch_bridges guards on to_regclass).
+# On by default; TRANSFR_STITCH_BRIDGES=0 restores classic no-stitch routing.
+STITCH_BRIDGES = os.environ.get("TRANSFR_STITCH_BRIDGES", "1") != "0"
+
 # Default number of itinerary options requested from the journey provider.
 DEFAULT_MAX_JOURNEYS = _int("TRANSFR_MAX_JOURNEYS", 5)
 MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)

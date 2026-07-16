@@ -5,20 +5,30 @@ import TransfrCore
 /// floor grid, the glowing azure path with chevrons toward a vanishing point, an
 /// instruction banner, a destination pill, and a distance badge. The real thing is
 /// ARKit + RealityKit anchored from the georeferenced `viz_export` (§7.7, §13.5) —
-/// flagged as the hard v2 frontier in `ios/SUI_TODO.md`.
+/// flagged as the hard v2 frontier in the repo-root `TODO.md` (§5).
 struct ARView: View {
     @Environment(TripModel.self) private var model
     @Environment(SettingsStore.self) private var settings
     @Environment(\.dismiss) private var dismiss
     let transferIndex: Int
 
+    @State private var boarding: BoardingGuidance?
+
     private var transfer: Transfer? { model.transfers[safe: transferIndex] }
+
+    /// The train boarded after this transfer — the (i+1)-th named leg. Real, not a
+    /// fixed "ICE 1197"; nil when the journey doesn't name it.
+    private var boardingTrain: String? {
+        let transit = (model.selected?.legs ?? []).filter { $0.trainName != nil }
+        return transit[safe: transferIndex + 1]?.trainName
+    }
 
     // Distance badge, in the user's units (the number and unit render separately).
     private var imperial: Bool { settings.units == .imperial }
-    private var distanceMeters: Double { transfer?.walkDistanceM ?? 78 }
-    private var distanceValue: Int {
-        Int((imperial ? distanceMeters * 3.28084 : distanceMeters).rounded())
+    private var distanceMeters: Double? { transfer?.walkDistanceM }
+    private var distanceText: String {
+        guard let m = distanceMeters else { return "—" }
+        return "\(Int((imperial ? m * 3.28084 : m).rounded()))"
     }
     private var distanceUnit: String { imperial ? "ft" : "m" }
 
@@ -33,13 +43,13 @@ struct ARView: View {
             ARFloor().ignoresSafeArea()
 
             VStack {
-                // Instruction banner
+                // Instruction banner — the real step-off direction from /walk.
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.up").font(.system(size: 20, weight: .bold)).foregroundStyle(.white)
                         .frame(width: 44, height: 44).background(Circle().fill(.white.opacity(0.15)))
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Walk toward sector C").font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
-                        Text("the stairs down are there").font(.system(size: 12)).foregroundStyle(.white.opacity(0.7))
+                        Text(bannerTitle).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                        Text(bannerSub).font(.system(size: 12)).foregroundStyle(.white.opacity(0.7))
                     }
                     Spacer()
                 }
@@ -52,15 +62,15 @@ struct ARView: View {
 
                 // Destination pill + distance
                 VStack(spacing: 10) {
-                    Text("▼ Platform \(transfer?.departurePlatform ?? "5") · ICE 1197")
+                    Text(destinationPill)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 12).padding(.vertical, 7)
                         .background(Capsule().fill(Color(hex: 0x4EA6FF).opacity(0.85)))
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(distanceValue)").font(.system(size: 30, weight: .bold, design: .monospaced))
-                        Text("\(distanceUnit) to go · \(Fmt.walkTime(transfer?.walkTimeS ?? 78))").font(.system(size: 13))
+                        Text(distanceText).font(.system(size: 30, weight: .bold, design: .monospaced))
+                        Text("\(distanceUnit) to go · \(Fmt.walkTime(transfer?.walkTimeS))").font(.system(size: 13))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 8)
@@ -79,6 +89,27 @@ struct ARView: View {
         }
         .navigationTitle("AR").navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
+        .task(id: transferIndex) { await loadBoarding() }
+    }
+
+    private var bannerTitle: String {
+        if let b = boarding, b.hasPosition, b.band != .low {
+            return "Head toward \(BoardingCopy.end(b))"
+        }
+        return "Follow the path"
+    }
+    private var bannerSub: String {
+        "your line to Platform \(transfer?.departurePlatform ?? "?")"
+    }
+    private var destinationPill: String {
+        let dep = transfer?.departurePlatform ?? "?"
+        if let train = boardingTrain { return "▼ Platform \(dep) · \(train)" }
+        return "▼ Platform \(dep)"
+    }
+
+    private func loadBoarding() async {
+        guard let t = transfer, let key = WalkKey(transfer: t, stepFree: settings.stepFree) else { return }
+        boarding = await model.walk(for: key)?.boarding
     }
 
     private func arControl(_ icon: String, _ label: String, filled: Bool = false) -> some View {

@@ -20,7 +20,6 @@ from graph import (
     bbox_from_coords,
     collapse_port_path,
     haversine_meters,
-    in_bbox,
     is_elevator_way,
     is_vertical_node,
     is_walkable_way,
@@ -245,73 +244,93 @@ def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords):
     return None
 
 
-def _find_platform_edges_near(
-    cur, ref: str, seed_nodes: set, coord_cache: Coords,
-) -> List[Tuple[int, List[int], Dict[str, str]]]:
-    """Look up the ways for platform `ref` by tag directly (indexed), then keep
-    only the ones within PLATFORM_EDGE_SEARCH_RADIUS_M of the station's own seed
-    geometry -- rejecting same-ref platforms belonging to unrelated stations
-    elsewhere in Europe.
+# The per-ref platform-edge lookup is a SearchContext method
+# (SearchContext._find_platform_edges_near): it needs the station's resolved
+# footprint (its in-bbox node coords and the set of way ids touching them),
+# computed once in _setup and shared by both refs. See that method for the tag
+# ladder and why candidates are bounded to the station's own ways.
 
-    Tries the tags precise-first (see the _PLATFORM_AREA_SQL comment): a
-    railway=platform_edge by ref then composite railway:track_ref, then -- only
-    if nothing precise matched -- a railway=platform / public_transport=platform
-    AREA by ref then local_ref. Stations mapped with platform_edge are therefore
-    resolved exactly as before; the area fallback only rescues stations that tag
-    their platforms as areas (the common case) rather than boardable edges.
-
-    Returns (way_id, nodes, tags) triples.
-    """
-    if not seed_nodes:
-        return []
-    seed_coords = {n: coord_cache[n] for n in seed_nodes if n in coord_cache}
-    if not seed_coords:
-        return []
-    bbox = bbox_from_coords(seed_coords, PLATFORM_EDGE_SEARCH_RADIUS_M)
-
-    def _candidates_near(predicate_sql: str, param) -> List[Tuple[int, List[int], Dict[str, str]]]:
-        cur.execute(f"SELECT id, nodes, tags FROM osm_ways WHERE {predicate_sql}", (param,))
-        rows = cur.fetchall()
-        if not rows:
-            return []
-        all_node_ids = {n for row in rows for n in row["nodes"] if n not in coord_cache}
-        if all_node_ids:
-            cur.execute("SELECT id, lat, lon FROM osm_nodes WHERE id = ANY(%s)", (list(all_node_ids),))
-            for r in cur.fetchall():
-                coord_cache[r["id"]] = (r["lat"], r["lon"])
-        matches = []
-        for row in rows:
-            nodes = list(row["nodes"])
-            if any(n in coord_cache and in_bbox(coord_cache[n], bbox) for n in nodes):
-                matches.append((row["id"], nodes, row["tags"] or {}))
-        return matches
-
-    attempts = (
+# The six tag predicates tried, precise-first (see the _PLATFORM_AREA_SQL
+# comment): railway=platform_edge by ref then composite railway:track_ref, then
+# -- only if nothing precise matched -- a railway=platform /
+# public_transport=platform AREA by ref then local_ref, then the compound-ref
+# ('3;4') token-containment fallbacks (GIN-indexed, see schema.sql). Each is a
+# fragment of a WHERE clause with a single %s for the ref-derived parameter; the
+# lookup ANDs an `id = ANY(station_way_ids)` bound in front so a common track
+# number never matches same-numbered platforms elsewhere in Europe.
+def _platform_edge_attempts(ref: str):
+    return (
         ("tags->>'railway' = 'platform_edge' AND tags->>'ref' = %s", str(ref)),
         ("tags->>'railway' = 'platform_edge' AND tags->>'railway:track_ref' LIKE %s", f"%{str(ref).zfill(2)}%"),
         (f"{_PLATFORM_AREA_SQL} AND tags->>'ref' = %s", str(ref)),
         (f"{_PLATFORM_AREA_SQL} AND tags->>'local_ref' = %s", str(ref)),
-        # Compound refs: one platform serving several tracks tagged '3;4'. Tried
-        # only after the exact lookups miss, so single-ref stations resolve
-        # byte-for-byte as before; a bare track number matches a token via array
-        # containment (GIN-indexed, see schema.sql). ref before local_ref, edge
-        # and area together (a compound edge is as rare as it is precise).
         (f"{_ANY_PLATFORM_SQL} AND {_REF_TOKENS_SQL} @> ARRAY[%s]", str(ref)),
         (f"{_ANY_PLATFORM_SQL} AND {_LOCAL_REF_TOKENS_SQL} @> ARRAY[%s]", str(ref)),
     )
-    for predicate_sql, param in attempts:
-        hit = _candidates_near(predicate_sql, param)
-        if hit:
-            return hit
 
-    # Tier 2: the ref wasn't on any platform way near the seed; it may live only
-    # on a stop_position node. Resolve that, then snap to the nearest platform.
-    stop = _nearest_stop_coord(cur, str(ref), bbox)
-    if stop is not None:
-        snapped = _nearest_walkable_way(cur, stop[0], stop[1], coord_cache)
-        if snapped is not None:
-            return [snapped]
-    return []
+
+# Natural sort so platform refs order the way a human reads them ("2" before
+# "10", "3a" just after "3"), not lexicographically ("10" before "2"). A ref
+# splits into alternating digit/non-digit chunks; digit chunks compare as ints
+# and sort ahead of any purely-alphabetic chunk at the same position.
+def _natural_key(ref: str):
+    return [
+        (0, int(tok), "") if tok.isdigit() else (1, 0, tok.lower())
+        for tok in re.findall(r"\d+|\D+", ref)
+    ]
+
+
+def list_platform_refs(cur, relation_id: int) -> List[str]:
+    """Every platform ref tagged at this station, naturally sorted.
+
+    Resolves the station's own footprint exactly as a platform-to-platform
+    search does (the same seed geometry -> padded bbox -> in-bbox ways chain as
+    SearchContext._setup), then collects the ref/local_ref of every platform way
+    (edge OR area) inside it. So the refs returned are precisely the ones a
+    `/walk` between them can resolve -- the walk-only door lists real, routable
+    platforms rather than free-form guesses. Compound island-platform refs
+    ('3;4') are split into their per-track tokens (see `_ref_tokens`)."""
+    seed_way_ids, seed_node_ids = resolve_relation_ways_and_nodes(cur, relation_id)
+    seed_nodes = set(seed_node_ids)
+    if seed_way_ids:
+        cur.execute("SELECT nodes FROM osm_ways WHERE id = ANY(%s)", (list(seed_way_ids),))
+        for row in cur.fetchall():
+            seed_nodes.update(row["nodes"])
+    if not seed_nodes:
+        return []
+
+    cur.execute("SELECT id, lat, lon FROM osm_nodes WHERE id = ANY(%s)", (list(seed_nodes),))
+    coords = {r["id"]: (r["lat"], r["lon"]) for r in cur.fetchall()}
+    if not coords:
+        return []
+
+    min_lat, max_lat, min_lon, max_lon = bbox_from_coords(coords, PLATFORM_EDGE_SEARCH_RADIUS_M)
+    cur.execute(
+        "SELECT id FROM osm_nodes WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+        (min_lat, max_lat, min_lon, max_lon),
+    )
+    node_ids = [r["id"] for r in cur.fetchall()]
+    if not node_ids:
+        return []
+
+    cur.execute(
+        "SELECT DISTINCT unnest(way_ids) AS w FROM node_way_ids WHERE node_id = ANY(%s)",
+        (node_ids,),
+    )
+    way_ids = [r["w"] for r in cur.fetchall()]
+    if not way_ids:
+        return []
+
+    cur.execute(
+        f"SELECT tags FROM osm_ways WHERE id = ANY(%s) AND {_ANY_PLATFORM_SQL}",
+        (way_ids,),
+    )
+    refs: set = set()
+    for row in cur.fetchall():
+        tags = row["tags"] or {}
+        for tag_key in ("ref", "local_ref"):
+            refs.update(_ref_tokens(tags.get(tag_key)))
+    return sorted(refs, key=_natural_key)
 
 
 class SearchContext:
@@ -376,6 +395,15 @@ class SearchContext:
         self.edges_2: List[Tuple[int, List[int], dict]] = []
         self.sources: set = set()
         self.targets: set = set()
+        # The station's own footprint, resolved once in _setup and shared by
+        # both refs' platform lookups (see _load_station_footprint). The in-bbox
+        # node ids bound platform candidates to this station; with the adjacency
+        # table they're mapped to a way-id set the lookups filter on in SQL,
+        # otherwise the (Europe-wide) ref matches are filtered against the node
+        # set in Python -- either way a same-ref platform elsewhere is rejected.
+        self._seed_bbox: Optional[Tuple[float, float, float, float]] = None
+        self._inbbox_nodes: set = set()
+        self._station_way_ids: Optional[set] = None
         self._setup(ref_1, ref_2)
 
     def _setup(self, ref_1: str, ref_2: str) -> None:
@@ -401,14 +429,26 @@ class SearchContext:
             seed_nodes.update(info["nodes"])
         self._load_nodes(seed_nodes)
 
+        # Resolve the station's own footprint once: a bbox around its seed
+        # geometry, the node ids inside it, and (with the adjacency table) the
+        # way ids touching them. Every platform-edge lookup below is bounded to
+        # this station. Without it, a common track number ('2') matches every
+        # platform so-numbered across the whole extract and we'd load hundreds of
+        # thousands of their node coordinates just to discard all but the local
+        # few (the dominant cost before this bound existed).
+        self._seed_bbox = self._compute_seed_bbox(seed_nodes)
+        self._inbbox_nodes = self._load_inbbox_nodes(self._seed_bbox)
+        if self.use_adjacency_table:
+            self._station_way_ids = self._station_way_ids_from(self._inbbox_nodes)
+
         # platform_edge ways are usually NOT relation members -- they're
         # associated with a station only by sharing nodes with its platform
         # ways. Rather than discovering them by expanding outward from the
         # seed (slow -- see core/ground_truth.py's module docstring), look
         # them up directly by the indexed (railway=platform_edge, ref) pair,
-        # then keep only candidates near the station's own seed geometry.
-        self.edges_1 = _find_platform_edges_near(cur, ref_1, seed_nodes, self.coord_cache)
-        self.edges_2 = _find_platform_edges_near(cur, ref_2, seed_nodes, self.coord_cache)
+        # restricted to the station's own ways.
+        self.edges_1 = self._find_platform_edges_near(ref_1)
+        self.edges_2 = self._find_platform_edges_near(ref_2)
         if not self.edges_1 or not self.edges_2:
             self.error = {
                 "found": False,
@@ -431,6 +471,101 @@ class SearchContext:
             return
         if self.use_stitch_bridges:
             self._load_stitch_bridges()
+
+    def _compute_seed_bbox(self, seed_nodes: set):
+        """A bbox around the station's seed geometry (its own tagged
+        infrastructure), padded by PLATFORM_EDGE_SEARCH_RADIUS_M. None when no
+        seed node has a known coordinate -- then no platform can be resolved,
+        exactly as before."""
+        seed_coords = {n: self.coord_cache[n] for n in seed_nodes if n in self.coord_cache}
+        if not seed_coords:
+            return None
+        return bbox_from_coords(seed_coords, PLATFORM_EDGE_SEARCH_RADIUS_M)
+
+    def _load_inbbox_nodes(self, bbox) -> set:
+        """The ids of every node inside the station bbox. These bound platform
+        resolution to the station: a platform way whose ref matches but which
+        touches none of these nodes belongs to a different station. Only ids are
+        needed here -- matched platforms' coords are loaded lazily, and the search
+        loads the rest on demand -- so a dense station's whole footprint is never
+        materialised."""
+        if bbox is None:
+            return set()
+        min_lat, max_lat, min_lon, max_lon = bbox
+        self.cur.execute(
+            "SELECT id FROM osm_nodes WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+            (min_lat, max_lat, min_lon, max_lon),
+        )
+        return {r["id"] for r in self.cur.fetchall()}
+
+    def _station_way_ids_from(self, node_ids: set) -> set:
+        """The way ids touching any in-bbox node, via node_way_ids (the same
+        node->ways adjacency the adjacency-table search uses). Lets the platform
+        lookups bound candidates in SQL (`id = ANY(...)`). Only used when
+        use_adjacency_table is set; the GIN path filters in Python instead."""
+        if not node_ids:
+            return set()
+        self.cur.execute(
+            "SELECT DISTINCT unnest(way_ids) AS w FROM node_way_ids WHERE node_id = ANY(%s)",
+            (list(node_ids),),
+        )
+        return {r["w"] for r in self.cur.fetchall()}
+
+    def _find_platform_edges_near(self, ref: str) -> List[Tuple[int, List[int], Dict[str, str]]]:
+        """Resolve platform `ref` to (way_id, nodes, tags) triples at THIS
+        station, precise-first over the tag ladder (see _platform_edge_attempts).
+
+        Every lookup is restricted to `self._station_way_ids`, so a common track
+        number never matches same-numbered platforms elsewhere in the extract.
+        Falls back to the Tier 2 stop-position snap (bbox-local) when no platform
+        way carries the ref. Returns [] -> caller reports platform_not_found."""
+        ref = str(ref)
+        for predicate_sql, param in _platform_edge_attempts(ref):
+            hit = self._candidates_in_station(predicate_sql, param)
+            if hit:
+                return hit
+
+        # Tier 2: the ref wasn't on any platform way at the station; it may live
+        # only on a stop_position node. Resolve that, then snap to the nearest
+        # platform. Bounded by the same seed bbox.
+        if self._seed_bbox is not None:
+            stop = _nearest_stop_coord(self.cur, ref, self._seed_bbox)
+            if stop is not None:
+                snapped = _nearest_walkable_way(self.cur, stop[0], stop[1], self.coord_cache)
+                if snapped is not None:
+                    return [snapped]
+        return []
+
+    def _candidates_in_station(self, predicate_sql: str, param) -> List[Tuple[int, List[int], Dict[str, str]]]:
+        """Ways matching one tag predicate AND belonging to this station's
+        footprint. Loads coords/tags only for the (few) matched ways' nodes still
+        missing -- never for the Europe-wide same-ref match set.
+
+        With the adjacency table, candidates are bounded in SQL by the station's
+        precomputed way-id set. Without it (the node_way_ids escape hatch), the
+        ref predicate is run unbounded and the matches are filtered against the
+        in-bbox node set in Python -- the same station bound, no giant array
+        pushed into a GIN scan (which the planner mishandles into a seq scan)."""
+        if not self._inbbox_nodes:
+            return []
+        if self.use_adjacency_table:
+            if not self._station_way_ids:
+                return []
+            self.cur.execute(
+                f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {predicate_sql}",
+                (list(self._station_way_ids), param),
+            )
+            rows = self.cur.fetchall()
+        else:
+            self.cur.execute(f"SELECT id, nodes, tags FROM osm_ways WHERE {predicate_sql}", (param,))
+            rows = [row for row in self.cur.fetchall()
+                    if any(n in self._inbbox_nodes for n in row["nodes"])]
+        if not rows:
+            return []
+        missing = {n for row in rows for n in row["nodes"] if n not in self.coord_cache}
+        if missing:
+            self._load_nodes(missing)
+        return [(row["id"], list(row["nodes"]), row["tags"] or {}) for row in rows]
 
     def _load_stitch_bridges(self) -> None:
         """Load synthetic stitch bridges near the resolved platforms into

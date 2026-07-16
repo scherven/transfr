@@ -24,6 +24,24 @@ public struct SampleRepository: JourneyRepository {
         return Self.stationSeed.filter { $0.name.lowercased().contains(q) }
     }
 
+    public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+        try? await Task.sleep(for: .milliseconds(140))
+        // Nearest seed station by rough coordinate distance → a plausible platform
+        // set so the walk-only pickers populate offline. (No DB in the sample tier,
+        // so relationId is 0 and walk(for:) returns ok == false; the lookup then
+        // falls back to its schematic.)
+        let nearest = Self.stationSeed.min {
+            hypot(($0.latitude ?? 0) - lat, ($0.longitude ?? 0) - lon)
+            < hypot(($1.latitude ?? 0) - lat, ($1.longitude ?? 0) - lon)
+        }
+        let name = nearest?.name ?? ""
+        let refs = name.hasPrefix("Berlin")
+            ? ["1", "2", "3", "4", "5", "6", "7", "8", "11", "12", "13", "14", "15", "16"]
+            : ["1", "2", "3", "4", "5", "6", "7", "8"]
+        return StationPlatformsResponse(lat: lat, lon: lon, relationId: 0, station: name,
+                                        found: true, platforms: refs)
+    }
+
     public func walk(for key: WalkKey) async throws -> WalkResult {
         // No bundled geometry in the sample tier — the walk screen falls back to
         // its schematic rendering (see WalkView). ok == false is an honest "no

@@ -33,6 +33,20 @@ struct WalkDecodeTests {
         #expect(!export.ways.isEmpty)
     }
 
+    @Test func decodesBoardingGuidanceOnWalk() throws {
+        let r = try TransfrJSON.decode(WalkResult.self, from: Self.fixture("walk_single"))
+        let b = try #require(r.boarding)
+        #expect(b.arrivalPlatform == "1")
+        #expect(b.departurePlatform == "2")
+        #expect(b.hasPosition)                 // a real 430 m edge was measured
+        #expect(b.stepoffFraction == 1.0)      // step off at the cross-over end
+        #expect(b.timeSavedS > 40)
+        #expect(b.band == .high)
+        // Position is known; the coach needs a live formation feed we don't have.
+        #expect(b.coach == nil)
+        #expect(b.reason == "no_formation_feed")
+    }
+
     // MARK: - /walks (batch)
 
     @Test func decodesBatchWithFoundAndFailedKeys() throws {

@@ -65,5 +65,7 @@ echo
 echo "Done. API key (ship this in the iOS build as the X-API-Key header):"
 echo "    $API_KEY"
 echo
-echo "Current tunnel URL (may take a few seconds to appear):"
-echo "    grep -o 'https://[a-z0-9-]*\\.trycloudflare\\.com' '$LOGS/tunnel.err.log' | tail -1"
+echo "Named tunnel serves the stable URL: https://api.trans-fr.com"
+echo "    verify:  curl -s -o /dev/null -w '%{http_code}\\n' https://api.trans-fr.com/health"
+echo "(No named tunnel configured? The plist's quick-tunnel fallback logs a random"
+echo " URL to $LOGS/tunnel.err.log instead.)"

@@ -3,7 +3,7 @@ import Observation
 
 /// The user's preferences (DESIGN.md §6.8 / §7.9), persisted via `@AppStorage`.
 /// These are real and durable; whether each one yet *affects routing* is tracked
-/// in `ios/SUI_TODO.md` (e.g. `stepFree` should ride on every walk request; the
+/// in the repo-root `TODO.md` §6 (e.g. `stepFree` should ride on every walk request; the
 /// makeable cut-off should re-verdict client-side). The theme override is fully
 /// wired to `.preferredColorScheme`.
 @MainActor

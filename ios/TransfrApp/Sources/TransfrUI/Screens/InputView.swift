@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreLocation
 import TransfrCore
 
 /// The planning screen — the prototype's "Where are you headed?" (`#s-input`,
@@ -7,6 +8,7 @@ import TransfrCore
 /// refs → the verdict-free walk, §6.9). Gear → Settings.
 struct InputView: View {
     @Environment(TripModel.self) private var model
+    @Environment(LocationManager.self) private var location
 
     enum Mode: String, CaseIterable, Identifiable { case type, paste, walk
         var id: String { rawValue }
@@ -19,6 +21,16 @@ struct InputView: View {
     @State private var fromPlatform = "1"
     @State private var toPlatform = "16"
 
+    /// Walk-only resolution: the station's platforms + relation id, resolved from a
+    /// picked suggestion's coordinate so the platform inputs **adapt to the entered
+    /// station** (the medium-TODO ask). `resolvedForStation` records which station
+    /// text the resolution belongs to, so editing the name reverts to free-form
+    /// until it's re-resolved. `resolving` covers the "Show walk" inline resolve.
+    @State private var resolved: StationPlatformsResponse?
+    @State private var stationLatLon: (lat: Double, lon: Double)?
+    @State private var resolvedForStation = ""
+    @State private var resolvingWalk = false
+
     /// Station-autocomplete state, shared across the From/To/Station fields — one
     /// focused field owns the suggestion list at a time.
     enum Field: Hashable { case from, to, station }
@@ -29,12 +41,21 @@ struct InputView: View {
     /// Departure-time editor presented as a sheet (the "Depart" chip is the trigger).
     @State private var showDepartPicker = false
 
+    /// Current-location wiring (design/route-maps.html §3). `awaitingLocation` means
+    /// a fix has been asked for and should be applied when it lands; `manualLocation`
+    /// distinguishes a button tap (always applies) from the first-launch default
+    /// (which yields to an origin the user has already typed). The persisted flag
+    /// fires the default exactly once.
+    @State private var awaitingLocation = false
+    @State private var manualLocation = false
+    @AppStorage("didDefaultLocationFrom") private var didDefaultLocation = false
+
     var body: some View {
         @Bindable var model = model
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                Text("Where are\nyou headed?")
+                Text("transfr")
                     .font(.system(size: 34, weight: .bold))
                     .foregroundStyle(Theme.ink)
                     .padding(.top, 4)
@@ -54,10 +75,22 @@ struct InputView: View {
         .sheet(isPresented: $showDepartPicker) { departureSheet }
         .navigationBarBackButtonHidden(true)
         .task {
+            if ProcessInfo.processInfo.environment["TRANSFR_OPEN_SETTINGS"] == "1" { model.path = [.settings] } // TEMP verify
+            // First launch: default "From" to the user's location (design §3). Asks
+            // permission once; the fix applies in onChange the moment it lands.
+            if !didDefaultLocation && !AppConfig.autoplanOnLaunch {
+                didDefaultLocation = true
+                if !location.isDenied { requestLocation(manual: false) }
+            }
             // Opt-in (TRANSFR_AUTOPLAN=1): jump straight to live results on launch.
-            if AppConfig.autoplanOnLaunch, model.load == .idle {
-                await model.plan()
-                if let j = model.journeys.first { model.select(j); model.path.append(.walk(transferIndex: 0)) } // TEMP verify
+            if AppConfig.autoplanOnLaunch, model.load == .idle { await model.plan() }
+        }
+        .onChange(of: location.coordinate?.latitude) { _, _ in applyLocationIfReady() }
+        .onChange(of: model.origin) { _, new in
+            // Any origin that isn't the resolved station means the user took over.
+            if new != model.locationName {
+                model.originUserEdited = true
+                model.usingCurrentLocation = false
             }
         }
     }
@@ -81,15 +114,7 @@ struct InputView: View {
         return VStack(alignment: .leading, spacing: 14) {
             Panel(padding: 6) {
                 VStack(spacing: 0) {
-                    fieldRow(dot: Theme.accent, label: "From", field: .from, text: $model.origin) {
-                        Button {
-                            withAnimation(.snappy) { model.swapEndpoints() }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down")
-                                .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink2)
-                                .frame(width: 34, height: 34).background(Circle().fill(Theme.panel2))
-                        }
-                    }
+                    fromRow(origin: $model.origin)
                     Divider().overlay(Theme.line).padding(.leading, 44)
                     fieldRow(dot: Theme.miss, label: "To", field: .to, text: $model.destination) { EmptyView() }
                 }
@@ -102,9 +127,97 @@ struct InputView: View {
                 chip(key: "Travellers", value: "1 adult")
                 Spacer(minLength: 0)
             }
-            Label("Every field here is editable — tap to change.", systemImage: "pencil")
+            Label("Tap any field to edit.", systemImage: "pencil")
                 .font(.system(size: 13)).foregroundStyle(Theme.ink3)
         }
+    }
+
+    // MARK: - From row (current location + button)
+
+    /// The "From" row. When the trip is location-sourced and the field isn't being
+    /// edited, it reads "Current location" over the resolved station; tapping the
+    /// text hands control back to typing. The trailing location button is always
+    /// present — the "also put in the button" half of the ask.
+    @ViewBuilder private func fromRow(origin: Binding<String>) -> some View {
+        if model.usingCurrentLocation && focused != .from {
+            HStack(spacing: 12) {
+                locationDot
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("From").font(.system(size: 11)).foregroundStyle(Theme.ink3)
+                    Text("Current location").font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
+                    if let n = model.locationName {
+                        Text(n).font(.system(size: 11)).foregroundStyle(Theme.ink3)
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    model.usingCurrentLocation = false
+                    model.originUserEdited = true
+                    focused = .from
+                }
+                Spacer(minLength: 0)
+                fromTrailing(active: true)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 12)
+        } else {
+            fieldRow(dot: Theme.accent, label: "From", field: .from, text: origin) {
+                fromTrailing(active: false)
+            }
+        }
+    }
+
+    private func fromTrailing(active: Bool) -> some View {
+        HStack(spacing: 8) {
+            locationButton(active: active)
+            Button {
+                withAnimation(.snappy) { model.swapEndpoints() }
+            } label: {
+                Image(systemName: "arrow.up.arrow.down")
+                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink2)
+                    .frame(width: 34, height: 34).background(Circle().fill(Theme.panel2))
+            }
+        }
+    }
+
+    private func locationButton(active: Bool) -> some View {
+        Button { requestLocation(manual: true) } label: {
+            Group {
+                if awaitingLocation && location.isRequesting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: active ? "location.fill" : "location")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(active ? .white : Theme.accent)
+                }
+            }
+            .frame(width: 34, height: 34)
+            .background(Circle().fill(active ? Theme.accent : Theme.accentSoft))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Use my current location")
+    }
+
+    private var locationDot: some View {
+        Circle().fill(Theme.accent).frame(width: 10, height: 10)
+            .overlay(Circle().stroke(Theme.accent.opacity(0.25), lineWidth: 4))
+    }
+
+    /// Ask for a fix. `manual` (button) always applies the result; the first-launch
+    /// default yields if the user has since typed an origin.
+    private func requestLocation(manual: Bool) {
+        focused = nil
+        manualLocation = manual
+        awaitingLocation = true
+        if manual { model.originUserEdited = false }
+        location.request()
+        applyLocationIfReady()   // apply straight away if a fix is already cached
+    }
+
+    private func applyLocationIfReady() {
+        guard awaitingLocation, let coord = location.coordinate else { return }
+        if !manualLocation && model.originUserEdited { awaitingLocation = false; return }
+        awaitingLocation = false
+        Task { await model.useCurrentLocation(lat: coord.latitude, lon: coord.longitude) }
     }
 
     private func fieldRow<Trailing: View>(
@@ -147,7 +260,7 @@ struct InputView: View {
                     }
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                        Text("We read the stops & departure time straight from a Google/Apple Maps or DB Navigator link — then rebuild it with platform transfers.")
+                        Text("Reads the stops from a Maps or DB link, then rebuilds it with platform transfers.")
                             .font(.system(size: 12)).foregroundStyle(Theme.ink3)
                     }
                 }
@@ -178,16 +291,36 @@ struct InputView: View {
                 fieldRow(dot: Theme.accent, label: "Station", field: .station, text: $lookupStation) { EmptyView() }
             }
             if focused == .station { suggestionList }
+
+            // The platform inputs adapt to the entered station: real dropdowns of
+            // its actual platforms once resolved, free-form text until then.
             HStack(spacing: 8) {
-                platformField("From platform", $fromPlatform)
+                platformInput("From platform", $fromPlatform)
                 Image(systemName: "arrow.right").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink3)
-                platformField("To platform", $toPlatform)
+                platformInput("To platform", $toPlatform)
             }
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                Text("Any two platforms at one station — we draw the walk between them. No trip, no train, no verdict: just the route, timed at your pace. Platform names are free-form (5a, Gl 1).")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-            }
+
+            walkHint
+        }
+    }
+
+    /// The platforms currently offered as a dropdown — the resolved station's real
+    /// list, but only while it still matches the station text (editing the name
+    /// reverts to free-form until re-resolved).
+    private var adaptedPlatforms: [String] {
+        guard resolvedForStation == lookupStation.trimmingCharacters(in: .whitespaces),
+              let refs = resolved?.platforms, !refs.isEmpty else { return [] }
+        return refs
+    }
+
+    /// A menu of the station's real platforms when we have them; the free-form
+    /// field otherwise — so an unmapped station or a hand-typed ref still works.
+    @ViewBuilder
+    private func platformInput(_ label: String, _ text: Binding<String>) -> some View {
+        if adaptedPlatforms.isEmpty {
+            platformField(label, text)
+        } else {
+            platformMenu(label, text, adaptedPlatforms)
         }
     }
 
@@ -202,6 +335,54 @@ struct InputView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line, lineWidth: 1))
+    }
+
+    private func platformMenu(_ label: String, _ text: Binding<String>, _ options: [String]) -> some View {
+        Menu {
+            Picker(label, selection: text) {
+                ForEach(options, id: \.self) { ref in Text("Platform \(ref)").tag(ref) }
+            }
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.system(size: 11)).foregroundStyle(Theme.ink3)
+                HStack(spacing: 6) {
+                    Text(text.wrappedValue.isEmpty ? "—" : text.wrappedValue)
+                        .font(.system(size: 17, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.ink)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 11, weight: .bold)).foregroundStyle(Theme.ink3)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line, lineWidth: 1))
+        }
+    }
+
+    /// Status line under the platform inputs: resolving / resolved (n platforms) /
+    /// the free-form fallback copy.
+    @ViewBuilder
+    private var walkHint: some View {
+        if resolvingWalk {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Finding this station's platforms…")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
+            }
+        } else if !adaptedPlatforms.isEmpty {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
+                Text("\(adaptedPlatforms.count) platforms at \(lookupStation). Pick any two — we draw the walk between them, timed at your pace.")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
+            }
+        } else {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
+                Text("Any two platforms at one station — we draw the walk between them, timed at your pace. Pick a station above to choose from its real platforms; names are free-form (5a, Gl 1).")
+                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
+            }
+        }
     }
 
     // MARK: - Autocomplete
@@ -222,17 +403,72 @@ struct InputView: View {
     }
 
     /// Commit a suggestion to whichever field is focused, then dismiss the list.
+    /// Picking the walk-only station also resolves its platforms so the pickers
+    /// adapt to it.
     private func pick(_ s: StationSuggestion) {
         @Bindable var model = model
         switch focused {
         case .from:    model.origin = s.name
         case .to:      model.destination = s.name
-        case .station: lookupStation = s.name
+        case .station:
+            lookupStation = s.name
+            if let lat = s.latitude, let lon = s.longitude {
+                Task { await resolvePlatforms(name: s.name, lat: lat, lon: lon) }
+            }
         case nil:      break
         }
         searchTask?.cancel()
         suggestions = []
         focused = nil
+    }
+
+    // MARK: - Walk-only resolution
+
+    /// Resolve a station's coordinate to its platforms (+ relation id) and adapt
+    /// the pickers. Defaults the two selected platforms to the first/last of the
+    /// real list when the current values aren't among them. Returns the response
+    /// so the "Show walk" path can reuse it.
+    @discardableResult
+    private func resolvePlatforms(name: String, lat: Double, lon: Double) async -> StationPlatformsResponse? {
+        resolvingWalk = true
+        defer { resolvingWalk = false }
+        stationLatLon = (lat, lon)
+        let r = await model.stationPlatforms(lat: lat, lon: lon)
+        guard let r, r.found, !r.platforms.isEmpty else { return r }
+        resolved = r
+        resolvedForStation = name.trimmingCharacters(in: .whitespaces)
+        if !r.platforms.contains(fromPlatform) { fromPlatform = r.platforms.first ?? fromPlatform }
+        if !r.platforms.contains(toPlatform) { toPlatform = r.platforms.last ?? toPlatform }
+        return r
+    }
+
+    /// The "Show walk" action: make sure the station is resolved (resolving inline
+    /// if the user typed a name without picking a suggestion), then hand the
+    /// resolved lookup to `WalkLookupView`. relationId 0 (sample tier / unresolved)
+    /// still navigates — the lookup falls back to its schematic there.
+    private func showWalk() async {
+        resolvingWalk = true
+        defer { resolvingWalk = false }
+
+        let station = lookupStation.trimmingCharacters(in: .whitespaces)
+        var lookup = resolved
+        if resolvedForStation != station || lookup == nil {
+            var coord = stationLatLon
+            if coord == nil {
+                let hits = await model.stations(matching: station)
+                if let top = hits.first, let la = top.latitude, let lo = top.longitude { coord = (la, lo) }
+            }
+            if let (la, lo) = coord {
+                lookup = await resolvePlatforms(name: station, lat: la, lon: lo)
+            }
+        }
+
+        model.walkLookup = TripModel.WalkLookup(
+            station: station.isEmpty ? (lookup?.station ?? "Walk") : station,
+            relationId: lookup?.relationId ?? 0,
+            fromPlatform: fromPlatform,
+            toPlatform: toPlatform)
+        model.path.append(.walkLookup)
     }
 
     @ViewBuilder private var suggestionList: some View {
@@ -324,6 +560,9 @@ struct InputView: View {
 
     private var ctaLabel: String { mode == .walk ? "Show walk" : "Find connections" }
 
+    /// The CTA shows a spinner while planning (type/paste) or resolving the walk.
+    private var ctaBusy: Bool { mode == .walk ? resolvingWalk : model.load == .loading }
+
     private var cta: some View {
         VStack(spacing: 8) {
             if case .failed(let msg) = model.load {
@@ -333,13 +572,13 @@ struct InputView: View {
             }
             Button {
                 if mode == .walk {
-                    model.path.append(.walkLookup)
+                    Task { await showWalk() }
                 } else {
                     Task { await model.plan() }
                 }
             } label: {
                 HStack {
-                    if model.load == .loading && mode != .walk {
+                    if ctaBusy {
                         ProgressView().tint(.white)
                     } else {
                         Text(ctaLabel)
@@ -348,7 +587,7 @@ struct InputView: View {
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(model.load == .loading && mode != .walk)
+            .disabled(ctaBusy || (mode == .walk && lookupStation.trimmingCharacters(in: .whitespaces).isEmpty))
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
         .background(.thinMaterial)

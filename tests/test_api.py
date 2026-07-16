@@ -167,6 +167,37 @@ def test_transfer_not_found_surfaces_reason(client, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# /station-platforms (walk-only door: platforms adapt to the entered station)
+# ---------------------------------------------------------------------------
+
+def test_station_platforms_found(client, monkeypatch):
+    monkeypatch.setattr(main, "resolve_station",
+                        lambda *a, **k: StationMatch(5688520, "Berlin, S Hauptbahnhof", 52.52, 13.37, 5.0))
+    monkeypatch.setattr(main, "list_platform_refs",
+                        lambda cur, rel: ["1", "2", "11", "16"])
+    r = client.get("/station-platforms", params={"lat": 52.52, "lon": 13.37})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is True
+    assert body["relation_id"] == 5688520 and body["station"] == "Berlin, S Hauptbahnhof"
+    # The relation_id echoes back so a subsequent /walk resolves the same station.
+    assert body["platforms"] == ["1", "2", "11", "16"]
+
+
+def test_station_platforms_unresolved(client, monkeypatch):
+    monkeypatch.setattr(main, "resolve_station", lambda *a, **k: None)
+    r = client.get("/station-platforms", params={"lat": 0.0, "lon": 0.0})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is False and body["reason"] == STATION_UNRESOLVED
+    assert body["platforms"] == [] and body["relation_id"] is None
+
+
+def test_station_platforms_missing_lat_is_422(client):
+    assert client.get("/station-platforms", params={"lon": 13.37}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # /walk and /walks (walk geometry delivery)
 #
 # HTTP-contract only: build_walk/build_walks are stubbed so these assert routing,

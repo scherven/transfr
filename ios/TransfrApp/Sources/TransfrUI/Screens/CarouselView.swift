@@ -54,9 +54,13 @@ struct CarouselView: View {
 /// stats, and the 3D / AR entry buttons.
 struct TransferDetailCard: View {
     @Environment(SettingsStore.self) private var settings
+    @Environment(TripModel.self) private var model
     let transfer: Transfer
     var onOpenWalk: () -> Void
     var onOpenAR: () -> Void
+
+    // Real boarding/step-off guidance + level note, from the transfer's /walk.
+    @State private var walk: WalkResult?
 
     private var v: Verdict { transfer.verdictKind }
 
@@ -65,12 +69,31 @@ struct TransferDetailCard: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 platformMove
-                boardingBox
-                levelNote
+                BoardingCard(guidance: walk?.boarding, levelNote: levelNote)
                 stats
                 buttons
             }
         }
+        // Same key as the walk screen: flipping step-free refetches the elevator-
+        // free route, whose step-off (and level note) can differ.
+        .task(id: settings.stepFree) { await loadWalk() }
+    }
+
+    /// A step-free / stairs summary from the walk's real `transitions` — nil until
+    /// the geometry loads (or on the sample tier), so the card shows only the
+    /// boarding half rather than inventing a level story.
+    private var levelNote: String? {
+        guard let p = walk?.export?.path, p.found else { return nil }
+        let transitions = p.transitions ?? []
+        if transitions.isEmpty { return "Step-free — same level, no stairs or lifts." }
+        let kinds = Set(transitions.map { WalkConnector.label($0.kind).lowercased() }).sorted()
+        let n = transitions.count
+        return "\(n) level change\(n == 1 ? "" : "s") — \(kinds.joined(separator: " + "))."
+    }
+
+    private func loadWalk() async {
+        guard let key = WalkKey(transfer: transfer, stepFree: settings.stepFree) else { return }
+        walk = await model.walk(for: key)
     }
 
     private var header: some View {
@@ -103,66 +126,6 @@ struct TransferDetailCard: View {
             Text(k).font(.system(size: 11)).foregroundStyle(Theme.ink3)
             Text(n).font(.system(size: 30, weight: .bold, design: .monospaced)).foregroundStyle(c)
         }
-    }
-
-    private var boardingBox: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Where to sit", systemImage: "tram.fill")
-                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
-                Spacer()
-                Text(v == .feasible ? "barely matters" : "saves ~30 s")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(v == .feasible ? Theme.ink3 : Theme.accent)
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Capsule().fill(v == .feasible ? Theme.panel2 : Theme.accentSoft))
-            }
-            HStack(spacing: 8) {
-                Image(systemName: v == .feasible ? "arrow.left.and.right" : "arrow.turn.up.left")
-                    .foregroundStyle(Theme.accent)
-                Text(boardingHint).font(.system(size: 13)).foregroundStyle(Theme.ink2)
-            }
-            sectorStrip
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel2))
-    }
-
-    private var boardingHint: String {
-        v == .feasible
-            ? "Step off anywhere — the next platform is right across the island."
-            : "Doors open → walk toward sector C (front). The stairs down are there."
-    }
-
-    private var sectorStrip: some View {
-        HStack(spacing: 6) {
-            ForEach(["A", "B", "C", "D", "E"], id: \.self) { s in
-                let on = (v != .feasible && s == "C")
-                Text(s)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .foregroundStyle(on ? .white : (v == .feasible ? Theme.go : Theme.ink3))
-                    .frame(maxWidth: .infinity).frame(height: 34)
-                    .background(RoundedRectangle(cornerRadius: 8)
-                        .fill(on ? Theme.accent : (v == .feasible ? Theme.goSoft : Theme.panel)))
-            }
-        }
-    }
-
-    private var levelNote: some View {
-        HStack(spacing: 10) {
-            Image(systemName: levelIcon)
-                .foregroundStyle(.white)
-                .frame(width: 30, height: 30)
-                .background(RoundedRectangle(cornerRadius: 8).fill(v == .feasible ? Theme.go : Theme.stair))
-            Text(levelText).font(.system(size: 13)).foregroundStyle(Theme.ink2)
-        }
-    }
-
-    private var levelIcon: String { v == .feasible ? "checkmark" : "stairs" }
-    private var levelText: String {
-        v == .feasible
-            ? "Same island platform — step across, no stairs. Very comfortable."
-            : "Down to the underpass, along, back up. Escalator on both ends."
     }
 
     private var stats: some View {

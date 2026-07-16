@@ -59,6 +59,15 @@ enum Fmt {
         let m = (abs(s) + 30) / 60
         return "\(s > 0 ? "+" : "−")\(max(m, 1)) min"
     }
+
+    /// A coarse "~40s" / "~3 min" used for the boarding time-saved estimate. The
+    /// value is an upper bound (worst-end penalty), so it's rounded coarsely and
+    /// always read with an "up to" in the copy — precision would overstate it.
+    static func approxSaved(_ seconds: Double?) -> String {
+        guard let s = seconds, s > 0 else { return "—" }
+        if s < 75 { return "~\(Int((s / 5).rounded()) * 5) s" }   // nearest 5s
+        return "~\(Int((s / 60).rounded())) min"
+    }
 }
 
 extension Transfer {

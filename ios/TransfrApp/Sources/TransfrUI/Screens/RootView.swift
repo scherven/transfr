@@ -8,6 +8,7 @@ import TransfrCore
 public struct RootView: View {
     @State private var model: TripModel
     @State private var settings = SettingsStore()
+    @State private var location = LocationManager()
 
     /// Inject any `JourneyRepository`. Defaults to the bundled sample tier so the
     /// app is runnable with no server (the API is still in progress).
@@ -39,6 +40,7 @@ public struct RootView: View {
         }
         .environment(model)
         .environment(settings)
+        .environment(location)
         .tint(Theme.accent)
         .preferredColorScheme(settings.theme.colorScheme)
     }

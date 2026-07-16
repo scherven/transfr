@@ -6,18 +6,20 @@ import TransfrCore
 /// (the key lives in `deploy/secrets/api_key`, gitignored). The Xcode scheme
 /// injects these at run time; see `ios/project.yml`.
 ///
-/// Now that `api/` is up this defaults to the **live** service (localhost dev
-/// server), a deliberate flip from the old hard-coded `.sample`. Set
+/// Now that `api/` is deployed this defaults to the **live** service at the stable
+/// named-tunnel hostname, a deliberate flip from the old hard-coded `.sample`. Set
 /// `TRANSFR_USE_SAMPLE=1` to force the bundled offline tier (handy for demos or a
-/// flight), or point `TRANSFR_API_URL` at the tunnel for an on-device build.
+/// flight), or point `TRANSFR_API_URL` at `http://localhost:5001` for a local dev
+/// server. The URL is not a secret and is committed; the key never is.
 ///
-///   TRANSFR_API_URL     base URL (default `http://localhost:5001`)
-///   TRANSFR_API_KEY     shared secret sent as `X-API-Key` (nil ⇒ unsecured dev)
+///   TRANSFR_API_URL     base URL (default `https://api.trans-fr.com`)
+///   TRANSFR_API_KEY     shared secret sent as `X-API-Key` (from deploy/secrets/api_key)
 ///   TRANSFR_USE_SAMPLE  "1"/"true" ⇒ ignore the above, serve bundled sample data
 public enum AppConfig {
-    /// The default dev server: a local `uvicorn api.main:app --port 5001`. The
-    /// simulator shares the host network, so `localhost` reaches it directly.
-    static let defaultBaseURL = URL(string: "https://observed-representative-abc-tigers.trycloudflare.com")!
+    /// The deployed service: the stable Cloudflare named tunnel in front of the
+    /// always-on host's `uvicorn api.main:app` (see deploy/launchd/). Overridable
+    /// with `TRANSFR_API_URL` (e.g. `http://localhost:5001` against a local server).
+    static let defaultBaseURL = URL(string: "https://api.trans-fr.com")!
 
     public static var repository: JourneyRepository {
         let env = ProcessInfo.processInfo.environment

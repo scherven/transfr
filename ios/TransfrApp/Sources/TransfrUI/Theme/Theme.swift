@@ -46,6 +46,16 @@ public enum Theme {
     public static let esc   = dyn(0x0EA5A5, 0x2DD4BF)
     public static let elev  = dyn(0xE0663A, 0xFB8A5C)
 
+    // Route-map surfaces (the vector "paper map" — RouteMapView). Sea is the map
+    // backdrop, land the country silhouette; both are picked to read as a soft
+    // raised shape over the panel, in either appearance.
+    public static let mapSea   = dyn(0xEAF0F8, 0x0B1220)
+    public static let mapLand  = dyn(0xDFE6F0, 0x182134)
+    public static let mapCoast = dynA(0x0E1626, 0.16, 0xFFFFFF, 0.15)
+    public static let mapGrat  = dynA(0x0E1626, 0.055, 0xFFFFFF, 0.05)
+    public static let mapRiver = dynA(0x0A63F0, 0.16, 0x4EA6FF, 0.20)
+    public static let mapCity  = dyn(0xAEB7C7, 0x3A465C)
+
     public static let radius: CGFloat = 22
     public static let mono  = Font.system(.body, design: .monospaced)
 

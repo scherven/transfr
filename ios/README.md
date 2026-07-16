@@ -140,8 +140,8 @@ the offline unit-of-work (DESIGN.md §13.9).
 (Section / Levels / 3D) ⇄ AR; Live; Walk-lookup; and Settings → Advanced (Full
 station walk · Nearest facility · Map health · Offline & regions) / Attributions.
 
-What is **live-driven** vs **illustrative/stub** per screen is tracked in
-[`SUI_TODO.md`](SUI_TODO.md). In short: the journey spine (Connections → timeline →
+What is **live-driven** vs **illustrative/stub** per screen is tracked in the
+repo-root [`TODO.md`](../TODO.md) (§1–§9). In short: the journey spine (Connections → timeline →
 carousel) reads real `/journeys` data, and the walk renderers (Section / Levels / 3D)
 now project real `viz_export` geometry from `/walk` (`WalkView.loadGeometry()` →
 `WalkGeometryViews.swift`); AR/Live/the Advanced tools are faithful **visual** builds

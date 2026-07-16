@@ -34,8 +34,24 @@ import argparse
 import json
 import math
 import os
+from urllib.parse import quote
 
 import plotly.graph_objects as go
+
+# Tab favicon for the rendered walk pages: the "transfr" mark -- a lowercase t in
+# the app azure with a green start / red end tip. Kept in sync with the canonical
+# design/favicon.svg; inlined as an SVG data URI so each page stays self-contained.
+_FAVICON_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<rect width='32' height='32' rx='7' fill='#fff'/>"
+    "<path d='M9 13.3 H21' fill='none' stroke='#0A63F0' stroke-width='3' stroke-linecap='round'/>"
+    "<path d='M15 8 V22 Q15 25.8 18.7 25.8 H21' fill='none' stroke='#0A63F0' "
+    "stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/>"
+    "<circle cx='15' cy='8' r='2.5' fill='#0FA968'/>"
+    "<circle cx='21' cy='25.8' r='2.5' fill='#E0402F'/>"
+    "</svg>"
+)
+_FAVICON = "data:image/svg+xml," + quote(_FAVICON_SVG)
 
 PATH_COLOR = "#ff8800"
 START_COLOR = "#2f9e44"
@@ -530,6 +546,7 @@ def write_html(fig, out, meta, subtitle, exag, auto_open):
     html = (
         "<!doctype html><html><head><meta charset='utf-8'>"
         "<meta name='viewport' content='width=device-width, initial-scale=1, maximum-scale=1'>"
+        f"<link rel='icon' href=\"{_FAVICON}\">"
         f"<title>{station_title}</title>"
         "<style>html,body{margin:0;padding:0;height:100%;overflow:hidden;"
         "font-family:-apple-system,Segoe UI,Roboto,sans-serif;}"

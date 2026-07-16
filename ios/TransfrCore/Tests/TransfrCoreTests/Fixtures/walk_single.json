@@ -961,5 +961,17 @@
       }
     },
     "details": []
+  },
+  "boarding": {
+    "arrival_platform": "1",
+    "departure_platform": "2",
+    "platform_length_m": 429.7,
+    "stepoff_offset_m": 429.7,
+    "stepoff_fraction": 1.0,
+    "time_saved_s": 306.9,
+    "significance": "high",
+    "coach": null,
+    "formation_source": null,
+    "reason": "no_formation_feed"
   }
 }

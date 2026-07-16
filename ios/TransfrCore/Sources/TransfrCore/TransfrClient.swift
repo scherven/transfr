@@ -76,6 +76,19 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
+    /// GET /station-platforms?lat=&lon= — the platforms (and the relation_id a
+    /// subsequent `walk(...)` uses) at the station nearest a coordinate. Powers
+    /// the walk-only door: the platform pickers adapt to the entered station.
+    public func stationPlatforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("station-platforms"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lon", value: String(lon)),
+        ]
+        return try await get(comps?.url)
+    }
+
     /// GET /walk?relation_id=&from_platform=&to_platform=&step_free= — one
     /// transfer's drawable walk geometry (the `viz_export` document). Keyed by the
     /// triple a `Transfer` already carries, so callers forward them verbatim.

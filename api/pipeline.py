@@ -61,7 +61,8 @@ def _leg(d: Dict[str, Any]) -> schemas.Leg:
 
 
 def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
-            buffer_s: float, algorithm: str) -> schemas.Transfer:
+            buffer_s: float, algorithm: str,
+            resolve_cache: Dict[Any, Any] = None) -> schemas.Transfer:
     arr, dep = arrive.get("destination") or {}, depart.get("origin") or {}
     a = assess_transfer(
         conn,
@@ -69,7 +70,7 @@ def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
         arr_platform=arrive.get("arrival_platform"), arr_time=arrive.get("arrival"),
         dep_lat=dep.get("latitude"), dep_lon=dep.get("longitude"),
         dep_platform=depart.get("departure_platform"), dep_time=depart.get("departure"),
-        buffer_s=buffer_s, algorithm=algorithm,
+        buffer_s=buffer_s, algorithm=algorithm, resolve_cache=resolve_cache,
     )
     return schemas.Transfer(
         at_station=a.station_name or arr.get("name"),
@@ -88,9 +89,13 @@ def enrich(conn, search_result: Dict[str, Any], *,
            buffer_s: float = DEFAULT_BUFFER_S,
            algorithm: str = DEFAULT_ALGORITHM) -> schemas.JourneysResponse:
     journeys_out: List[schemas.Journey] = []
+    # One change of train (same station + platforms) commonly recurs across a
+    # search's journeys; its walk is clock-independent, so pathfind it once and
+    # reuse across every itinerary in this response.
+    resolve_cache: Dict[Any, Any] = {}
     for j in search_result.get("journeys", []):
         transfers = [
-            _assess(conn, arrive, depart, buffer_s, algorithm)
+            _assess(conn, arrive, depart, buffer_s, algorithm, resolve_cache)
             for arrive, depart in interchanges(j)
         ]
         n_changes = j.get("num_changes")

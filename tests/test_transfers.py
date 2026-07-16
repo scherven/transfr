@@ -102,6 +102,12 @@ def _base_kwargs(**over):
     return kw
 
 
+def _kw_layover(layover_s, **over):
+    """_base_kwargs with the arr/dep times set to yield exactly `layover_s`."""
+    arr_time, dep_time = _times(layover_s)
+    return _base_kwargs(arr_time=arr_time, dep_time=dep_time, **over)
+
+
 def test_no_platform_data_short_circuits(monkeypatch):
     calls = []
     _patch(monkeypatch,
@@ -206,6 +212,64 @@ def test_implausible_walk_does_not_block_a_later_real_candidate(monkeypatch):
         arr_time="2026-07-13T07:00:00Z", dep_time="2026-07-13T07:10:00Z"))
     assert a.verdict == FEASIBLE
     assert a.relation_id == 2 and a.walk_distance_m == 120.0
+
+
+# ---------------------------------------------------------------------------
+# resolve_walk split + memoization (the clock-independent half is cacheable)
+# ---------------------------------------------------------------------------
+
+def test_resolve_walk_is_clock_independent(monkeypatch):
+    """resolve_walk carries no layover/verdict -- only the station, refs and the
+    walk (or a reason). It takes no *_time args, so it can't depend on them."""
+    same = [StationMatch(6365739, "Colmar", 48.07, 7.35, 5.0)]
+    _patch(monkeypatch, lambda *a, **k: same,
+           lambda *a, **k: {"found": True, "walking_time_seconds": 90.0, "walking_distance_meters": 120.0})
+    r = T.resolve_walk(_FakeConn(), arr_lat=50.1, arr_lon=8.6, arr_platform="7",
+                       dep_lat=50.1, dep_lon=8.6, dep_platform="9")
+    assert r.walk_time_s == 90.0 and r.walk_distance_m == 120.0 and r.reason is None
+    assert r.relation_id == 6365739 and r.arrival_platform == "7" and r.departure_platform == "9"
+
+
+def test_cache_reuses_walk_but_reclassifies_per_layover(monkeypatch):
+    """Same change of train, two itineraries with different layovers: the walk is
+    pathfound ONCE (cache hit), yet each call's verdict reflects its own layover."""
+    finds = []
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(1, "X", 50.1, 8.6, 5.0)],
+           lambda *a, **k: finds.append(1) or {"found": True, "walking_time_seconds": 200.0, "walking_distance_meters": 260.0})
+    cache = {}
+    # Layover 600s: 200s walk + 60s buffer comfortably clears -> feasible.
+    a1 = assess_transfer(_FakeConn(), resolve_cache=cache, **_kw_layover(600))
+    # Layover 210s: barely over the walk, inside the buffer -> tight.
+    a2 = assess_transfer(_FakeConn(), resolve_cache=cache, **_kw_layover(210))
+    # Layover 150s: under the walk -> infeasible.
+    a3 = assess_transfer(_FakeConn(), resolve_cache=cache, **_kw_layover(150))
+    assert (a1.verdict, a2.verdict, a3.verdict) == (FEASIBLE, TIGHT, INFEASIBLE)
+    assert all(a.walk_time_s == 200.0 for a in (a1, a2, a3))
+    assert len(finds) == 1, "the walk must be resolved once and reused from cache"
+    assert len(cache) == 1
+
+
+def test_cache_distinguishes_different_transfers(monkeypatch):
+    """Different platforms => different cache key => a fresh resolve, not a stale hit."""
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(1, "X", 50.1, 8.6, 5.0)],
+           lambda conn, rel, aref, bref, **k: {"found": True,
+               "walking_time_seconds": 100.0 if bref == "9" else 40.0,
+               "walking_distance_meters": 130.0 if bref == "9" else 50.0})
+    cache = {}
+    a = assess_transfer(_FakeConn(), resolve_cache=cache, **_kw_layover(600))
+    b = assess_transfer(_FakeConn(), resolve_cache=cache, **_kw_layover(600, dep_platform="4"))
+    assert a.walk_time_s == 100.0 and b.walk_time_s == 40.0
+    assert len(cache) == 2
+
+
+def test_cache_result_matches_uncached(monkeypatch):
+    """Passing a cache never changes the assessment vs not passing one."""
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(7, "Y", 50.1, 8.6, 5.0)],
+           lambda *a, **k: {"found": True, "walking_time_seconds": 75.0, "walking_distance_meters": 95.0})
+    kw = _kw_layover(300)
+    uncached = assess_transfer(_FakeConn(), **kw)
+    cached = assess_transfer(_FakeConn(), resolve_cache={}, **kw)
+    assert uncached == cached
 
 
 # ---------------------------------------------------------------------------

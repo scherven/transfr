@@ -42,7 +42,7 @@ struct NearestFacilityView: View {
                         SetIcon("toilet", tint: .white, bg: Theme.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Toilets · main concourse").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                            Text("step-free · level 0 · via the Pl 1 escalator").font(.system(size: 11)).foregroundStyle(Theme.ink3)
+                            Text("stairs-free · level 0 · via the Pl 1 escalator").font(.system(size: 11)).foregroundStyle(Theme.ink3)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 1) {
@@ -67,8 +67,8 @@ struct NearestFacilityView: View {
 
                 Text("All toilets in this station · 3 found").font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.ink3)
                     .padding(.horizontal, 4).padding(.bottom, 8)
-                facilityRow("Main concourse", "level 0 · step-free", "38 m")
-                facilityRow("Upper Stadtbahn (Pl 13–14)", "level +2 · step-free", "104 m")
+                facilityRow("Main concourse", "level 0 · stairs-free", "38 m")
+                facilityRow("Upper Stadtbahn (Pl 13–14)", "level +2 · stairs-free", "104 m")
                 facilityRow("Europaplatz entrance", "level 0", "131 m")
 
                 Label("Tap a facility to walk to it in full 3D. Facilities come from OSM amenity/shop tags. If a station has none mapped, we say so rather than guess.",

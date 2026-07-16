@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Offline & regions — the prototype's `#s-dbmanage` (§6.10). Install / update /
 /// remove regional databases, prefetch a station's 3D detail, and storage. Static
-/// example content; real region management is device-side (see `ios/SUI_TODO.md`).
+/// example content; real region management is device-side (see repo-root `TODO.md` §7).
 struct OfflineRegionsView: View {
     @State private var prefetch = ""
 

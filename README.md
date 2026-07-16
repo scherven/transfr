@@ -87,9 +87,13 @@ Both are idempotent (re-run after any code change or reboot). They:
   * generate the shared API key **once** into `deploy/secrets/api_key`
     (gitignored) and reuse it forever, so the shipped iOS build keeps working;
   * install two services — the API (uvicorn on `127.0.0.1:5001`) and the
-    cloudflared quick tunnel — that restart on crash / DB blip / reboot. The API
+    cloudflared tunnel — that restart on crash / DB blip / reboot. The API
     binds to loopback only; cloudflared is the only thing that reaches it;
   * print the API key and how to read the current tunnel URL.
+
+The deployed tunnel is a **named tunnel** serving the stable hostname
+**`https://api.trans-fr.com`** (set up once — see below). The quick-tunnel
+variant (random URL, no domain) is the documented fallback in the tunnel plist.
 
 The key never enters the service definition: it passes only `TRANSFR_API_KEY_FILE`
 (a path), and the app reads the secret from that gitignored file at startup. (On
@@ -97,27 +101,49 @@ macOS, uvicorn is invoked directly rather than via a wrapper because TCC blocks
 launchd from running a shell script under `~/Documents`; Linux has no such limit.)
 See `deploy/launchd/README.md` / `deploy/systemd/README.md` for day-to-day ops.
 
-### 3. get the URL + key for the app
+### 3. named tunnel — one-time setup (stable URL)
+
+The deployment serves `https://api.trans-fr.com`, a Cloudflare **named tunnel** so
+the URL survives restarts/reboots (unlike a quick tunnel). Set up once on the host:
+
+    cloudflared tunnel login                              # browser: authorize the domain
+    cloudflared tunnel create transfr                     # creates the tunnel + <uuid>.json creds
+    cloudflared tunnel route dns transfr api.trans-fr.com # auto-creates the DNS CNAME
+
+Then write `~/.cloudflared/config.yml` (outside the repo; the creds are secret):
+
+    tunnel: <uuid from create>
+    credentials-file: /Users/<you>/.cloudflared/<uuid>.json
+    ingress:
+      - hostname: api.trans-fr.com
+        service: http://localhost:5001
+      - service: http_status:404
+
+The tunnel plist runs `cloudflared tunnel run transfr`, which reads that config.
+Re-running `deploy/launchd/install.sh` keeps it wired.
+
+### 4. point the app at it
 
     cat deploy/secrets/api_key    # the X-API-Key value
-    # current tunnel URL --
-    #   macOS: grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/Library/Logs/transfr/tunnel.err.log | tail -1
-    #   Linux: journalctl -u transfr-tunnel | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
 
-The iOS app sends that key in an `X-API-Key` header on every request to that URL.
+The iOS app defaults to `https://api.trans-fr.com` (`AppConfig.defaultBaseURL`) and
+reads the key from the `TRANSFR_API_KEY` env var (injected by the Xcode scheme, so
+it's never committed). Set it from the file above; override the URL with
+`TRANSFR_API_URL` for a local server, or `TRANSFR_USE_SAMPLE=1` for the offline tier.
 
 ### running by hand (dev, no service manager)
 
     TRANSFR_API_KEY="$(openssl rand -hex 24)" TRANSFR_RATE_LIMIT=60/minute \
         .venv/bin/uvicorn api.main:app --port 5001
-    cloudflared tunnel --url http://localhost:5001    # separate terminal
+    cloudflared tunnel run transfr        # named tunnel, separate terminal
+    # or, no domain: cloudflared tunnel --url http://localhost:5001  (random URL)
 
 ### caveats
 
-> **Quick-tunnel URL changes on every restart.** Fine for testing (read it from
-> the log). For a URL stable enough to ship in TestFlight, register a **named
-> tunnel** on a Cloudflare domain (~$8/yr) and swap the tunnel plist's
-> `ProgramArguments` to `cloudflared tunnel run <name>` (documented inline).
+> **No domain?** A **quick tunnel** (`cloudflared tunnel --url http://localhost:5001`)
+> needs no account/domain but its URL is random and changes every restart — read it
+> from the log (`~/Library/Logs/transfr/tunnel.err.log`). The named tunnel above is
+> what makes the URL stable enough to ship in a build.
 
 > **Web surface — deferred, not free.** The controls above suit a single-tenant
 > native client. CORS is still `*` (harmless for iOS, which doesn't do CORS) and

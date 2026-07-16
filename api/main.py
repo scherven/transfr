@@ -11,6 +11,9 @@ Endpoints:
   GET  /transfer?lat=&lon=&from_platform=&to_platform=
                                                  debug: platform-to-platform walk at
                                                  the station nearest a coordinate
+  GET  /station-platforms?lat=&lon=              the platforms (+ relation_id) at the
+                                                 station nearest a coordinate; powers
+                                                 the walk-only door's platform pickers
   GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
                                                  one transfer's drawable walk geometry
                                                  (viz_export); cacheable
@@ -32,6 +35,7 @@ from slowapi import _rate_limit_exceeded_handler
 
 from api import stations  # CSV autocomplete
 from ground_truth import find_shortest_path
+from search_context import list_platform_refs
 
 from api import config, schemas
 from api.bridge import resolve_station
@@ -134,7 +138,8 @@ def get_transfer(
             lat=lat, lon=lon, from_platform=from_platform, to_platform=to_platform,
             found=False, reason=STATION_UNRESOLVED,
         )
-    result = find_shortest_path(conn, match.relation_id, from_platform, to_platform, algorithm="astar")
+    result = find_shortest_path(conn, match.relation_id, from_platform, to_platform,
+                                algorithm="astar", use_stitch_bridges=config.STITCH_BRIDGES)
     found = bool(result.get("found"))
     return schemas.PlatformWalkResponse(
         lat=lat, lon=lon,
@@ -144,6 +149,25 @@ def get_transfer(
         walk_time_s=result.get("walking_time_seconds"),
         walk_distance_m=result.get("walking_distance_meters"),
         reason=None if found else result.get("reason"),
+    )
+
+
+@app.get("/station-platforms", response_model=schemas.StationPlatformsResponse, dependencies=_PROTECTED)
+def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
+    """The platforms at the station nearest (lat, lon), plus the relation_id a
+    subsequent /walk between two of them uses. Powers the walk-only door: the
+    platform pickers adapt to the entered station, and both calls resolve the
+    same station because they key off the same coordinate -> relation."""
+    with conn.cursor() as cur:
+        match = resolve_station(cur, lat, lon)
+        if match is None:
+            return schemas.StationPlatformsResponse(
+                lat=lat, lon=lon, found=False, reason=STATION_UNRESOLVED,
+            )
+        refs = list_platform_refs(cur, match.relation_id)
+    return schemas.StationPlatformsResponse(
+        lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
+        found=True, platforms=refs,
     )
 
 

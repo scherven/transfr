@@ -5,15 +5,15 @@
   TEMPLATE -- install.sh fills __CLOUDFLARED__ and __HOME__ and installs the
   rendered copy to ~/Library/LaunchAgents/.
 
-  This runs a QUICK tunnel (no account/domain). Its URL is random and CHANGES on
-  every restart -- fine while testing, but read the current URL from the log:
+  Runs the NAMED tunnel `transfr`, which serves a STABLE hostname
+  (api.trans-fr.com) that survives restarts/reboots. It reads its routing and
+  credentials from ~/.cloudflared/config.yml + the tunnel's <uuid>.json (both
+  outside the repo, created once via `cloudflared tunnel login/create/route dns`).
 
-      grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/Library/Logs/transfr/tunnel.err.log | tail -1
-
-  For a STABLE URL that survives restarts (what TestFlight needs), register a
-  named tunnel on a Cloudflare domain and swap ProgramArguments to:
-      __CLOUDFLARED__  tunnel  run  <your-tunnel-name>
-  (A named tunnel stores its own creds, so no --url is needed.)
+  Fallback with no domain -- a QUICK tunnel (random URL, changes each restart):
+      <string>__CLOUDFLARED__</string><string>tunnel</string>
+      <string>--url</string><string>http://localhost:5001</string>
+  then read the URL from tunnel.err.log.
 -->
 <plist version="1.0">
 <dict>
@@ -24,8 +24,8 @@
     <array>
         <string>__CLOUDFLARED__</string>
         <string>tunnel</string>
-        <string>--url</string>
-        <string>http://localhost:5001</string>
+        <string>run</string>
+        <string>transfr</string>
     </array>
 
     <key>RunAtLoad</key>

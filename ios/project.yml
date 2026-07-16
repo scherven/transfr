@@ -32,7 +32,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Transfr
+        CFBundleDisplayName: transfr
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -43,9 +43,15 @@ targets:
         # (Only localhost/*.local/link-local — not a blanket HTTP allowance.)
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        # Location is one-shot / while-in-use: plan from the user's position and
+        # place the live "you" dot. No background/Always usage in this scope.
+        NSLocationWhenInUseUsageDescription: >-
+          transfr uses your location to plan from where you are and to place you
+          on the live route map. It's only read while the app is open.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.transfr.app
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
@@ -68,5 +74,5 @@ schemes:
       # The generated .xcodeproj is gitignored, so the baked key never lands in
       # git. Unset TRANSFR_API_URL or set TRANSFR_USE_SAMPLE=1 to run offline.
       environmentVariables:
-        TRANSFR_API_URL: https://observed-representative-abc-tigers.trycloudflare.com
+        TRANSFR_API_URL: https://api.trans-fr.com
         TRANSFR_API_KEY: ${TRANSFR_API_KEY}

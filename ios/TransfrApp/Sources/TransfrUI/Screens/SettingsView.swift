@@ -4,7 +4,7 @@ import SwiftUI
 /// Making the connection · Appearance · On the move · Power tools · About. Every
 /// control is bound to `SettingsStore` and persisted; the Theme control drives
 /// `.preferredColorScheme` for real. Whether each preference yet affects routing
-/// is tracked in `ios/SUI_TODO.md`.
+/// is tracked in the repo-root `TODO.md` (§6).
 struct SettingsView: View {
     @Environment(SettingsStore.self) private var s
 
@@ -13,16 +13,16 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 0) {
                 SectionHeader(text: "Getting around")
-                SettingRow(icon: "figure.walk", title: "Step-free routes",
-                           subtitle: "Skip stairs — route via lifts and ramps") {
+                SettingRow(icon: "figure.walk", title: "Stairs-free routes",
+                           subtitle: "Route via lifts and ramps") {
                     TransfrToggle(isOn: $s.stepFree)
                 }.padding(.bottom, 8)
                 SettingStack(icon: "figure.walk.motion", title: "Walking pace",
-                             subtitle: "How fast we assume you move between platforms") {
+                             subtitle: "Assumed pace between platforms") {
                     SegmentedControl(options: SettingsStore.Pace.allCases, selection: $s.pace) { $0.label }
                 }.padding(.bottom, 8)
                 SettingRow(icon: "stairs", title: "Prefer escalators",
-                           subtitle: "Use them over stairs where there's a choice") {
+                           subtitle: "Over stairs where there's a choice") {
                     TransfrToggle(isOn: $s.preferEscalators)
                 }
 
@@ -35,7 +35,7 @@ struct SettingsView: View {
 
                 SectionHeader(text: "Appearance")
                 SettingStack(icon: "moon.stars", title: "Theme",
-                             subtitle: "Try it — this one actually switches") {
+                             subtitle: "Light, dark, or system") {
                     SegmentedControl(options: SettingsStore.ThemeMode.allCases, selection: $s.theme) { $0.label }
                 }.padding(.bottom, 8)
                 SettingStack(icon: "ruler", title: "Distance units",
@@ -49,7 +49,7 @@ struct SettingsView: View {
                     TransfrToggle(isOn: $s.liveActivity)
                 }.padding(.bottom, 8)
                 SettingStack(icon: "viewfinder", title: "Open AR automatically",
-                             subtitle: "Prompt me to point my phone before I arrive") {
+                             subtitle: "Prompt to raise your phone before arrival") {
                     SegmentedControl(options: [0, 60, 90], selection: $s.autoARLeadS) {
                         $0 == 0 ? "Off" : "\($0)s"
                     }
@@ -86,14 +86,14 @@ struct SettingsView: View {
                         .font(.system(size: 16, weight: .bold, design: .monospaced))
                         .foregroundStyle(Theme.accent)
                 }
-                Text("Call a connection makeable when the walk uses under this much of the layover. Above it, we flag it tight.")
+                Text("Makeable when the walk uses under this share of the layover.")
                     .font(.system(size: 11.5)).foregroundStyle(Theme.ink3)
                     .padding(.top, 5).padding(.bottom, 12)
 
                 Slider(value: Binding(
                     get: { Double(s.makeablePct) },
-                    set: { s.makeablePct = (Int($0) / 5) * 5 }
-                ), in: 40...90, step: 5)
+                    set: { s.makeablePct = Int($0.rounded()) }
+                ), in: 1...100)
                 .tint(Theme.accent)
 
                 ZoneBar(zones: [

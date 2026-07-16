@@ -21,9 +21,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 
 from api import journeys  # noqa: E402
 import api.pipeline as P  # noqa: E402
+import api.transfers as T  # noqa: E402
 from api.pipeline import enrich, plan_journeys, rollup_verdict  # noqa: E402
 from api.transfers import (  # noqa: E402
-    FEASIBLE, INFEASIBLE, TIGHT, UNKNOWN, NO_PLATFORM_DATA, TransferAssessment,
+    FEASIBLE, INFEASIBLE, TIGHT, UNKNOWN, NO_PLATFORM_DATA,
+    TransferAssessment, WalkResolution,
 )
 
 FIX_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "journeys")
@@ -129,6 +131,68 @@ def test_plan_journeys_wires_search_and_enrich(monkeypatch):
     resp = plan_journeys(None, "Frankfurt", "Köln", datetime(2026, 7, 13, 9, 0))
     assert resp.journeys
     assert any(j.transfers for j in resp.journeys)  # the 1-transfer itinerary
+
+
+# ---------------------------------------------------------------------------
+# Memoization: one change of train shared by several journeys is resolved once
+# ---------------------------------------------------------------------------
+
+def _station(lat, lon, name):
+    return {"id": name, "name": name, "latitude": lat, "longitude": lon}
+
+
+def _transit_leg(origin, destination, dep_plat, arr_plat, dep_time, arr_time):
+    return {
+        "mode": "train", "train_name": "ICE",
+        "origin": origin, "destination": destination,
+        "departure": dep_time, "arrival": arr_time,
+        "departure_platform": dep_plat, "arrival_platform": arr_plat,
+    }
+
+
+def _journey_with_shared_change(dep_time, mid_arr, mid_dep):
+    """Two-leg itinerary changing at the SAME station (Mannheim, p3->p5); only the
+    layover (mid_arr/mid_dep) varies between journeys."""
+    a = _station(49.4794, 8.4692, "Frankfurt")
+    mid = _station(49.4795, 8.4699, "Mannheim")
+    b = _station(48.7838, 9.1829, "Stuttgart")
+    return {
+        "id": f"j@{dep_time}", "date": dep_time, "duration_s": 3600, "num_changes": 1,
+        "legs": [
+            _transit_leg(a, mid, "7", "3", dep_time, mid_arr),
+            _transit_leg(mid, b, "5", "11", mid_dep, "2026-07-13T10:00:00Z"),
+        ],
+    }
+
+
+def test_enrich_memoizes_shared_change_across_journeys(monkeypatch):
+    """The interchange (same station + platforms) recurs in both journeys; the
+    walk is clock-independent, so resolve_walk must run ONCE and be reused, while
+    each journey still classifies against its own layover."""
+    calls = []
+
+    def fake_resolve_walk(conn, **kw):
+        calls.append((kw["arr_platform"], kw["dep_platform"]))
+        return WalkResolution(walk_time_s=200.0, walk_distance_m=260.0, reason=None,
+                              relation_id=1, station_name="Mannheim",
+                              arrival_platform="3", departure_platform="5")
+
+    monkeypatch.setattr(T, "resolve_walk", fake_resolve_walk)
+    search_result = {
+        "origin": _station(49.4794, 8.4692, "Frankfurt"),
+        "destination": _station(48.7838, 9.1829, "Stuttgart"),
+        "departure_time": "2026-07-13T09:00:00Z",
+        "journeys": [
+            # layover 600s -> feasible (200s walk + 60s buffer clears)
+            _journey_with_shared_change("2026-07-13T09:00:00Z", "2026-07-13T09:20:00Z", "2026-07-13T09:30:00Z"),
+            # layover 150s -> infeasible (under the 200s walk)
+            _journey_with_shared_change("2026-07-13T09:05:00Z", "2026-07-13T09:25:30Z", "2026-07-13T09:28:00Z"),
+        ],
+    }
+    resp = enrich(conn=None, search_result=search_result)
+    assert [j.verdict for j in resp.journeys] == [FEASIBLE, INFEASIBLE]
+    assert all(j.transfers[0].walk_time_s == 200.0 for j in resp.journeys)
+    assert calls == [("3", "5")], "the shared change must be pathfound exactly once"
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,7 @@ struct WalkView: View {
     @State private var mode: Mode = .section
     @State private var level: Int = 0
     @State private var scene: WalkScene?      // real geometry once /walk returns it
+    @State private var boarding: BoardingGuidance?   // step-off guidance from the same /walk
     @State private var loading = true         // fetching that geometry (first load)
 
     enum Mode: String, CaseIterable, Identifiable { case section, levels, threeD
@@ -219,7 +220,7 @@ struct WalkView: View {
     /// Derived from the real `transitions` when geometry is present; the synthesized
     /// walkthrough only stands in for the sample tier / off-path lookups.
     private var currentSteps: [WalkStep] {
-        if let scene { return scene.turnByTurn(imperial: imperial) }
+        if let scene { return scene.turnByTurn(imperial: imperial, boarding: boarding) }
         return schematicSteps
     }
 
@@ -231,18 +232,18 @@ struct WalkView: View {
                 WalkStep(icon: "figure.walk", color: Theme.go,
                          title: "Step off onto Platform \(from)", sub: "Platform \(to) is directly across the island"),
                 WalkStep(icon: "checkmark", color: Theme.accent,
-                         title: "Board on Platform \(to)", sub: "No stairs — very comfortable"),
+                         title: "Board on Platform \(to)", sub: "Same island — no stairs"),
             ]
         }
         return [
             WalkStep(icon: "clock", color: Theme.go,
-                     title: "Off the train — walk toward sector C", sub: "Platform \(from) · the stairwell is at C"),
+                     title: "Walk toward sector C", sub: "Platform \(from) · the stairwell is at C"),
             WalkStep(icon: "stairs", color: Theme.stair,
-                     title: "Stairs down to the underpass", sub: "escalator alongside · level 0 → −1"),
+                     title: "Take the stairs down to the underpass", sub: "escalator alongside · level 0 → −1"),
             WalkStep(icon: "arrow.right", color: Theme.accent,
-                     title: "Along the underpass to the Platform \(to) stairwell", sub: "level −1"),
+                     title: "Follow the underpass to the Platform \(to) stairwell", sub: "level −1"),
             WalkStep(icon: "checkmark", color: Theme.accent,
-                     title: "Up the stairs — your train boards here", sub: "Platform \(to)"),
+                     title: "Climb the stairs to Platform \(to)", sub: "your train boards here"),
         ]
     }
 
@@ -256,6 +257,7 @@ struct WalkView: View {
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s
+            boarding = result.boarding
             level = s.levelsAsc.contains(s.startLevel) ? s.startLevel : (s.levelsAsc.first ?? 0)
         }
     }

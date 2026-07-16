@@ -91,6 +91,22 @@ class PlatformWalkResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class StationPlatformsResponse(BaseModel):
+    """The platforms at the station nearest a coordinate. Powers the walk-only
+    door: the platform pickers adapt to the entered station, and `relation_id`
+    is what a subsequent /walk between two of these refs uses, so the two calls
+    resolve the same station. `found=False` (with `reason`) when no station sits
+    near the coordinate."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    found: bool
+    platforms: List[str] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Walk geometry (viz_export) delivery -- /walk and /walks
 #
@@ -114,6 +130,27 @@ class WalkKey(BaseModel):
     step_free: bool = False
 
 
+class BoardingGuidance(BaseModel):
+    """Where to be on the arriving train so you step off nearest the onward walk
+    (see api/boarding.py). `stepoff_fraction` is 0 at the platform end farthest
+    from the departure side, 1 at the nearest -- a larger fraction means "board
+    further toward your connection". `time_saved_s` is the extra platform-walking
+    the far end would cost (an upper bound, hence "up to"). `significance` is
+    high/some/low. `coach` is filled only when a live formation feed resolves it;
+    `reason` explains what's missing (usually `no_formation_feed`)."""
+
+    arrival_platform: str
+    departure_platform: str
+    platform_length_m: float = 0.0
+    stepoff_offset_m: float = 0.0
+    stepoff_fraction: float = 0.0
+    time_saved_s: float = 0.0
+    significance: str = "low"
+    coach: Optional[str] = None
+    formation_source: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class WalkResult(BaseModel):
     """One walk's geometry, or a reason it couldn't be built. `export` is the
     full `core/viz_export.py` document (mirrored by `VizExport` on the Swift
@@ -123,7 +160,10 @@ class WalkResult(BaseModel):
     Two failure levels: `ok=False` means no export could be produced at all
     (bad relation / unresolvable platforms); `ok=True` with `export.path.found
     == false` means the export exists but the two platforms don't connect
-    (a real, drawable 'no route' state)."""
+    (a real, drawable 'no route' state).
+
+    `boarding` is the step-off guidance derived from the same resolved path; it
+    is present only on a found walk whose arrival platform is a measurable edge."""
 
     relation_id: int
     from_platform: str
@@ -132,6 +172,7 @@ class WalkResult(BaseModel):
     ok: bool
     reason: Optional[str] = None
     export: Optional[Dict[str, Any]] = None
+    boarding: Optional[BoardingGuidance] = None
 
 
 class WalksRequest(BaseModel):

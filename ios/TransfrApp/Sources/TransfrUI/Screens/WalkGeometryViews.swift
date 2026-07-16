@@ -73,20 +73,27 @@ struct WalkScene {
     }
 
     /// Turn-by-turn derived from the real `transitions` + endpoints — replaces the
-    /// synthesized copy the schematic uses.
-    func turnByTurn(imperial: Bool = false) -> [WalkStep] {
-        var steps: [WalkStep] = [
-            WalkStep(icon: "figure.walk", color: Theme.go,
-                     title: "Step off on Platform \(startRef)",
-                     sub: "Level " + String(Self.label(forLevel: startLevel).dropFirst()))
-        ]
+    /// synthesized copy the schematic uses. `boarding`, when present, sharpens the
+    /// first step from "step off on Platform X" to *where* on it to step off.
+    func turnByTurn(imperial: Bool = false, boarding: BoardingGuidance? = nil) -> [WalkStep] {
+        let stepOff: WalkStep
+        if let b = boarding, b.hasPosition, b.band != .low {
+            stepOff = WalkStep(icon: "figure.walk", color: Theme.go,
+                               title: "Step off toward \(BoardingCopy.end(b))",
+                               sub: "Platform \(startRef) · saves up to \(Fmt.approxSaved(b.timeSavedS)) over the far end")
+        } else {
+            stepOff = WalkStep(icon: "figure.walk", color: Theme.go,
+                               title: "Step off on Platform \(startRef)",
+                               sub: "Level " + String(Self.label(forLevel: startLevel).dropFirst()))
+        }
+        var steps: [WalkStep] = [stepOff]
         for t in transitions {
             let toLvl = level(of: t.to.z)
             let up = t.to.z > t.from.z
             steps.append(WalkStep(
                 icon: WalkConnector.icon(t.kind, up: up),
                 color: WalkConnector.color(t.kind),
-                title: "\(WalkConnector.verb(t.kind)) \(up ? "up" : "down") to \(Self.label(forLevel: toLvl))",
+                title: WalkConnector.instruction(t.kind, up: up, to: Self.label(forLevel: toLvl)),
                 sub: WalkConnector.label(t.kind)))
         }
         let arrive = WalkStep(icon: "checkmark", color: Theme.accent,
@@ -133,6 +140,18 @@ enum WalkConnector {
         case "stairs": "Stairs"; case "escalator": "Escalator"
         case "elevator", "lift": "Lift"; case "ramp": "Ramp"
         default: "Change level"
+        }
+    }
+    /// Action-forward turn-by-turn instruction: leads with the verb ("Take the
+    /// stairs down to L−1") rather than naming the connector.
+    static func instruction(_ kind: String, up: Bool, to label: String) -> String {
+        let dir = up ? "up" : "down"
+        switch kind {
+        case "stairs":            return "Take the stairs \(dir) to \(label)"
+        case "escalator":         return "Ride the escalator \(dir) to \(label)"
+        case "elevator", "lift":  return "Take the lift \(dir) to \(label)"
+        case "ramp":              return "Follow the ramp \(dir) to \(label)"
+        default:                  return "Change level \(dir) to \(label)"
         }
     }
     static func icon(_ kind: String, up: Bool) -> String {

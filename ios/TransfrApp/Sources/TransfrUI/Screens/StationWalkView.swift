@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Full station walk — the prototype's `#s-stationwalk` (§6.10). From one source
 /// platform, distance / walk time / level Δ to every other, sorted nearest-first,
-/// with a step-free marker. Tapping a row opens the full walk view (§6.5). Content
+/// with a stairs-free marker. Tapping a row opens the full walk view (§6.5). Content
 /// is the Berlin Hbf example; a live build runs one pathfind per platform.
 struct StationWalkView: View {
     @Environment(TripModel.self) private var model
@@ -49,7 +49,7 @@ struct StationWalkView: View {
                     }.buttonStyle(.plain)
                 }
 
-                Label("Tap any platform to see the walk as a full 3D view. The green figure marks a step-free reachable platform (Step-free is on in Settings). One pathfind per platform — same walk cost the transfer verdict uses.",
+                Label("Tap any platform to see the walk as a full 3D view. The green figure marks a stairs-free reachable platform (Stairs-free is on in Settings). One pathfind per platform — same walk cost the transfer verdict uses.",
                       systemImage: "figure.walk")
                     .font(.system(size: 12)).foregroundStyle(Theme.ink3).padding(.top, 12)
             }

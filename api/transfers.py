@@ -19,6 +19,7 @@ from typing import Optional
 from graph import haversine_meters
 from ground_truth import find_shortest_path
 
+from api import config
 from api.bridge import map_track_to_ref, resolve_station_candidates
 
 # Safety margin on top of the raw walk: a transfer that is walkable only with
@@ -89,6 +90,24 @@ class TransferAssessment:
     departure_platform: Optional[str] = None
 
 
+@dataclass
+class WalkResolution:
+    """The delay- and time-INDEPENDENT half of a transfer assessment: which
+    station/platforms the two stops resolve to and the real platform-to-platform
+    walk between them (or the reason there is none). Everything here depends only
+    on coordinates + platform refs, never on the journey's clock -- so it is
+    identical for the same change of train across every itinerary that contains
+    it, and can be memoized across a search's journeys (see resolve_walk /
+    api.pipeline.enrich). `reason` is None exactly when a walk was found."""
+    reason: Optional[str] = None
+    walk_time_s: Optional[float] = None
+    walk_distance_m: Optional[float] = None
+    relation_id: Optional[int] = None
+    station_name: Optional[str] = None
+    arrival_platform: Optional[str] = None
+    departure_platform: Optional[str] = None
+
+
 def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
     """Z-tolerant ISO parse (datetime.fromisoformat rejects 'Z' before 3.11)."""
     if not ts:
@@ -119,36 +138,31 @@ def classify(walk_time_s: Optional[float], layover_s: Optional[float],
     return FEASIBLE
 
 
-def assess_transfer(
+def resolve_walk(
     conn,
     *,
-    arr_lat: Optional[float], arr_lon: Optional[float],
-    arr_platform: Optional[str], arr_time: Optional[str],
-    dep_lat: Optional[float], dep_lon: Optional[float],
-    dep_platform: Optional[str], dep_time: Optional[str],
-    buffer_s: float = DEFAULT_BUFFER_S,
+    arr_lat: Optional[float], arr_lon: Optional[float], arr_platform: Optional[str],
+    dep_lat: Optional[float], dep_lon: Optional[float], dep_platform: Optional[str],
     algorithm: str = DEFAULT_ALGORITHM,
     max_search_seconds: Optional[float] = None,
-) -> TransferAssessment:
-    """Resolve both platforms to a station + ref, walk-route between them, and
-    classify against the layover. Never raises for missing data -- returns an
-    `unknown` assessment carrying the reason instead."""
-    lay = layover_seconds(arr_time, dep_time)
+) -> WalkResolution:
+    """Resolve both platforms to a station + ref and walk-route between them --
+    the expensive, clock-independent core of a transfer assessment (station
+    lookup + core/ pathfind). Never raises: every gap degrades to a typed
+    `reason` with `walk_time_s` left None. Split out from assess_transfer so its
+    result -- the same for a given change of train regardless of when the trains
+    run -- can be cached across a search's journeys."""
     arr_ref = map_track_to_ref(arr_platform)
     dep_ref = map_track_to_ref(dep_platform)
-
-    base = TransferAssessment(
-        verdict=UNKNOWN, layover_s=lay,
-        arrival_platform=arr_ref, departure_platform=dep_ref,
-    )
+    res = WalkResolution(arrival_platform=arr_ref, departure_platform=dep_ref)
 
     # No platform on one side (e.g. FR/IT/ES feeds) -> nothing to route.
     if arr_ref is None or dep_ref is None:
-        base.reason = NO_PLATFORM_DATA
-        return base
+        res.reason = NO_PLATFORM_DATA
+        return res
     if arr_lat is None or arr_lon is None or dep_lat is None or dep_lon is None:
-        base.reason = STATION_UNRESOLVED
-        return base
+        res.reason = STATION_UNRESOLVED
+        return res
 
     gap_m = haversine_meters(arr_lat, arr_lon, dep_lat, dep_lon)
     with conn.cursor() as cur:
@@ -157,9 +171,9 @@ def assess_transfer(
             # doesn't model. Resolve just the arrival end, for a station name.
             near = resolve_station_candidates(cur, [(arr_lat, arr_lon)], CANDIDATE_RADIUS_M, 1)
             if near:
-                base.relation_id, base.station_name = near[0].relation_id, near[0].name
-            base.reason = CROSS_STATION
-            return base
+                res.relation_id, res.station_name = near[0].relation_id, near[0].name
+            res.reason = CROSS_STATION
+            return res
         # Gather every stop_area relation near either end. A big station is often
         # several overlapping relations, and the two platforms can resolve closest
         # to different ones, so we try each until one relation's geometry actually
@@ -169,14 +183,14 @@ def assess_transfer(
         )
 
     if not candidates:
-        base.reason = STATION_UNRESOLVED
-        return base
+        res.reason = STATION_UNRESOLVED
+        return res
 
     # Report against the nearest station even if routing ultimately fails.
-    base.relation_id = candidates[0].relation_id
-    base.station_name = candidates[0].name
+    res.relation_id = candidates[0].relation_id
+    res.station_name = candidates[0].name
 
-    kwargs = {"algorithm": algorithm}
+    kwargs = {"algorithm": algorithm, "use_stitch_bridges": config.STITCH_BRIDGES}
     if max_search_seconds is not None:
         kwargs["max_search_seconds"] = max_search_seconds
 
@@ -193,14 +207,12 @@ def assess_transfer(
                 # other candidate relations, and fall through to an honest reason.
                 saw_implausible = True
                 continue
-            base.relation_id = cand.relation_id
-            base.station_name = cand.name
-            base.walk_time_s = result["walking_time_seconds"]
-            base.walk_distance_m = walk_m
-            base.verdict = classify(base.walk_time_s, lay, buffer_s)
-            if base.verdict == UNKNOWN:
-                base.reason = NO_TIMING  # walk known but layover wasn't parseable
-            return base
+            res.relation_id = cand.relation_id
+            res.station_name = cand.name
+            res.walk_time_s = result["walking_time_seconds"]
+            res.walk_distance_m = walk_m
+            res.reason = None
+            return res
         if first_reason is None:
             first_reason = result.get("reason", "not_found")
 
@@ -208,7 +220,71 @@ def assess_transfer(
     # actually resolved-and-rejected a bogus one (implausible_walk) over an
     # incidental not-found reason from another candidate (e.g. a search that ran
     # long) -- otherwise the surfaced reason would depend on candidate order.
-    base.reason = IMPLAUSIBLE_WALK if saw_implausible else (first_reason or "platform_not_found")
+    res.reason = IMPLAUSIBLE_WALK if saw_implausible else (first_reason or "platform_not_found")
+    return res
+
+
+def _resolve_walk_key(arr_lat, arr_lon, arr_platform, dep_lat, dep_lon,
+                      dep_platform, algorithm, max_search_seconds):
+    """Cache key for resolve_walk: exactly its inputs. Coords are rounded to ~0.1 m
+    so the same stop (identical MOTIS coords across journeys) always hits."""
+    def r(x):
+        return round(x, 6) if x is not None else None
+    return (r(arr_lat), r(arr_lon), arr_platform,
+            r(dep_lat), r(dep_lon), dep_platform, algorithm, max_search_seconds)
+
+
+def assess_transfer(
+    conn,
+    *,
+    arr_lat: Optional[float], arr_lon: Optional[float],
+    arr_platform: Optional[str], arr_time: Optional[str],
+    dep_lat: Optional[float], dep_lon: Optional[float],
+    dep_platform: Optional[str], dep_time: Optional[str],
+    buffer_s: float = DEFAULT_BUFFER_S,
+    algorithm: str = DEFAULT_ALGORITHM,
+    max_search_seconds: Optional[float] = None,
+    resolve_cache: Optional[dict] = None,
+) -> TransferAssessment:
+    """Resolve both platforms to a station + ref, walk-route between them, and
+    classify against the layover. Never raises for missing data -- returns an
+    `unknown` assessment carrying the reason instead.
+
+    The walk resolution (the costly part) is clock-independent; pass a shared
+    `resolve_cache` dict to memoize it across every journey in one search, so a
+    change of train appearing in several itineraries is pathfound once. Only the
+    layover and the final verdict are recomputed per call."""
+    lay = layover_seconds(arr_time, dep_time)
+    if resolve_cache is None:
+        r = resolve_walk(
+            conn, arr_lat=arr_lat, arr_lon=arr_lon, arr_platform=arr_platform,
+            dep_lat=dep_lat, dep_lon=dep_lon, dep_platform=dep_platform,
+            algorithm=algorithm, max_search_seconds=max_search_seconds,
+        )
+    else:
+        key = _resolve_walk_key(arr_lat, arr_lon, arr_platform, dep_lat, dep_lon,
+                                dep_platform, algorithm, max_search_seconds)
+        r = resolve_cache.get(key)
+        if r is None:
+            r = resolve_walk(
+                conn, arr_lat=arr_lat, arr_lon=arr_lon, arr_platform=arr_platform,
+                dep_lat=dep_lat, dep_lon=dep_lon, dep_platform=dep_platform,
+                algorithm=algorithm, max_search_seconds=max_search_seconds,
+            )
+            resolve_cache[key] = r
+
+    base = TransferAssessment(
+        verdict=UNKNOWN, layover_s=lay,
+        relation_id=r.relation_id, station_name=r.station_name,
+        arrival_platform=r.arrival_platform, departure_platform=r.departure_platform,
+        walk_time_s=r.walk_time_s, walk_distance_m=r.walk_distance_m,
+    )
+    if r.walk_time_s is None:
+        base.reason = r.reason
+        return base
+    base.verdict = classify(r.walk_time_s, lay, buffer_s)
+    if base.verdict == UNKNOWN:
+        base.reason = NO_TIMING  # walk known but layover wasn't parseable
     return base
 
 
@@ -296,7 +372,8 @@ def reassess(
               (new_dep is not None and new_dep != t.dep_ref)
     if changed and conn is not None and t.relation_id is not None:
         r = find_shortest_path(conn, t.relation_id,
-                               new_arr or t.arr_ref, new_dep or t.dep_ref, algorithm=algorithm)
+                               new_arr or t.arr_ref, new_dep or t.dep_ref, algorithm=algorithm,
+                               use_stitch_bridges=config.STITCH_BRIDGES)
         if r.get("found"):
             walk = r["walking_time_seconds"]
             t.walk_time_s = walk

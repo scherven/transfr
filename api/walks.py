@@ -7,9 +7,10 @@ Swift client's four walk renderers (section / per-level / 3D / AR) draw from.
 
 Kept as a thin, DB-taking wrapper around `viz_export.export` so it is:
   * consistent with the verdict -- it uses the SAME settings assess_transfer's
-    pathfind used (astar, no stitch), so a default walk's `walking_time_seconds`
-    equals the Transfer's `walk_time_s`. `step_free=True` deliberately routes a
-    different (elevator-free) path, so its time may differ;
+    pathfind used (astar, and synthetic stitch bridges per config.STITCH_BRIDGES),
+    so a default walk's `walking_time_seconds` equals the Transfer's `walk_time_s`.
+    `step_free=True` deliberately routes a different (elevator-free) path, so its
+    time may differ;
   * never fatal -- `viz_export.export` raises `SystemExit` when a relation has no
     resolvable coordinates; we catch that (and anything else) and return a typed
     `WalkResult(ok=False, reason=...)` rather than 500 the request;
@@ -23,7 +24,8 @@ from typing import List
 
 from viz_export import export  # resolved via api/__init__ sys.path setup
 
-from api import schemas
+from api import config, schemas
+from api.boarding import compute_boarding, stepoff_node_of
 
 # Match assess_transfer's pathfind so geometry and verdict never disagree.
 _ALGORITHM = "astar"
@@ -32,8 +34,23 @@ WALK_BUILD_FAILED = "walk_build_failed"
 NO_GEOMETRY = "no_geometry_for_platforms"
 
 
+def _boarding_for(conn, key: schemas.WalkKey, doc: dict) -> schemas.BoardingGuidance | None:
+    """Step-off guidance for a found walk, or None. Best-effort: a failure here
+    (a coarse platform, a DB hiccup) must never fail the walk it enriches, so
+    everything is caught and dropped -- the geometry still returns."""
+    stepoff = stepoff_node_of(doc)
+    if stepoff is None:
+        return None
+    try:
+        g = compute_boarding(conn, key.relation_id, key.from_platform, key.to_platform, stepoff)
+    except Exception:  # noqa: BLE001 -- boarding is progressive enhancement
+        return None
+    return schemas.BoardingGuidance(**g.as_dict())
+
+
 def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
-    """Produce one walk's viz_export, degrading to a typed reason on failure."""
+    """Produce one walk's viz_export (plus step-off guidance), degrading to a
+    typed reason on failure."""
     base = dict(
         relation_id=key.relation_id,
         from_platform=key.from_platform,
@@ -48,7 +65,7 @@ def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
             key.to_platform,
             algorithm=_ALGORITHM,
             details=False,
-            stitch=False,
+            stitch=config.STITCH_BRIDGES,
             avoid_elevators=key.step_free,
         )
     except SystemExit:
@@ -58,7 +75,7 @@ def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
     except Exception:  # noqa: BLE001 -- one bad key must not fail a batch
         return schemas.WalkResult(**base, ok=False, reason=WALK_BUILD_FAILED)
 
-    return schemas.WalkResult(**base, ok=True, export=doc)
+    return schemas.WalkResult(**base, ok=True, export=doc, boarding=_boarding_for(conn, key, doc))
 
 
 def build_walks(conn, keys: List[schemas.WalkKey]) -> schemas.WalksResponse:

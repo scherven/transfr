@@ -56,30 +56,42 @@ struct JourneyCard: View {
     private var verdict: Verdict { journey.recomputedVerdict }
 
     var body: some View {
-        Panel {
-            VStack(alignment: .leading, spacing: 12) {
-                if isBest {
-                    Text("Best")
-                        .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
-                        .padding(.horizontal, 9).padding(.vertical, 3)
-                        .background(Capsule().fill(Theme.accent))
+        Panel(padding: 0) {
+            HStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    if isBest {
+                        Text("Best")
+                            .font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 9).padding(.vertical, 3)
+                            .background(Capsule().fill(Theme.accent))
+                    }
+                    HStack {
+                        Text("\(Fmt.time(journey.departureISO))  →  \(Fmt.time(journey.arrivalISO))")
+                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                            .foregroundStyle(Theme.ink)
+                        Spacer()
+                        VerdictBadge(verdict: verdict)
+                    }
+                    flow
+                    meta
                 }
-                HStack {
-                    Text("\(Fmt.time(journey.departureISO))  →  \(Fmt.time(journey.arrivalISO))")
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
-                        .foregroundStyle(Theme.ink)
-                    Spacer()
-                    VerdictBadge(verdict: verdict)
-                }
-                flow
-                meta
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // A thumbnail of where this option actually goes — the routes differ
+                // at a glance (design/route-maps.html §2). Same renderer, mini mode.
+                RouteMapView(journey: journey, mini: true, showLabels: false)
+                    .frame(width: 92)
+                    .frame(maxHeight: .infinity)
+                    .overlay(alignment: .leading) { Rectangle().fill(Theme.line2).frame(width: 1) }
             }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
         }
     }
 
     private var flow: some View {
         HStack(spacing: 6) {
-            legPill(journey.legs.first?.trainName ?? "Train")
+            legPill(journey.legs.first(where: { $0.trainName != nil })?.trainName ?? "Train")
             ForEach(Array(journey.transfers.enumerated()), id: \.offset) { _, t in
                 Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.ink3)

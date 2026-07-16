@@ -17,6 +17,11 @@ public protocol JourneyRepository: Sendable {
     /// offline suggestions; this is the online-refresh path — DESIGN.md §13.2.)
     func stations(query: String) async throws -> [StationSuggestion]
 
+    /// The platforms (and the `relationId` a subsequent `walk(...)` uses) at the
+    /// station nearest a coordinate. Powers the walk-only door: the platform
+    /// pickers adapt to the entered station.
+    func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse
+
     /// One transfer's drawable walk geometry, keyed by the triple a `Transfer`
     /// already carries. May be `ok == false` when no geometry exists yet.
     func walk(for key: WalkKey) async throws -> WalkResult
@@ -50,6 +55,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func stations(query: String) async throws -> [StationSuggestion] {
         try await client.stations(query: query)
+    }
+
+    public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+        try await client.stationPlatforms(lat: lat, lon: lon)
     }
 
     public func walk(for key: WalkKey) async throws -> WalkResult {

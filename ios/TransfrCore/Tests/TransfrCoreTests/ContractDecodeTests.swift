@@ -89,4 +89,18 @@ struct ContractDecodeTests {
         #expect(pw.toPlatform == "16")
         #expect(pw.walkDistanceM == 107.0)
     }
+
+    // MARK: - /station-platforms contract (the walk-only door)
+
+    @Test func decodesStationPlatforms() throws {
+        let data = try Self.fixture("station_platforms_berlin")
+        let sp = try TransfrJSON.decode(StationPlatformsResponse.self, from: data)
+        #expect(sp.found)
+        // snake_case relation_id → camelCase relationId; the id a subsequent
+        // /walk uses so both calls resolve the same station.
+        #expect(sp.relationId == 5688520)
+        #expect(sp.station == "Berlin, S Hauptbahnhof")
+        #expect(sp.platforms.count == 14)
+        #expect(sp.platforms.first == "1" && sp.platforms.last == "16")
+    }
 }

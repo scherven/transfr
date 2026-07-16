@@ -1,0 +1,730 @@
+<meta charset="utf-8">
+<title>Route maps — transfr prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ── Tokens: ported 1:1 from ios .../Theme/Theme.swift so this reads as the app ── */
+  :root{
+    --paper:#F6F8FC; --panel:#FFFFFF; --panel2:#EFF3F9; --panel3:#E7ECF4; --bg:#E4E9F1;
+    --ink:#0E1626; --ink2:#55607A; --ink3:#8A93A6;
+    --line:rgba(14,22,38,.10); --line2:rgba(14,22,38,.055);
+    --accent:#0A63F0; --accent-soft:rgba(10,99,240,.10);
+    --go:#0FA968; --tight:#C9820A; --miss:#E0402F; --nodata:#6B7688;
+    --go-soft:rgba(15,169,104,.12); --tight-soft:rgba(201,130,10,.14);
+    --nodata-soft:rgba(107,118,136,.14);
+    /* map surfaces */
+    --sea:#EAF0F8; --land:#DFE6F0; --coast:rgba(14,22,38,.16); --grat:rgba(14,22,38,.055);
+    --river:rgba(10,99,240,.16); --city:#AEB7C7;
+    --shadow:0 1px 2px rgba(14,22,38,.05),0 10px 30px rgba(14,22,38,.08);
+    --shadow-sm:0 1px 2px rgba(14,22,38,.06),0 4px 14px rgba(14,22,38,.06);
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#0A0E17; --panel:#131A28; --panel2:#1A2233; --panel3:#222C40; --bg:#05070D;
+    --ink:#EAF0FA; --ink2:#98A4BC; --ink3:#616C86;
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.06);
+    --accent:#4EA6FF; --accent-soft:rgba(78,166,255,.14);
+    --go:#2FD39A; --tight:#F5B740; --miss:#FF6A5E; --nodata:#8894AB;
+    --go-soft:rgba(47,211,154,.15); --tight-soft:rgba(245,183,64,.16);
+    --nodata-soft:rgba(136,148,171,.16);
+    --sea:#0B1220; --land:#182134; --coast:rgba(255,255,255,.15); --grat:rgba(255,255,255,.05);
+    --river:rgba(78,166,255,.20); --city:#3A465C;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.5);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.4);
+    color-scheme:dark;
+  }}
+  :root[data-theme="light"]{
+    --paper:#F6F8FC; --panel:#FFFFFF; --panel2:#EFF3F9; --panel3:#E7ECF4; --bg:#E4E9F1;
+    --ink:#0E1626; --ink2:#55607A; --ink3:#8A93A6;
+    --line:rgba(14,22,38,.10); --line2:rgba(14,22,38,.055);
+    --accent:#0A63F0; --accent-soft:rgba(10,99,240,.10);
+    --go:#0FA968; --tight:#C9820A; --miss:#E0402F; --nodata:#6B7688;
+    --go-soft:rgba(15,169,104,.12); --tight-soft:rgba(201,130,10,.14); --nodata-soft:rgba(107,118,136,.14);
+    --sea:#EAF0F8; --land:#DFE6F0; --coast:rgba(14,22,38,.16); --grat:rgba(14,22,38,.055);
+    --river:rgba(10,99,240,.16); --city:#AEB7C7;
+    --shadow:0 1px 2px rgba(14,22,38,.05),0 10px 30px rgba(14,22,38,.08);
+    --shadow-sm:0 1px 2px rgba(14,22,38,.06),0 4px 14px rgba(14,22,38,.06);
+    color-scheme:light;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0A0E17; --panel:#131A28; --panel2:#1A2233; --panel3:#222C40; --bg:#05070D;
+    --ink:#EAF0FA; --ink2:#98A4BC; --ink3:#616C86;
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.06);
+    --accent:#4EA6FF; --accent-soft:rgba(78,166,255,.14);
+    --go:#2FD39A; --tight:#F5B740; --miss:#FF6A5E; --nodata:#8894AB;
+    --go-soft:rgba(47,211,154,.15); --tight-soft:rgba(245,183,64,.16); --nodata-soft:rgba(136,148,171,.16);
+    --sea:#0B1220; --land:#182134; --coast:rgba(255,255,255,.15); --grat:rgba(255,255,255,.05);
+    --river:rgba(78,166,255,.20); --city:#3A465C;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.5);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.4);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{
+    font-family:system-ui,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    background:var(--paper); color:var(--ink);
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    line-height:1.5;
+  }
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+  .col{max-width:1000px;margin:0 auto;padding:0 24px}
+
+  /* ── Page rhythm ── */
+  header.top{padding:64px 24px 40px;position:relative}
+  .eyebrow{font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+  h1{font-size:clamp(38px,6vw,58px);line-height:1.02;letter-spacing:-.02em;margin:.32em 0 0;font-weight:700;text-wrap:balance}
+  .lede{font-size:18px;color:var(--ink2);max-width:52ch;margin:18px 0 0;text-wrap:pretty}
+  .lede b{color:var(--ink);font-weight:600}
+
+  section{padding:34px 0}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+  .sec-num{font-size:12px;font-weight:700;color:var(--accent);font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  h2{font-size:26px;letter-spacing:-.015em;margin:0;font-weight:650;text-wrap:balance}
+  .sec-sub{font-size:15.5px;color:var(--ink2);max-width:64ch;margin:8px 0 24px;text-wrap:pretty}
+  .rule{height:1px;background:var(--line);border:0;margin:0}
+
+  /* ── Phone frame ── */
+  .phone{
+    width:300px;background:var(--panel);border-radius:38px;padding:9px;
+    box-shadow:var(--shadow), inset 0 0 0 1px var(--line);
+    position:relative;flex:0 0 auto;
+  }
+  .phone-screen{background:var(--paper);border-radius:30px;overflow:hidden;position:relative}
+  .statusbar{height:34px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 20px 5px;font-size:12px;font-weight:600;color:var(--ink)}
+  .sbicons{display:inline-flex;align-items:flex-end;gap:6px}
+  .sig{display:inline-flex;align-items:flex-end;gap:1.5px;height:11px}
+  .sig i{width:2.5px;background:var(--ink);border-radius:1px}
+  .sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:11px}
+  .batt{width:22px;height:11px;border:1.2px solid var(--ink);border-radius:3px;position:relative;opacity:.9}
+  .batt::before{content:"";position:absolute;left:1.5px;top:1.5px;bottom:1.5px;right:6px;background:var(--ink);border-radius:1px}
+  .batt::after{content:"";position:absolute;right:-2.6px;top:3px;width:1.6px;height:5px;background:var(--ink);border-radius:1px}
+  .notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:104px;height:26px;background:var(--panel);border-radius:0 0 16px 16px;z-index:5}
+  .navbar{display:flex;flex-direction:column;align-items:center;gap:1px;padding:4px 0 12px;border-bottom:1px solid var(--line)}
+  .navbar .t{font-size:15px;font-weight:600}
+  .navbar .s{font-size:11px;color:var(--ink3)}
+  .screen-body{padding:14px}
+
+  /* ── Map ── */
+  .map{display:block;width:100%;height:auto;border-radius:16px;overflow:hidden;
+       box-shadow:inset 0 0 0 1px var(--line)}
+  .map text{font-family:system-ui,-apple-system,sans-serif;paint-order:stroke;stroke:var(--panel);stroke-width:1px;stroke-linejoin:round}
+
+  /* pulsing "you" dot */
+  @media (prefers-reduced-motion:no-preference){
+    .pulse{transform-box:fill-box;transform-origin:center;animation:pl 2.2s ease-out infinite}
+    @keyframes pl{0%{transform:scale(.55);opacity:.55}70%{opacity:0}100%{transform:scale(2.6);opacity:0}}
+  }
+
+  /* ── Controls (segmented + toggle) ── */
+  .controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:0 0 22px}
+  .seg{display:inline-flex;background:var(--panel2);border-radius:12px;padding:3px;gap:2px;box-shadow:inset 0 0 0 1px var(--line2)}
+  .seg button{border:0;background:transparent;color:var(--ink2);font:inherit;font-size:13px;font-weight:600;
+              padding:7px 13px;border-radius:9px;cursor:pointer;white-space:nowrap;transition:.15s}
+  .seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:var(--shadow-sm)}
+  .toggle{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;color:var(--ink2);cursor:pointer;user-select:none}
+  .switch{width:42px;height:25px;border-radius:20px;background:var(--panel3);position:relative;transition:.18s;flex:0 0 auto;box-shadow:inset 0 0 0 1px var(--line2)}
+  .switch::after{content:"";position:absolute;top:2.5px;left:2.5px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:.18s}
+  .toggle[aria-pressed="true"] .switch{background:var(--accent)}
+  .toggle[aria-pressed="true"] .switch::after{left:19.5px}
+
+  /* ── Bottom sheet inside phone ── */
+  .sheet{background:var(--panel);border-radius:18px 18px 0 0;margin:-14px -14px 0;padding:14px 14px 18px;box-shadow:0 -8px 24px rgba(14,22,38,.06)}
+  .sheet .grab{width:34px;height:4px;border-radius:3px;background:var(--panel3);margin:0 auto 12px}
+  .route-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+  .route-times{font-size:19px;font-weight:700}
+  .badge{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+  .b-tight{background:var(--tight-soft);color:var(--tight)} .b-go{background:var(--go-soft);color:var(--go)}
+  .b-unknown{background:var(--nodata-soft);color:var(--nodata)}
+  .metaline{display:flex;gap:14px;font-size:12px;color:var(--ink3);margin-top:8px}
+  .metaline b{color:var(--ink2);font-weight:600}
+  .stoplist{margin-top:12px;display:flex;flex-direction:column;gap:0}
+  .stoprow{display:grid;grid-template-columns:16px 1fr auto;gap:10px;align-items:center;padding:7px 0;position:relative}
+  .stoprow+.stoprow{border-top:1px solid var(--line2)}
+  .stopdot{width:12px;height:12px;border-radius:50%;justify-self:center}
+  .stopname{font-size:13px;font-weight:600}
+  .stopsub{font-size:11px;color:var(--ink3)}
+  .plat{font-size:12px;font-weight:600}
+
+  /* ── Result card w/ mini-map ── */
+  .cards{display:flex;flex-direction:column;gap:12px}
+  .rcard{display:flex;gap:0;background:var(--panel);border-radius:16px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);overflow:hidden}
+  .rcard .body{flex:1;padding:14px 14px 13px;min-width:0}
+  .rcard .thumb{width:96px;flex:0 0 auto;border-left:1px solid var(--line2);background:var(--sea);position:relative}
+  .rcard .thumb svg{width:100%;height:100%;display:block}
+  .thumb .thumb-tag{position:absolute;left:6px;bottom:6px;font-size:9px;font-weight:600;color:var(--ink3);background:var(--panel);padding:1px 5px;border-radius:6px;box-shadow:0 0 0 1px var(--line2)}
+  .rc-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .rc-times{font-size:17px;font-weight:700}
+  .rc-flow{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:9px}
+  .pill{font-size:10.5px;font-weight:600;padding:3px 7px;border-radius:20px;background:var(--panel2);color:var(--ink2);white-space:nowrap}
+  .pill.v-go{background:var(--go-soft);color:var(--go)} .pill.v-tight{background:var(--tight-soft);color:var(--tight)}
+  .pill.v-unknown{background:var(--nodata-soft);color:var(--nodata)}
+  .arw{color:var(--ink3);font-size:10px}
+  .rc-meta{display:flex;gap:12px;font-size:11.5px;color:var(--ink3);margin-top:10px}
+  .rc-meta b{color:var(--ink2);font-weight:600}
+  .best-tag{font-size:10px;font-weight:700;color:#fff;background:var(--accent);padding:2px 7px;border-radius:20px;margin-bottom:8px;display:inline-block}
+
+  /* ── Input / location screen ── */
+  .fieldcard{background:var(--panel);border-radius:16px;box-shadow:inset 0 0 0 1px var(--line);padding:4px 6px}
+  .field{display:flex;align-items:center;gap:11px;padding:11px 8px}
+  .field+.field{border-top:1px solid var(--line2)}
+  .fdot{width:10px;height:10px;border-radius:50%;flex:0 0 auto}
+  .fdot.loc{position:relative;background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .flabel{font-size:11px;color:var(--ink3)}
+  .fval{font-size:16px;font-weight:600}
+  .fval.mut{color:var(--ink3);font-weight:500}
+  .locbtn{margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:6px 9px;border-radius:20px;white-space:nowrap}
+  .hintrow{display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--ink3);margin-top:12px}
+  .permit{margin-top:12px;background:var(--panel2);border-radius:14px;padding:12px;box-shadow:inset 0 0 0 1px var(--line2)}
+  .permit .pt{font-size:12.5px;font-weight:600}
+  .permit .pb{font-size:11.5px;color:var(--ink3);margin-top:3px}
+  .permit .prow{display:flex;gap:8px;margin-top:10px}
+  .permit .prow span{flex:1;text-align:center;font-size:12px;font-weight:600;padding:7px;border-radius:10px}
+  .permit .allow{background:var(--accent);color:#fff}
+  .permit .once{background:var(--panel);color:var(--ink2);box-shadow:inset 0 0 0 1px var(--line)}
+
+  /* ── two-up layouts ── */
+  .twoup{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .note{font-size:14px;color:var(--ink2);text-wrap:pretty}
+  .note h4{font-size:15px;margin:0 0 4px;color:var(--ink)}
+  .kv{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+  .kv .row{display:flex;gap:10px;font-size:13.5px;color:var(--ink2)}
+  .kv .row .m{flex:0 0 auto;margin-top:2px}
+  .tick{color:var(--go)} .cross{color:var(--miss)} .dash{color:var(--ink3)}
+
+  /* ── style comparison ── */
+  .style-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+  .style-card{background:var(--panel);border-radius:18px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);padding:16px;display:flex;flex-direction:column;gap:12px}
+  .style-card.reco{box-shadow:var(--shadow),inset 0 0 0 1.5px var(--accent)}
+  .style-card h3{margin:0;font-size:17px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tag-reco{font-size:10px;font-weight:700;color:#fff;background:var(--accent);padding:2px 8px;border-radius:20px}
+  .style-map{border-radius:12px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line);aspect-ratio:16/10}
+  .style-map svg,.style-map .tiles{width:100%;height:100%;display:block}
+  .pluslist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;font-size:12.5px}
+  .pluslist li{display:flex;gap:8px;color:var(--ink2)}
+  .pluslist li .m{flex:0 0 auto}
+  .verdict-line{font-size:12.5px;color:var(--ink2)}
+  .verdict-line b{color:var(--ink)}
+
+  /* legend */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2);margin-top:16px}
+  .legend .li{display:flex;align-items:center;gap:7px}
+  .lg-dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+  .lg-line{width:18px;height:3px;border-radius:2px;flex:0 0 auto}
+
+  /* decisions */
+  .decisions{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .dcard{background:var(--panel);border-radius:16px;padding:16px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line)}
+  .dcard .dn{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+  .dcard h4{margin:8px 0 6px;font-size:16px}
+  .dcard p{margin:0;font-size:13px;color:var(--ink2)}
+
+  footer{padding:40px 0 72px;color:var(--ink3);font-size:12.5px;border-top:1px solid var(--line);margin-top:24px}
+
+  .themebtn{position:fixed;top:16px;right:16px;z-index:20;width:38px;height:38px;border-radius:50%;
+    border:0;background:var(--panel);color:var(--ink2);box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);
+    cursor:pointer;font-size:16px;display:grid;place-items:center}
+  .caption{font-size:12px;color:var(--ink3);margin-top:10px;text-align:center}
+
+  @media (max-width:820px){
+    .twoup,.style-grid{grid-template-columns:1fr}
+    .decisions{grid-template-columns:1fr}
+    .hero-stage{flex-direction:column;align-items:flex-start}
+  }
+  .hero-stage{display:flex;gap:34px;align-items:flex-start}
+  .hero-side{flex:1;min-width:0;padding-top:6px}
+</style>
+
+<button class="themebtn" id="themebtn" aria-label="Toggle light / dark">◐</button>
+
+<div class="wrap">
+  <header class="top col">
+    <div class="eyebrow">transfr · design prototype</div>
+    <h1>Route maps</h1>
+    <p class="lede">Two additions, one look to sign off before we build. Every connection gets a map that draws it <b>where it actually goes</b> — and planning can start from <b>where you're standing</b>. Real coordinates, real sample routes, the app's own palette. Nothing here is wired yet.</p>
+    <div class="legend" aria-hidden="true">
+      <span class="li"><span class="lg-line" style="background:var(--accent)"></span> the path</span>
+      <span class="li"><span class="lg-dot" style="background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)"></span> you / current location</span>
+      <span class="li"><span class="lg-dot" style="background:var(--panel);box-shadow:inset 0 0 0 3px var(--go)"></span> transfer · comfortable</span>
+      <span class="li"><span class="lg-dot" style="background:var(--panel);box-shadow:inset 0 0 0 3px var(--tight)"></span> tight</span>
+      <span class="li"><span class="lg-dot" style="background:var(--panel);box-shadow:inset 0 0 0 3px var(--nodata)"></span> unknown</span>
+    </div>
+  </header>
+
+  <hr class="rule">
+
+  <!-- 1 · THE MAP -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">01</span><h2>The map</h2></div>
+    <p class="sec-sub">The whole connection at a glance: the line is the trains, the dots are your changes — coloured by whether you'll make them. Flip on “start from my location” to see the origin become a live location dot. Try the three real options for Hamburg → Stuttgart.</p>
+
+    <div class="controls">
+      <div class="seg" id="routeseg" role="group" aria-label="Choose a connection">
+        <button data-i="0" aria-pressed="true">via Göttingen · Mannheim</button>
+        <button data-i="1" aria-pressed="false">via Frankfurt</button>
+        <button data-i="2" aria-pressed="false">via Kassel · Frankfurt</button>
+      </div>
+      <div class="toggle" id="loctoggle" role="button" tabindex="0" aria-pressed="true">
+        <span class="switch"></span> Start from my location
+      </div>
+    </div>
+
+    <div class="hero-stage">
+      <div class="phone" aria-label="Route map screen">
+        <div class="notch"></div>
+        <div class="phone-screen">
+          <div class="statusbar mono"><span>9:41</span><span class="sbicons"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+          <div class="navbar"><span class="t">The connection</span><span class="s mono" id="hero-nav">Hamburg → Stuttgart</span></div>
+          <div class="screen-body">
+            <div id="hero-map"></div>
+            <div class="sheet" id="hero-sheet"></div>
+          </div>
+        </div>
+      </div>
+      <div class="hero-side">
+        <div class="note">
+          <h4>What the map earns its space with</h4>
+          <div class="kv">
+            <div class="row"><span class="m tick">━</span><div><b>Shape recognition.</b> Two options can take wildly different paths through the country — you feel that instantly on a map, never from a text list.</div></div>
+            <div class="row"><span class="m tick">◉</span><div><b>Risk, placed.</b> The one tight change isn't a word in a row — it's a coloured dot you can point at, on the city where it happens.</div></div>
+            <div class="row"><span class="m tick">◈</span><div><b>Grounding.</b> Faint neighbours (Berlin, Köln, München…) and the coastline tell you north-from-south without reading a single label.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 2 · WHERE THEY SHOW UP -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Where they show up</h2></div>
+    <p class="sec-sub">The same renderer, three sizes. A thumbnail on every option so the list is scannable; the full map on the connection itself; and a live version that moves with you once you're travelling.</p>
+
+    <div class="twoup">
+      <div class="stack">
+        <div style="font-size:13px;font-weight:600;color:var(--ink3);letter-spacing:.04em;text-transform:uppercase">On the results list — a thumbnail per option</div>
+        <div class="cards" id="cards"></div>
+        <p class="note" style="font-size:13px">Each card carries its own mini-map. The eye sorts them before it reads a word — the Frankfurt option is visibly straighter, the Kassel option visibly bends west.</p>
+      </div>
+
+      <div class="stack">
+        <div style="font-size:13px;font-weight:600;color:var(--ink3);letter-spacing:.04em;text-transform:uppercase">On the live view — you, moving</div>
+        <div class="phone" style="width:280px;margin:0 auto" aria-label="Live tracking screen">
+          <div class="notch"></div>
+          <div class="phone-screen">
+            <div class="statusbar mono"><span>10:29</span><span class="sbicons"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+            <div class="navbar"><span class="t">On your way</span><span class="s mono">ICE 271 · to Mannheim</span></div>
+            <div class="screen-body">
+              <div id="live-map"></div>
+              <div style="margin-top:12px;background:var(--panel);border-radius:14px;padding:12px;box-shadow:inset 0 0 0 1px var(--line)">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                  <span style="font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--ink3)">NEXT CHANGE</span>
+                  <span class="badge b-tight">▲ Tight</span>
+                </div>
+                <div class="mono" style="font-size:26px;font-weight:700;margin-top:6px">9:12 <span style="font-size:12px;font-weight:500;color:var(--ink3)" class="mono">to Mannheim</span></div>
+                <div style="font-size:12px;color:var(--ink2);margin-top:2px">~2 min spare on the platform change · Pl 4 → 5</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="note" style="font-size:13px">The traveled leg fills solid; the rest waits dimmed. The pulsing dot is your position — real once <span class="mono" style="font-size:12px">CoreLocation</span> is wired.</p>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 3 · FROM WHERE YOU ARE -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Starting from where you are</h2></div>
+    <p class="sec-sub">“From” defaults to your location — one tap to plan the trip out your front door. It's a default, not a lock: the field is still fully typeable, and the swap / recent / autocomplete you already have keep working.</p>
+
+    <div class="twoup">
+      <div class="phone" style="width:290px" aria-label="Plan screen with current location">
+        <div class="notch"></div>
+        <div class="phone-screen">
+          <div class="statusbar mono"><span>9:41</span><span class="sbicons"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+          <div class="navbar"><span class="t">transfr</span><span class="s">Plan a trip</span></div>
+          <div class="screen-body">
+            <div class="fieldcard">
+              <div class="field">
+                <span class="fdot loc"></span>
+                <div style="min-width:0">
+                  <div class="flabel">From</div>
+                  <div class="fval">Current location</div>
+                </div>
+                <span class="locbtn"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 3 3 10.5l7.2 2.8L13 21l8-18Z"/></svg> Located</span>
+              </div>
+              <div class="field">
+                <span class="fdot" style="background:var(--miss)"></span>
+                <div>
+                  <div class="flabel">To</div>
+                  <div class="fval">Stuttgart Hbf</div>
+                </div>
+              </div>
+            </div>
+            <div class="hintrow"><span style="color:var(--ink3)">✎</span><span>Tap the “From” field to type a station instead — nothing about search changes.</span></div>
+            <div class="permit">
+              <div class="pt">“transfr” would like to use your location</div>
+              <div class="pb">To plan from where you are and place you on the live map. Used only while the app is open.</div>
+              <div class="prow"><span class="once">While using</span><span class="allow">Allow once</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="note">
+          <h4>How it behaves</h4>
+          <div class="kv">
+            <div class="row"><span class="m tick">✓</span><div><b>Opt-in, gracefully.</b> First plan asks for location. Decline and “From” simply falls back to an empty field / last station — no dead ends.</div></div>
+            <div class="row"><span class="m tick">✓</span><div><b>Nearest station, not raw GPS.</b> We snap your coordinate to the nearest reachable station for routing, and keep the exact point for the live “you” dot.</div></div>
+            <div class="row"><span class="m tick">✓</span><div><b>Still just a field.</b> Type, paste, swap, pick a recent — current-location is one more way in, never the only one.</div></div>
+            <div class="row"><span class="m dash">•</span><div>Uses <span class="mono" style="font-size:12.5px">CLLocationManager</span>, while-in-use authorization. No background tracking in this scope.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 4 · TWO WAYS TO DRAW IT -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Two ways to draw the map</h2></div>
+    <p class="sec-sub">This is the real fork, and the one I'd like your call on. Both draw the exact same route overlay — the only question is what sits underneath it.</p>
+
+    <div class="style-grid">
+      <div class="style-card reco">
+        <h3>Paper map <span class="tag-reco">Recommended</span></h3>
+        <div class="style-map" id="style-vector"></div>
+        <div class="verdict-line"><b>Vector, drawn by us</b> — the maps you see all over this page.</div>
+        <ul class="pluslist">
+          <li><span class="m tick">✓</span> Matches the app exactly, light &amp; dark, offline.</li>
+          <li><span class="m tick">✓</span> Free; no keys, no tile bill, no attribution bar.</li>
+          <li><span class="m tick">✓</span> Perfect for thumbnails — 30 tiny maps cost nothing.</li>
+          <li><span class="m cross">✗</span> Not zoomable to street level; it's a schematic, not a survey.</li>
+        </ul>
+      </div>
+      <div class="style-card">
+        <h3>Apple Maps</h3>
+        <div class="style-map"><div class="tiles" id="style-tiles"></div></div>
+        <div class="verdict-line"><b>Native MapKit tiles</b> under the same overlay (mocked here — real tiles can't load in this preview).</div>
+        <ul class="pluslist">
+          <li><span class="m tick">✓</span> A true map: pan, zoom, streets, real geography.</li>
+          <li><span class="m tick">✓</span> Free on iOS, no API key, first-party.</li>
+          <li><span class="m cross">✗</span> Heavier; its look is Apple's, not ours.</li>
+          <li><span class="m cross">✗</span> Wants network; snapshots per card get expensive.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note" style="margin-top:18px"><b>My recommendation:</b> ship the <b>paper map</b> everywhere first — it's consistent, cheap, and offline, which suits a transit app. If you want a true zoomable map on the single full-screen connection view, we add <b>MapKit there only</b> and keep the vector thumbnails on cards. Best of both, one screen at a time.</p>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 5 · DECISIONS -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">05</span><h2>Your call before I build</h2></div>
+    <p class="sec-sub">Three small decisions turn this into work. Tell me and I'll wire it into the SwiftUI app (this lives in <span class="mono" style="font-size:13px">design/route-maps.html</span>, next to the app prototype).</p>
+    <div class="decisions">
+      <div class="dcard">
+        <div class="dn">Decision A</div>
+        <h4>Map style</h4>
+        <p>Paper map everywhere, or paper thumbnails + MapKit on the full view? I recommend the latter.</p>
+      </div>
+      <div class="dcard">
+        <div class="dn">Decision B</div>
+        <h4>Thumbnails on cards</h4>
+        <p>Add the mini-map to every result card, or keep the map only on the connection &amp; live screens?</p>
+      </div>
+      <div class="dcard">
+        <div class="dn">Decision C</div>
+        <h4>Location default</h4>
+        <p>Default “From” to current location on first launch, or leave it opt-in behind a small button?</p>
+      </div>
+    </div>
+  </section>
+
+  <footer class="col">
+    Prototype · real coordinates from <span class="mono">sample_journeys.json</span>, tokens from <span class="mono">Theme.swift</span>. Country outline is schematic, not survey-grade. Toggle ◐ top-right for the other theme.
+  </footer>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  // ── Geography (approx, schematic) ── [lat, lon] ──────────────────────────
+  const OUTLINE = [
+    [54.90,8.30],[54.83,9.45],[54.45,10.00],[54.30,11.10],[54.15,12.10],[54.35,13.10],[53.93,14.20],
+    [53.30,14.35],[52.80,14.14],[52.10,14.72],[51.55,14.75],[51.00,14.95],
+    [50.95,14.30],[50.65,14.00],[50.40,12.95],[50.20,12.20],[49.75,12.55],[49.30,12.60],[48.95,13.40],[48.58,13.50],
+    [48.35,13.00],[47.95,12.90],[47.70,12.20],[47.55,11.30],[47.45,10.90],[47.55,10.10],[47.55,9.75],
+    [47.65,9.20],[47.80,8.65],[47.55,7.85],[47.59,7.59],
+    [48.10,7.55],[48.75,8.00],[49.05,8.00],[49.10,6.85],[49.46,6.36],
+    [50.00,6.13],[50.32,6.02],[50.75,6.02],[51.05,5.87],[51.60,6.05],[51.83,6.10],[52.10,6.68],[52.45,7.06],[52.65,7.06],[53.18,7.19],
+    [53.68,7.15],[53.70,8.00],[53.90,8.13],[54.05,8.55],[54.45,8.60],[54.75,8.30]
+  ];
+  const RHINE = [[47.59,7.59],[48.0,7.75],[48.6,7.85],[49.0,8.3],[49.5,8.45],[50.0,8.3],[50.4,7.62],[50.9,6.96],[51.4,6.72],[51.83,6.1]];
+  const ELBE  = [[53.55,10.0],[53.2,10.9],[52.9,11.6],[52.5,12.25],[51.85,12.9],[51.3,13.4],[51.05,13.74]];
+  const CITIES = [
+    ["Berlin",52.52,13.40],["München",48.14,11.58],["Köln",50.94,6.96],["Leipzig",51.34,12.37],
+    ["Nürnberg",49.45,11.08],["Hannover",52.37,9.73],["Dresden",51.05,13.74],["Bremen",53.08,8.81],["Dortmund",51.51,7.47]
+  ];
+
+  // ── Journeys (from sample_journeys.json) ─────────────────────────────────
+  const HH = {name:"Hamburg Hbf",lat:53.5528,lon:10.0067};
+  const STR= {name:"Stuttgart Hbf",lat:48.7838,lon:9.1815,arr:true};
+  const JOURNEYS = [
+    { via:"via Göttingen · Mannheim", dep:"08:34", arr:"13:49", dur:"5h 15m", changes:2, verdict:"tight",
+      stops:[ {...HH}, {name:"Göttingen",lat:51.5366,lon:9.9266,verdict:"feasible",plat:"7→8"},
+              {name:"Mannheim Hbf",lat:49.4794,lon:8.4693,verdict:"tight",plat:"4→5"}, {...STR,arrt:"13:49"} ] },
+    { via:"via Frankfurt", dep:"09:02", arr:"13:58", dur:"4h 56m", changes:1, verdict:"tight",
+      stops:[ {...HH}, {name:"Frankfurt (Main) Hbf",lat:50.1070,lon:8.6638,verdict:"tight",plat:"5→7"}, {...STR,arrt:"13:58"} ] },
+    { via:"via Kassel · Frankfurt", dep:"08:16", arr:"14:20", dur:"6h 04m", changes:2, verdict:"unknown",
+      stops:[ {...HH}, {name:"Kassel-Wilhelmshöhe",lat:51.3130,lon:9.4470,verdict:"feasible",plat:"2→2"},
+              {name:"Frankfurt (Main) Hbf",lat:50.1070,lon:8.6638,verdict:"unknown",plat:"—"}, {...STR,arrt:"14:20"} ] }
+  ];
+
+  const VC = {feasible:"var(--go)",tight:"var(--tight)",unknown:"var(--nodata)"};
+  const VL = {feasible:"comfortable",tight:"tight",unknown:"unknown"};
+  const short = n => n.replace(" Hbf","").replace(" (Main)","").replace("-Wilhelmshöhe","");
+
+  // ── Projection: equirectangular, cos(lat0) scaled, fit to outline ─────────
+  const K = Math.cos(51*Math.PI/180);
+  const raw = (lat,lon) => ({x:lon*K, y:-lat});
+  let rx0=1e9,rx1=-1e9,ry0=1e9,ry1=-1e9;
+  for (const [la,lo] of OUTLINE){ const r=raw(la,lo);
+    rx0=Math.min(rx0,r.x); rx1=Math.max(rx1,r.x); ry0=Math.min(ry0,r.y); ry1=Math.max(ry1,r.y); }
+  const VBW=100, PAD=7, scale=(VBW-2*PAD)/(rx1-rx0), VBH=+((ry1-ry0)*scale+2*PAD).toFixed(2);
+  const P = (lat,lon) => { const r=raw(lat,lon); return {x:PAD+(r.x-rx0)*scale, y:PAD+(r.y-ry0)*scale}; };
+  const poly = (pts,close) => pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(2)+" "+p.y.toFixed(2)).join(" ")+(close?" Z":"");
+  const projPts = coords => coords.map(([la,lo])=>P(la,lo));
+
+  // point at fraction t along a projected polyline
+  function pointAt(pts,t){
+    let tot=0; const seg=[];
+    for(let i=1;i<pts.length;i++){ const d=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y); seg.push(d); tot+=d; }
+    let target=t*tot, acc=0;
+    for(let i=0;i<seg.length;i++){ if(acc+seg[i]>=target){ const f=(target-acc)/seg[i];
+      return {x:pts[i].x+(pts[i+1].x-pts[i].x)*f, y:pts[i].y+(pts[i+1].y-pts[i].y)*f}; } acc+=seg[i]; }
+    return pts[pts.length-1];
+  }
+
+  // ── Base layers shared by every map ──────────────────────────────────────
+  const outlinePath = poly(projPts(OUTLINE),true);
+  const rhinePath   = poly(projPts(RHINE),false);
+  const elbePath    = poly(projPts(ELBE),false);
+
+  function baseSVG({grat=true, rivers=true, cities=false, exclude=[]} = {}){
+    let s = `<rect x="0" y="0" width="${VBW}" height="${VBH}" fill="var(--sea)"/>`;
+    if(grat){
+      for(const lon of [7,9,11,13,15]){ const x=P(48,lon).x; s+=`<line x1="${x.toFixed(2)}" y1="0" x2="${x.toFixed(2)}" y2="${VBH}" stroke="var(--grat)" stroke-width=".4"/>`; }
+      for(const lat of [48,50,52,54]){ const y=P(lat,10).y; s+=`<line x1="0" y1="${y.toFixed(2)}" x2="${VBW}" y2="${y.toFixed(2)}" stroke="var(--grat)" stroke-width=".4"/>`; }
+    }
+    s += `<path d="${outlinePath}" fill="var(--land)" stroke="var(--coast)" stroke-width=".7" stroke-linejoin="round"/>`;
+    if(rivers){
+      s += `<path d="${rhinePath}" fill="none" stroke="var(--river)" stroke-width=".9" stroke-linecap="round"/>`;
+      s += `<path d="${elbePath}" fill="none" stroke="var(--river)" stroke-width=".9" stroke-linecap="round"/>`;
+    }
+    if(cities){
+      for(const [nm,la,lo] of CITIES){ if(exclude.includes(nm)) continue;
+        const p=P(la,lo); const anchor = p.x>VBW*0.62?"end":"start"; const dx = anchor==="end"?-2.2:2.2;
+        s += `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r=".9" fill="var(--city)"/>`;
+        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(p.y+0.9).toFixed(2)}" font-size="2.7" fill="var(--city)" text-anchor="${anchor}">${nm}</text>`;
+      }
+    }
+    return s;
+  }
+
+  // ── Route overlay ────────────────────────────────────────────────────────
+  // opts: {mini, fromCurrent, youT (0..1 or null), labels}
+  function routeSVG(j, opts={}){
+    const {mini=false, fromCurrent=true, youT=null, labels=!mini} = opts;
+    const pts = j.stops.map(s=>P(s.lat,s.lon));
+    const line = poly(pts,false);
+    let s = "";
+    // glow + line
+    s += `<path d="${line}" fill="none" stroke="var(--accent)" stroke-opacity=".16" stroke-width="${mini?4.2:3.4}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    if(youT!=null){
+      // done portion solid, remainder dashed/dim
+      const you = pointAt(pts, youT);
+      // build done poly up to you
+      let tot=0,seg=[]; for(let i=1;i<pts.length;i++){const d=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);seg.push(d);tot+=d;}
+      let target=youT*tot, acc=0, done=[pts[0]];
+      for(let i=0;i<seg.length;i++){ if(acc+seg[i]>=target){ done.push(you); break; } acc+=seg[i]; done.push(pts[i+1]); }
+      s += `<path d="${line}" fill="none" stroke="var(--accent)" stroke-opacity=".33" stroke-width="${mini?1.7:1.9}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2.4 2.4"/>`;
+      s += `<path d="${poly(done,false)}" fill="none" stroke="var(--accent)" stroke-width="${mini?1.9:2.1}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    } else {
+      s += `<path d="${line}" fill="none" stroke="var(--accent)" stroke-width="${mini?1.9:2.1}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+    // markers
+    j.stops.forEach((st,i)=>{
+      const p=pts[i], isFirst=i===0, isLast=i===j.stops.length-1;
+      if(isFirst){
+        if(fromCurrent){ // current-location dot
+          s += `<circle cx="${p.x}" cy="${p.y}" r="${mini?2.6:2.4}" fill="var(--accent)" stroke="#fff" stroke-width="${mini?1:1.1}"/>`;
+        } else {
+          s += `<circle cx="${p.x}" cy="${p.y}" r="${mini?2.4:2.2}" fill="#fff" stroke="var(--accent)" stroke-width="${mini?1.6:1.5}"/>`;
+        }
+      } else if(isLast){ // destination
+        s += `<circle cx="${p.x}" cy="${p.y}" r="${mini?2.6:2.5}" fill="var(--accent)" stroke="#fff" stroke-width="1.1"/>`;
+        s += `<circle cx="${p.x}" cy="${p.y}" r="${mini?1:0.9}" fill="#fff"/>`;
+      } else { // transfer, verdict-coloured ring
+        const c=VC[st.verdict]||VC.unknown;
+        s += `<circle cx="${p.x}" cy="${p.y}" r="${mini?2.7:2.6}" fill="var(--panel)" stroke="${c}" stroke-width="${mini?1.5:1.6}"/>`;
+        s += `<circle cx="${p.x}" cy="${p.y}" r="${mini?1.1:1.05}" fill="${c}"/>`;
+      }
+    });
+    // "you" pulse
+    if(youT!=null){
+      const you = pointAt(pts, youT);
+      s += `<circle class="pulse" cx="${you.x}" cy="${you.y}" r="3.4" fill="var(--accent)" opacity=".5"/>`;
+      s += `<circle cx="${you.x}" cy="${you.y}" r="2.2" fill="var(--accent)" stroke="#fff" stroke-width="1.1"/>`;
+    }
+    // labels
+    if(labels){
+      j.stops.forEach((st,i)=>{
+        const p=pts[i], isFirst=i===0, isLast=i===j.stops.length-1;
+        const anchor = p.x>VBW*0.58?"end":"start"; const dx=anchor==="end"?-3.4:3.4;
+        let name, sub, col="var(--ink)";
+        if(isFirst){ name = fromCurrent?"You're here":short(st.name); sub = fromCurrent?short(st.name):("dep "+j.dep); }
+        else if(isLast){ name = short(st.name); sub = "arr "+st.arrt; }
+        else { name = short(st.name); sub = (st.plat==="—"?"platform ?":"Pl "+st.plat)+" · "+VL[st.verdict]; col=VC[st.verdict]; }
+        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(p.y-0.4).toFixed(2)}" font-size="3.1" font-weight="600" fill="${col}" text-anchor="${anchor}">${name}</text>`;
+        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(p.y+3).toFixed(2)}" font-size="2.5" fill="var(--ink3)" text-anchor="${anchor}">${sub}</text>`;
+      });
+    }
+    return s;
+  }
+
+  const svgEl = (inner, cls) =>
+    `<svg class="${cls||""}" viewBox="0 0 ${VBW} ${VBH}" xmlns="http://www.w3.org/2000/svg" role="img">${inner}</svg>`;
+
+  // full map (hero / live)
+  function fullMap(j, opts){
+    const exclude = j.stops.map(s=>short(s.name)).concat(["Hannover"]); // hide neighbours that clash w/ stops
+    return svgEl(baseSVG({grat:true,rivers:true,cities:true,exclude})+routeSVG(j,opts), "map");
+  }
+  // mini map (card thumbnail)
+  function miniMap(j){
+    return svgEl(baseSVG({grat:false,rivers:true,cities:false})+routeSVG(j,{mini:true,fromCurrent:false,labels:false}));
+  }
+
+  // ── Bottom sheet (hero) ──────────────────────────────────────────────────
+  function sheetHTML(j, fromCurrent){
+    const bcls = j.verdict==="tight"?"b-tight":j.verdict==="unknown"?"b-unknown":"b-go";
+    const bico = j.verdict==="tight"?"▲":j.verdict==="unknown"?"?":"✓";
+    const blab = j.verdict==="tight"?"Tight change":j.verdict==="unknown"?"Unknown":"All clear";
+    const rows = j.stops.map((st,i)=>{
+      const isFirst=i===0,isLast=i===j.stops.length-1;
+      let dot,name,sub,right;
+      if(isFirst){ dot = fromCurrent
+          ? `<span class="stopdot" style="background:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)"></span>`
+          : `<span class="stopdot" style="background:#fff;box-shadow:inset 0 0 0 2px var(--accent)"></span>`;
+        name = fromCurrent?"Current location":short(st.name); sub = fromCurrent?short(st.name)+" · dep "+j.dep:"dep "+j.dep; right=`<span class="plat mono" style="color:var(--ink3)">${j.dep}</span>`;
+      } else if(isLast){ dot=`<span class="stopdot" style="background:var(--accent)"></span>`;
+        name=short(st.name); sub="arrive"; right=`<span class="plat mono">${st.arrt}</span>`;
+      } else { const c=VC[st.verdict]; dot=`<span class="stopdot" style="background:var(--panel);box-shadow:inset 0 0 0 2px ${c}"></span>`;
+        name=short(st.name); sub="change · "+VL[st.verdict]; right=`<span class="plat mono" style="color:${c}">${st.plat}</span>`;
+      }
+      return `<div class="stoprow">${dot}<div style="min-width:0"><div class="stopname">${name}</div><div class="stopsub">${sub}</div></div>${right}</div>`;
+    }).join("");
+    return `<div class="grab"></div>
+      <div class="route-head">
+        <div><div class="route-times mono">${j.dep} → ${j.arr}</div>
+        <div class="metaline"><span><b>${j.dur}</b></span><span>⇄ <b>${j.changes}</b> change${j.changes===1?"":"s"}</span></div></div>
+        <span class="badge ${bcls}">${bico} ${blab}</span>
+      </div>
+      <div class="stoplist">${rows}</div>`;
+  }
+
+  // ── Render hero ──────────────────────────────────────────────────────────
+  let curJ=0, fromCurrent=true;
+  const heroMap=document.getElementById("hero-map"),
+        heroSheet=document.getElementById("hero-sheet"),
+        heroNav=document.getElementById("hero-nav");
+  function renderHero(){
+    const j=JOURNEYS[curJ];
+    heroMap.innerHTML = fullMap(j,{mini:false,fromCurrent,youT:null,labels:true});
+    heroSheet.innerHTML = sheetHTML(j,fromCurrent);
+    heroNav.textContent = "Hamburg → Stuttgart · "+j.via.replace("via ","");
+  }
+  document.getElementById("routeseg").addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    curJ=+b.dataset.i;
+    [...e.currentTarget.children].forEach(x=>x.setAttribute("aria-pressed", x===b));
+    renderHero();
+  });
+  const lt=document.getElementById("loctoggle");
+  function toggleLoc(){ fromCurrent=!fromCurrent; lt.setAttribute("aria-pressed",fromCurrent); renderHero(); }
+  lt.addEventListener("click",toggleLoc);
+  lt.addEventListener("keydown",e=>{ if(e.key===" "||e.key==="Enter"){e.preventDefault();toggleLoc();} });
+
+  // ── Render cards ─────────────────────────────────────────────────────────
+  const cardHTML = (j,i)=>{
+    const vcls = j.verdict==="tight"?"v-tight":j.verdict==="unknown"?"v-unknown":"v-go";
+    const tag = j.verdict==="tight"?"tight":j.verdict==="unknown"?"unknown":"all clear";
+    const flow = j.stops.map((st,k)=>{
+      if(k===0) return `<span class="pill">ICE</span>`;
+      const isLast=k===j.stops.length-1;
+      if(isLast) return `<span class="arw">→</span><span class="pill">${short(st.name)}</span>`;
+      const vc = st.verdict==="feasible"?"v-go":st.verdict==="tight"?"v-tight":"v-unknown";
+      return `<span class="arw">→</span><span class="pill ${vc}">${short(st.name)} ${st.plat}</span>`;
+    }).join("");
+    return `<div class="rcard">
+      <div class="body">
+        ${i===1?'<span class="best-tag">Best</span>':''}
+        <div class="rc-top"><span class="rc-times mono">${j.dep} → ${j.arr}</span>
+          <span class="badge ${j.verdict==='tight'?'b-tight':j.verdict==='unknown'?'b-unknown':'b-go'}">${j.verdict==='tight'?'▲ Tight':j.verdict==='unknown'?'? Unknown':'✓ Clear'}</span></div>
+        <div class="rc-flow">${flow}</div>
+        <div class="rc-meta"><span><b>${j.dur}</b></span><span>⇄ <b>${j.changes}</b></span><span style="margin-left:auto;color:var(--ink3)">${tag}</span></div>
+      </div>
+      <div class="thumb">${miniMap(j)}<span class="thumb-tag mono">${j.via.replace("via ","").split(" · ")[0]}</span></div>
+    </div>`;
+  };
+  // order to make the "best" (fastest, j2) first — mirrors ResultsView flagging idx 0
+  const order=[1,0,2];
+  document.getElementById("cards").innerHTML = order.map(i=>cardHTML(JOURNEYS[i],i)).join("");
+
+  // ── Live map ─────────────────────────────────────────────────────────────
+  document.getElementById("live-map").innerHTML = (()=>{
+    const j=JOURNEYS[0];
+    const exclude=j.stops.map(s=>short(s.name)).concat(["Hannover"]);
+    return svgEl(baseSVG({grat:true,rivers:true,cities:true,exclude})+routeSVG(j,{fromCurrent:true,youT:0.42,labels:true}),"map");
+  })();
+
+  // ── Style comparison: vector + mocked tiles ──────────────────────────────
+  (function styleMaps(){
+    const j=JOURNEYS[0];
+    // vector (crop to a wide window; reuse full map)
+    document.getElementById("style-vector").innerHTML =
+      svgEl(baseSVG({grat:true,rivers:true,cities:true,exclude:j.stops.map(s=>short(s.name))})+routeSVG(j,{fromCurrent:true,labels:false}),"");
+    // mocked Apple-Maps tiles: soft blocks + roads behind the same overlay
+    const ts = (()=>{
+      const w=VBW,h=VBH; let g=`<rect width="${w}" height="${h}" fill="var(--land)"/>`;
+      // greenspace + water blobs
+      const blobs=[[20,30,16,"var(--go-soft)"],[70,80,20,"var(--go-soft)"],[40,60,12,"rgba(78,166,255,.14)"],[80,40,10,"var(--go-soft)"]];
+      for(const [x,y,r,c] of blobs) g+=`<circle cx="${x}" cy="${y}" r="${r}" fill="${c}"/>`;
+      // road grid
+      for(let i=1;i<7;i++){ g+=`<line x1="${i*14}" y1="0" x2="${i*14-8}" y2="${h}" stroke="var(--line2)" stroke-width=".7"/>`; }
+      for(let i=1;i<9;i++){ g+=`<line x1="0" y1="${i*14}" x2="${w}" y2="${i*14-6}" stroke="var(--line2)" stroke-width=".7"/>`; }
+      g+=`<path d="${rhinePath}" fill="none" stroke="rgba(78,166,255,.35)" stroke-width="1.4" stroke-linecap="round"/>`;
+      g+=routeSVG(j,{fromCurrent:true,labels:false});
+      return g;
+    })();
+    document.getElementById("style-tiles").innerHTML = svgEl(ts,"");
+  })();
+
+  renderHero();
+
+  // ── theme toggle ─────────────────────────────────────────────────────────
+  const tb=document.getElementById("themebtn");
+  tb.addEventListener("click",()=>{
+    const cur=document.documentElement.getAttribute("data-theme")
+      || (matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light");
+    document.documentElement.setAttribute("data-theme", cur==="dark"?"light":"dark");
+  });
+})();
+</script>
