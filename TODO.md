@@ -23,7 +23,7 @@ Compliance** at the bottom.
 
 | # | Screen | File | Status | Note |
 |---|--------|------|--------|------|
-| 1 | Plan / Input | `InputView.swift` | 🟠 | Type mode plans live; **station autocomplete** 🟢 & **editable departure** 🟢 now wired; **walk-only** 🟢 (platforms adapt to the station via `/station-platforms`, live `/walk` geometry); **paste-link has no parser**. |
+| 1 | Plan / Input | `InputView.swift` | 🟢 | Type mode plans live; **station autocomplete** 🟢 & **editable departure** 🟢 now wired; **walk-only** 🟢 (platforms adapt to the station via `/station-platforms`, live `/walk` geometry); **paste-link** 🟢 now parses Google/Apple Maps + bahn.de links (`RouteLinkParser`) and plans through `/journeys`. |
 | 2 | Connections | `ResultsView.swift` | 🟢 | Fully from `/journeys`. |
 | 3 | The connection | `JourneyView.swift` | 🟢 | Legs/transfers/delays from live data. |
 | 4 | Transfers (carousel) | `CarouselView.swift` | 🟢 | Core stats + **boarding/step-off** now live from `/walk` `boarding` (§3); coach name is the only 🚧 (needs a formation feed). |
@@ -56,9 +56,17 @@ Compliance** at the bottom.
   Today / Tomorrow / "Wed 16". Left *unrestricted* (past times allowed). `plan()`
   already forwards `departure` to `/journeys?time=`.
 - 🔴 **Remove the "Travellers" chip.** Decorative; drop it.
-- 🔴 **Paste-link mode has no parser.** The UI/field exist, but nothing turns a
-  Google/Apple Maps / DB Navigator link into an itinerary. 🚧 also needs the
-  name→stop-id normalisation gap resolved (§9).
+- 🟢 **Paste-link mode is wired.** `TransfrCore.RouteLinkParser` (pure,
+  unit-tested) turns a Google Maps (`maps.app.goo.gl` short links expanded over
+  HTTP + full `/maps/dir/…` + `?api=1` form), Apple Maps (`saddr`/`daddr`/place),
+  or bahn.de (new `#so=…&zo=…&hd=…` fragment + legacy reiseauskunft) link into
+  `{from, to, departure?}`. `TripModel.planFromLink` expands the short link
+  (`LinkExpander`), parses, reverse-resolves a name-less pin-drop via
+  `/station-platforms`, then plans through the normal `/journeys` path; the CTA
+  fails soft with a message on a junk/unsupported link. Departure is recovered
+  from bahn.de only; platform/track is never in these links; the EVA/place-id →
+  query step still rides on the §9 name→stop-id gap (we plan by name today). Full
+  survey in `md/PASTE-LINK.md`.
 - 🟢 **Walk-only mode is live.** Picking a station resolves its coordinate to the
   real platform list + relation id via the new `GET /station-platforms` (built on
   `SearchContext.list_platform_refs` — the same footprint/tag ladder a `/walk`
