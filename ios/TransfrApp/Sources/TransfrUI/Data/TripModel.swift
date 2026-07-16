@@ -93,9 +93,14 @@ public final class TripModel {
     public var walkLookup: WalkLookup?
 
     private let repo: JourneyRepository
+    /// Expands a pasted short link (HTTP redirect) before parsing. Injectable so a
+    /// test can supply a stub instead of hitting the network.
+    private let linkExpander: LinkExpanding
 
-    public init(repository: JourneyRepository) {
+    public init(repository: JourneyRepository,
+                linkExpander: LinkExpanding = URLSessionLinkExpander()) {
         self.repo = repository
+        self.linkExpander = linkExpander
     }
 
     public var journeys: [Journey] { response?.journeys ?? [] }
@@ -112,6 +117,75 @@ public final class TripModel {
         } catch {
             load = .failed(message(for: error))
         }
+    }
+
+    /// Plan a trip from a pasted maps / rail link (the "Paste link" door). Expands
+    /// a short link if needed (HTTP redirect), parses the endpoints with the pure
+    /// `RouteLinkParser`, and converges on the same `plan()` path as typed input.
+    /// Fails soft — a bad or unsupported link surfaces a message on the CTA, never
+    /// a crash.
+    public func planFromLink(_ raw: String) async {
+        load = .loading
+        let parsed: RouteLinkParser.ParsedRouteLink
+        do {
+            parsed = try await resolveLink(raw)
+        } catch {
+            load = .failed(linkMessage(for: error)); return
+        }
+
+        // Names first; fall back to reverse-resolving a coordinate (a shared
+        // pin-drop) the way "current location" does, so a link that carried only
+        // points still plans.
+        let from = await endpointName(parsed.from, coordinate: parsed.fromCoordinate)
+        let to   = await endpointName(parsed.to, coordinate: parsed.toCoordinate)
+
+        guard let from, let to else {
+            load = .failed("That link didn't include both a start and destination.")
+            return
+        }
+
+        origin = from
+        destination = to
+        usingCurrentLocation = false
+        originUserEdited = true
+        if let dep = parsed.departure { departure = dep }
+        await plan()
+    }
+
+    /// Expand (only if a short link) then parse. Pure parsing lives in
+    /// `RouteLinkParser`; the redirect is the sole network hop.
+    private func resolveLink(_ raw: String) async throws -> RouteLinkParser.ParsedRouteLink {
+        do {
+            return try RouteLinkParser.parse(raw)
+        } catch RouteLinkParser.ParseError.shortLinkNeedsExpansion(let url) {
+            let expanded = try await linkExpander.expand(url)
+            return try RouteLinkParser.parse(expanded.absoluteString)
+        }
+    }
+
+    /// A queryable station name for one end: the parsed name if present, else the
+    /// nearest station to the parsed coordinate (reusing the `/station-platforms`
+    /// reverse lookup), else nil.
+    private func endpointName(_ name: String?,
+                              coordinate: RouteLinkParser.Coordinate?) async -> String? {
+        if let name, !name.trimmingCharacters(in: .whitespaces).isEmpty { return name }
+        guard let coordinate else { return nil }
+        let resp = try? await repo.platforms(lat: coordinate.latitude, lon: coordinate.longitude)
+        if let resp, resp.found, let station = resp.station, !station.isEmpty { return station }
+        return nil
+    }
+
+    private func linkMessage(for error: Error) -> String {
+        if let e = error as? RouteLinkParser.ParseError {
+            switch e {
+            case .notAURL:                 return "That doesn't look like a link. Paste a Maps or bahn.de link."
+            case .unrecognizedProvider:    return "Unsupported link. Use Google Maps, Apple Maps, or bahn.de."
+            case .noEndpoints:             return "Couldn't read a start or destination from that link."
+            case .shortLinkNeedsExpansion: return "Couldn't open that short link. Check your connection."
+            }
+        }
+        if error is URLError { return "Couldn't open that link. Check your connection." }
+        return "Couldn't read that link."
     }
 
     /// Resolve a coordinate to the nearest station and set it as the origin. Keeps

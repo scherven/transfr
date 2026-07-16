@@ -271,16 +271,31 @@ struct InputView: View {
         }
     }
 
+    /// A recent route. Tapping it plans that "A → B" example through the same live
+    /// path as typed input — so the paste screen is fully interactive, not just the
+    /// link field. (These are illustrative examples, not persisted history yet.)
     private func recentRow(title: String, when: String) -> some View {
-        HStack(spacing: 10) {
-            SetIcon("clock")
-            Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-            Spacer()
-            Text(when).font(.system(size: 12)).foregroundStyle(Theme.ink3)
+        Button {
+            let parts = title.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return }
+            model.origin = parts[0]
+            model.destination = parts[1]
+            model.usingCurrentLocation = false
+            model.originUserEdited = true
+            Task { await model.plan() }
+        } label: {
+            HStack(spacing: 10) {
+                SetIcon("clock")
+                Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                Spacer()
+                Text(when).font(.system(size: 12)).foregroundStyle(Theme.ink3)
+            }
+            .padding(.horizontal, 13).padding(.vertical, 12)
+            .frame(maxWidth: .infinity)
+            .background(RoundedRectangle(cornerRadius: 13).fill(Theme.panel))
+            .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(Theme.line, lineWidth: 1))
         }
-        .padding(.horizontal, 13).padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 13).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 13).strokeBorder(Theme.line, lineWidth: 1))
+        .buttonStyle(.plain)
     }
 
     // MARK: - Walk-only mode
@@ -571,10 +586,10 @@ struct InputView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             Button {
-                if mode == .walk {
-                    Task { await showWalk() }
-                } else {
-                    Task { await model.plan() }
+                switch mode {
+                case .walk:  Task { await showWalk() }
+                case .paste: Task { await model.planFromLink(link) }
+                case .type:  Task { await model.plan() }
                 }
             } label: {
                 HStack {
@@ -587,7 +602,9 @@ struct InputView: View {
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(ctaBusy || (mode == .walk && lookupStation.trimmingCharacters(in: .whitespaces).isEmpty))
+            .disabled(ctaBusy
+                      || (mode == .walk && lookupStation.trimmingCharacters(in: .whitespaces).isEmpty)
+                      || (mode == .paste && link.trimmingCharacters(in: .whitespaces).isEmpty))
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
         .background(.thinMaterial)
