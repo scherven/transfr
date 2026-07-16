@@ -32,9 +32,19 @@ struct InputView: View {
     @State private var resolvingWalk = false
 
     /// Station-autocomplete state, shared across the From/To/Station fields — one
-    /// focused field owns the suggestion list at a time.
-    enum Field: Hashable { case from, to, station }
+    /// focused field owns the suggestion list at a time. `.link` joins in so the
+    /// paste field gets the same focus-to-clear treatment (it owns no suggestions).
+    enum Field: Hashable { case from, to, station, link }
     @FocusState private var focused: Field?
+
+    /// Placeholder-style seeding: From / To / the paste link ship with an example
+    /// value, but the first time you focus a field that *still holds its seed*, it
+    /// clears so you type into a blank (placeholder-showing) field. Seeds are
+    /// captured on first appear so a location-resolved origin — which replaces the
+    /// seed before you ever touch it — is never wiped.
+    @State private var originSeed: String?
+    @State private var destinationSeed: String?
+    @State private var linkSeed: String?
     @State private var suggestions: [StationSuggestion] = []
     @State private var searchTask: Task<Void, Never>?
 
@@ -92,6 +102,28 @@ struct InputView: View {
                 model.originUserEdited = true
                 model.usingCurrentLocation = false
             }
+        }
+        .onAppear {
+            // Capture the pristine seeds once, before any location fix replaces them.
+            if originSeed == nil {
+                originSeed = model.origin; destinationSeed = model.destination; linkSeed = link
+            }
+        }
+        .onChange(of: focused) { _, now in
+            if let now { clearSeedIfPristine(now) }
+        }
+    }
+
+    /// First focus on a still-seeded field clears its example so you type into a
+    /// blank field (the built-in placeholder then shows) — the "press it and the
+    /// content deletes" ask. A value the user, or a location fix, already changed is
+    /// left untouched, so this only ever clears the shipped example.
+    private func clearSeedIfPristine(_ field: Field) {
+        switch field {
+        case .from:    if model.origin == originSeed { model.origin = "" }
+        case .to:      if model.destination == destinationSeed { model.destination = "" }
+        case .link:    if link == linkSeed { link = "" }
+        case .station: break   // walk-only station keeps its example (not requested)
         }
     }
 
@@ -257,6 +289,7 @@ struct InputView: View {
                         TextField("Paste a route link", text: $link)
                             .font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.ink)
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
+                            .focused($focused, equals: .link)
                     }
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
@@ -430,7 +463,7 @@ struct InputView: View {
             if let lat = s.latitude, let lon = s.longitude {
                 Task { await resolvePlatforms(name: s.name, lat: lat, lon: lon) }
             }
-        case nil:      break
+        case .link, nil: break   // the paste field owns no suggestions
         }
         searchTask?.cancel()
         suggestions = []

@@ -45,6 +45,18 @@ struct RouteLinkParserTests {
         #expect(P.isShortLink(raw))
     }
 
+    @Test func shortLinkRejectsLookalikeHost() throws {
+        // A substring match on "goo.gl" would treat these as Google short links and
+        // expand them over the network; strict dotted-suffix matching must not (PR #6).
+        #expect(!P.isShortLink("https://evilgoo.gl.example.com/x"))
+        #expect(!P.isShortLink("https://goo.gl.evil.com/x"))
+        #expect(P.isShortLink("https://maps.app.goo.gl/abc"))        // the real host still matches
+        // …and it isn't silently sent for expansion either — it's just unknown.
+        #expect(throws: P.ParseError.unrecognizedProvider) {
+            try P.parse("https://evilgoo.gl.example.com/x")
+        }
+    }
+
     // MARK: - Google Maps: the real expanded /maps/dir/ URL (field fixture)
 
     /// Exactly what `maps.app.goo.gl/JWTvpehbneTcqad39` (the app's default) expands
@@ -97,6 +109,45 @@ struct RouteLinkParserTests {
         #expect(r.to == "Leipzig Hbf")
         #expect(r.travelMode == .driving)     // parsed, not rejected — planning still works
         #expect(r.isPlannable)
+    }
+
+    @Test func parsesClassicGoogleSaddrDaddr() throws {
+        // What `maps.app.goo.gl/ug6h1EyzTy6diDvx6` expands to (host `maps.google.com`,
+        // path `/`): the classic directions form with endpoints in `saddr`/`daddr`
+        // and mode in `dirflg` — no `/maps/dir/` path, no `origin`/`destination`. The
+        // `geocode=a;b` pair must not derail query parsing.
+        let r = try P.parse(
+            "https://maps.google.com/?geocode=FTEnMQMd_A%3D%3D;FeBh6AII_B%3D%3D" +
+            "&daddr=Stuttgart+Hauptbahnhof,+Arnulf-Klett-Platz,+Stuttgart,+Deutschland" +
+            "&saddr=Hamburg+Hbf,+Hachmannplatz,+Hamburg,+Deutschland&dirflg=rBSTR&g_st=ic")
+        #expect(r.source == .googleMaps)
+        #expect(r.from == "Hamburg Hbf")
+        #expect(r.to == "Stuttgart Hauptbahnhof")
+        #expect(r.travelMode == .transit)     // dirflg=rBSTR → leading 'r'
+        #expect(r.isPlannable)
+    }
+
+    @Test func unwrapsGoogleConsentInterstitial() throws {
+        // EU consent bounce: `consent.google.com/…?continue=<real /maps/dir/ url>`.
+        // Without unwrapping it fails as an unrecognised `consent.google.com` host.
+        let inner = "https://www.google.com/maps/dir/Hamburg+Hbf/Stuttgart+Hbf/data=!3e3"
+        let encoded = inner.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        let r = try P.parse("https://consent.google.com/m?continue=\(encoded)&gl=DE&hl=de&pc=m")
+        #expect(r.source == .googleMaps)
+        #expect(r.from == "Hamburg Hbf")
+        #expect(r.to == "Stuttgart Hbf")
+        #expect(r.travelMode == .transit)     // !3e3 survives the unwrap
+        #expect(r.isPlannable)
+    }
+
+    @Test func unwrapsGoogleUrlRedirect() throws {
+        // The `google.com/url?q=…` bounce shape resolves the same way.
+        let inner = "https://www.google.com/maps/dir/?api=1&origin=Berlin+Hbf&destination=Basel+SBB"
+        let encoded = inner.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        let r = try P.parse("https://www.google.com/url?q=\(encoded)&sa=D")
+        #expect(r.source == .googleMaps)
+        #expect(r.from == "Berlin Hbf")
+        #expect(r.to == "Basel SBB")
     }
 
     // MARK: - Apple Maps

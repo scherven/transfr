@@ -69,8 +69,13 @@ for a shared *station* is the station itself, and is exactly the shape
 the real endpoint coords come from the `data` block.
 
 Also handled: the Maps-URLs API form
-`…/maps/dir/?api=1&origin=…&destination=…&travelmode=transit`, and an empty first
-segment (`/dir//Dest`) which Google uses for "your location" (→ `from == nil`).
+`…/maps/dir/?api=1&origin=…&destination=…&travelmode=transit`; an empty first
+segment (`/dir//Dest`) which Google uses for "your location" (→ `from == nil`); and
+the **classic directions form** that the Maps app's share sheet actually emits
+today — `maps.google.com/?saddr=<from>&daddr=<to>&dirflg=<mode>` (endpoints in the
+query, mode letter `r`/`w`/`d`/`b`, possibly suffixed as in `dirflg=rBSTR`). A
+short link like `maps.app.goo.gl/ug6h1EyzTy6diDvx6` redirects to this shape, not to
+`/maps/dir/`, so the parser reads `saddr`/`daddr` names as well as the path form.
 
 **Blocked / not recoverable:**
 - **Departure time.** A chosen "depart at" is buried in the opaque protobuf-ish
