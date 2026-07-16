@@ -34,6 +34,11 @@ public protocol JourneyRepository: Sendable {
     /// platform, sorted nearest-first.
     func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse
 
+    /// Facilities (POIs) of a category near the station nearest a coordinate,
+    /// nearest first. May be `found == false` with a typed `reason` when the POI
+    /// layer isn't available for that station — the view shows that honestly.
+    func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse
+
     /// A single station's platform-connectivity breakdown (connected / stitchable
     /// / island), for the Map-health tool's per-station query.
     func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse
@@ -83,6 +88,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
         try await client.stationWalk(lat: lat, lon: lon, fromPlatform: fromPlatform, stepFree: stepFree)
+    }
+
+    public func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+        try await client.facilities(lat: lat, lon: lon, category: category)
     }
 
     public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {

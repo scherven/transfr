@@ -214,6 +214,61 @@ public struct StationWalkResponse: Codable, Sendable {
     }
 }
 
+// MARK: - Nearest facility (/facilities) — mirrors api/schemas.py
+
+/// One mapped facility (a POI) near a station, ranked by straight-line distance
+/// from the station centroid. `category` is the OSM bucket (amenity/shop/…) and
+/// `subtype` the specific tag ("toilets", "cafe"), mirroring the `viz_export`
+/// details shape. `nearestPlatform`/`walk*` are filled only when a `from_platform`
+/// anchor was supplied and a routed walk to the facility's nearest platform
+/// resolved — otherwise `distanceM` (straight-line) is the only measure.
+public struct Facility: Codable, Hashable, Sendable, Identifiable {
+    public var name: String?
+    public var category: String
+    public var subtype: String?
+    public var level: String?
+    public var distanceM: Double
+    public var lat: Double?
+    public var lon: Double?
+    public var nearestPlatform: String?
+    public var walkTimeS: Double?
+    public var walkDistanceM: Double?
+
+    /// Stable identity for `ForEach`: no server id, so key off what's mapped.
+    public var id: String { "\(category)/\(subtype ?? "")/\(name ?? "")/\(distanceM)" }
+
+    public init(name: String? = nil, category: String, subtype: String? = nil,
+                level: String? = nil, distanceM: Double, lat: Double? = nil, lon: Double? = nil,
+                nearestPlatform: String? = nil, walkTimeS: Double? = nil, walkDistanceM: Double? = nil) {
+        self.name = name; self.category = category; self.subtype = subtype
+        self.level = level; self.distanceM = distanceM; self.lat = lat; self.lon = lon
+        self.nearestPlatform = nearestPlatform; self.walkTimeS = walkTimeS; self.walkDistanceM = walkDistanceM
+    }
+}
+
+/// Facilities of one `category` near the station nearest a coordinate, nearest
+/// first (from `/facilities`). `found == true` iff at least one was returned;
+/// otherwise `reason` says why: `station_unresolved`, `unsupported_category`,
+/// `no_poi_layer` (the POI source isn't available on the host — the honest
+/// degradation, mirroring boarding's `no_formation_feed`), or `none_mapped` (the
+/// layer is present but this station tags none of that category).
+public struct FacilitiesResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var relationId: Int?
+    public var station: String?
+    public var category: String
+    public var found: Bool
+    public var reason: String?
+    public var facilities: [Facility]
+
+    public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
+                category: String, found: Bool, reason: String? = nil, facilities: [Facility] = []) {
+        self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
+        self.category = category; self.found = found; self.reason = reason; self.facilities = facilities
+    }
+}
+
 // MARK: - Station connectivity health (/station-health) — mirrors api/schemas.py
 
 /// One platform pair that doesn't plainly connect — `kind` is "stitchable" (a

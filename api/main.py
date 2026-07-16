@@ -19,6 +19,9 @@ Endpoints:
                                                  source platform, the walk to every other
                                                  platform at the nearest station,
                                                  nearest-first (one pathfind each)
+  GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
+                                                 station, nearest first; degrades to a
+                                                 typed reason when the POI layer is absent
   GET  /station-health?lat=&lon=                 one station's platform-connectivity
                                                  breakdown (connected/stitchable/island
                                                  over every pair); the Map-health tool
@@ -48,6 +51,7 @@ from search_context import list_platform_refs
 from api import config, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
+from api.facilities import build_facilities
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
 from api.station_health import build_station_health
@@ -213,6 +217,24 @@ def get_station_walk(
     `found=False` row with core/'s reason; a coordinate with no station near it
     returns a top-level `found=False`. `step_free` routes elevator-free."""
     return build_station_walk(conn, lat, lon, from_platform, step_free)
+
+
+@app.get("/facilities", response_model=schemas.FacilitiesResponse, dependencies=_PROTECTED)
+def get_facilities(
+    lat: float,
+    lon: float,
+    category: str = Query(min_length=1, description="facility category, e.g. toilets/coffee/atm"),
+    from_platform: Optional[str] = Query(default=None, min_length=1,
+                                         description="optional platform anchor for a routed walk"),
+    conn=Depends(get_conn),
+):
+    """Facilities of `category` near the station nearest (lat, lon), nearest first.
+
+    The POI layer is the optional `viz_export` details extract (amenity/shop/...);
+    where it isn't producible on this host the response degrades to `found=False`
+    with `reason="no_poi_layer"` rather than guessing. With `from_platform`, each
+    facility also carries a routed walk to its nearest platform."""
+    return build_facilities(conn, lat, lon, category, from_platform=from_platform)
 
 
 @app.get("/station-health", response_model=schemas.StationHealthResponse, dependencies=_PROTECTED)

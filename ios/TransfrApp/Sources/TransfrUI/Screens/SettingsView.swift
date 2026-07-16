@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Full settings — the prototype's `#s-settings` (§6.8), grouped: Getting around ·
 /// Making the connection · Appearance · On the move · Power tools · About. Every
-/// control is bound to `SettingsStore` and persisted; the Theme control drives
-/// `.preferredColorScheme` for real. Whether each preference yet affects routing
-/// is tracked in the repo-root `TODO.md` (§6).
+/// control is bound to `SettingsStore`, which persists each change on `didSet`, so
+/// this view carries no persistence lifecycle of its own; the Theme control drives
+/// `.preferredColorScheme` for real (via `RootView`). Whether each preference yet
+/// affects routing is tracked in the repo-root `TODO.md` (§6).
 struct SettingsView: View {
     @Environment(SettingsStore.self) private var s
 
@@ -67,12 +68,9 @@ struct SettingsView: View {
             }
             .padding(20)
         }
-        .scrollBounceBehavior(.basedOnSize)
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: s.theme) { _, _ in s.persist() }
-        .onDisappear { s.persist() }
     }
 
     private var makeableCard: some View {

@@ -208,6 +208,14 @@ public final class TripModel {
         try? await repo.stationWalk(lat: lat, lon: lon, fromPlatform: fromPlatform, stepFree: stepFree)
     }
 
+    /// Facilities of a category near a coordinate (the Nearest-facility tool).
+    /// Fails soft to nil only on a network/transport error; a resolved-but-empty
+    /// or POI-layer-absent result comes back as a `FacilitiesResponse` with
+    /// `found == false` and a typed `reason` so the view can say so honestly.
+    public func facilities(lat: Double, lon: Double, category: String) async -> FacilitiesResponse? {
+        try? await repo.facilities(lat: lat, lon: lon, category: category)
+    }
+
     /// Resolve a coordinate to its station's platform-connectivity health (the
     /// Map-health per-station query). Fails soft to nil — the diagnostic panel then
     /// shows nothing rather than surfacing an error.
