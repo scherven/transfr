@@ -124,3 +124,56 @@ def test_node_levels_orient_a_reversed_level_list():
     oriented = vx.way_node_heights([1, 2], coords, [1.0, 2.0], proj, {1: 2.0, 2: 1.0})
     assert oriented[1] == proj.z(2.0)  # node 1's own tag (L2) wins
     assert oriented[2] == proj.z(1.0)  # node 2's own tag (L1) wins
+
+
+# --- is_area_way / multi-level-area flattening (Karlsruhe room=elevator) ------
+
+def test_is_area_way_detects_polygons():
+    assert vx.is_area_way({"area": "yes"}, [1, 2, 3]) is True
+    assert vx.is_area_way({"indoor": "room"}, [1, 2, 3]) is True
+    assert vx.is_area_way({"building": "elevator"}, [1, 2, 3]) is True
+    assert vx.is_area_way({"building:part": "elevator"}, [1, 2, 3]) is True
+    # a closed node ring is an area even with no explicit area tag
+    assert vx.is_area_way({}, [1, 2, 3, 1]) is True
+    # a plain open linear way (a footway, a staircase) is NOT an area
+    assert vx.is_area_way({"highway": "footway"}, [1, 2, 3]) is False
+    assert vx.is_area_way({"highway": "steps"}, [1, 2]) is False
+
+
+def test_multi_level_area_is_flattened_not_ramped():
+    # A room=elevator polygon tagged level=0;1 (Karlsruhe Hbf way 270880470):
+    # its boundary has no along-slope order, so it must render FLAT at its lowest
+    # level, not interpolate a fake ramp around its perimeter that reads as a
+    # burst of phantom transitions.
+    coords = {1: (48.0, 7.0), 2: (48.0, 7.001), 3: (48.001, 7.001), 4: (48.001, 7.0)}
+    proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
+    flat = vx.way_node_heights([1, 2, 3, 4], coords, [0.0, 1.0], proj, is_area=True)
+    assert set(flat.values()) == {0.0}
+    # the same node ring as a genuine linear connector still slopes end-to-end
+    sloped = vx.way_node_heights([1, 2, 3, 4], coords, [0.0, 1.0], proj, is_area=False)
+    assert min(sloped.values()) == 0.0 and max(sloped.values()) == 4.0
+
+
+# --- way_for_hop preference (Stuttgart untagged-duplicate-way flip) -----------
+
+def test_hop_way_rank_orders_level_then_path_then_bare():
+    # explicit level beats a bare mapped path; a mapped path beats empty geometry
+    assert vx._hop_way_rank({"level": "1", "highway": "footway"}) > vx._hop_way_rank({"highway": "footway"})
+    assert vx._hop_way_rank({"highway": "footway"}) > vx._hop_way_rank({})
+    # level="0" is an EXPLICIT ground tag, not an absent one -> still outranks bare
+    assert vx._hop_way_rank({"level": "0"}) > vx._hop_way_rank({})
+
+
+def test_way_for_hop_prefers_level_tagged_over_untagged_stub():
+    # Two ways place nodes 10 and 11 adjacent: a level=1 concourse AREA and a
+    # tag-less stub laid over the same pair (the Stuttgart Hbf pattern). The
+    # tagged way must win in BOTH hop directions regardless of set iteration
+    # order, so the hop's height is read off it, not off the stub whose missing
+    # level would default the pair to the ground plane.
+    way_cache = {
+        100: {"nodes": [10, 11, 12], "tags": {"highway": "footway", "level": "1", "area": "yes"}},
+        200: {"nodes": [11, 10], "tags": {}},
+    }
+    node_to_ways = {10: {100, 200}, 11: {100, 200}, 12: {100}}
+    assert vx.way_for_hop(10, 11, way_cache, node_to_ways) == 100
+    assert vx.way_for_hop(11, 10, way_cache, node_to_ways) == 100
