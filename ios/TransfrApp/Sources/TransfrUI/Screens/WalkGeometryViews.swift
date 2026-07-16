@@ -258,6 +258,7 @@ struct PlanGeometryCanvas: View {
             // Context ways on this level.
             for way in scene.export.ways where wayTouches(way, level: level, scene: scene) {
                 guard way.points.count >= 2 else { continue }
+                if way.walkRelevant == false { continue }   // hide connectors the walk doesn't use
                 var p = Path()
                 p.move(to: fit.map(way.points[0]))
                 for pt in way.points.dropFirst() { p.addLine(to: fit.map(pt)) }
@@ -322,7 +323,7 @@ struct IsoGeometryCanvas: View {
 
             // Ways, drawn low floors first so upper floors overlay.
             let ways = scene.export.ways.sorted { wayLevel($0, scene) < wayLevel($1, scene) }
-            for way in ways where way.points.count >= 2 {
+            for way in ways where way.points.count >= 2 && way.walkRelevant != false {
                 var p = Path()
                 p.move(to: iso.map(way.points[0]))
                 for pt in way.points.dropFirst() { p.addLine(to: iso.map(pt)) }

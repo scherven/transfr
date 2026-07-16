@@ -56,6 +56,13 @@ from search_context import SearchContext  # noqa: E402
 DEFAULT_FLOOR_HEIGHT_M = 4.0
 MAX_RADIUS_M = 350.0  # user-set ceiling for the optional context-widening load
 
+# A connector is "walk-relevant" when the resolved path passes within this many
+# metres of it -- i.e. the walk actually uses that stair/escalator/lift. Lets a
+# walk view show only the vertical circulation on the route; a full station map
+# shows them all.
+CONNECTOR_KINDS = {"stairs", "escalator", "elevator", "ramp"}
+WALK_RELEVANT_M = 3.5
+
 # --- "details" layer: landmarks/stores/buildings around the station ----------
 # The transfr_eu DB is tag-scoped to railway/pedestrian (no shops/buildings), so
 # the optional details layer comes from a local osmium bbox extract of the full
@@ -197,6 +204,16 @@ def platform_level_from_graph(cur, node_ids: List[int]) -> Optional[float]:
     if multi:  # only connectors touch it -- vote over their endpoint floors
         return Counter(v for l in multi for v in (l[0], l[-1])).most_common(1)[0][0]
     return None
+
+
+def _seg_dist2(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    """Squared distance from point (px,py) to segment (ax,ay)-(bx,by)."""
+    dx, dy = bx - ax, by - ay
+    l2 = dx * dx + dy * dy
+    if l2 == 0.0:
+        return (px - ax) ** 2 + (py - ay) ** 2
+    t = max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / l2))
+    return (px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +605,22 @@ def export(
             z = round(proj.z(lvl_i), 2)
             w["points"] = [[p[0], p[1], z] for p in w["points"]]
             levels_seen.add(float(lvl_i))
+
+    # Connector walk-relevance: flag each stairs/escalator/elevator/ramp the walk
+    # actually passes through (a path point within WALK_RELEVANT_M of its line).
+    # A walk view can then show only the vertical circulation on the route; a full
+    # station map ignores the flag and shows them all. Only set when a path exists.
+    if path_json.get("found") and path_json.get("points"):
+        ppts = [(p[0], p[1]) for p in path_json["points"]]
+        thr2 = WALK_RELEVANT_M ** 2
+        for w in ways_json:
+            if w["kind"] not in CONNECTOR_KINDS:
+                continue
+            pts = w["points"]
+            w["walk_relevant"] = any(
+                _seg_dist2(px, py, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]) <= thr2
+                for i in range(len(pts) - 1) for (px, py) in ppts
+            )
 
     # Horizontal extent of everything drawn -- the renderer sizes the level
     # reference planes to it, and an AR client can use it as the anchor footprint.

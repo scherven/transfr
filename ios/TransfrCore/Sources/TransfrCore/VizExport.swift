@@ -77,6 +77,11 @@ public struct VizExport: Codable, Sendable {
         public var points: [Point3]
         public var ref: String?
         public var level: Int?
+        /// Set only on connector ways (stairs/escalator/elevator/ramp) of a found
+        /// walk: `true` when the path passes through this connector. A walk view
+        /// hides connectors where this is `false`; a full station map ignores it.
+        /// `nil` on platforms/walkways and on exports without a resolved path.
+        public var walkRelevant: Bool?
     }
 
     /// The resolved route. When `found` is false only `reason` is populated.
