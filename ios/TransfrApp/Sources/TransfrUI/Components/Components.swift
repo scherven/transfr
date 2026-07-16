@@ -136,3 +136,77 @@ struct GhostButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.85 : 1)
     }
 }
+
+/// A left-aligned wrapping flow layout. Lays subviews out left-to-right and wraps
+/// to a new row when the next subview would overflow the available width. Each
+/// subview keeps its natural (ideal) size — nothing is compressed — so pills flow
+/// onto extra rows instead of being crunched into one. iOS 16+ `Layout`.
+struct FlowLayout: Layout {
+    /// Horizontal gap between subviews on the same row.
+    var spacing: CGFloat = 6
+    /// Vertical gap between wrapped rows.
+    var lineSpacing: CGFloat = 6
+
+    private struct Row {
+        var indices: [Int] = []
+        var height: CGFloat = 0
+    }
+
+    /// Break `sizes` into rows for a given max width and report the content size.
+    private func arrange(maxWidth: CGFloat, sizes: [CGSize]) -> (rows: [Row], size: CGSize) {
+        var rows: [Row] = []
+        var current = Row()
+        var x: CGFloat = 0
+        for (i, size) in sizes.enumerated() {
+            // Wrap when this subview would overflow — but always keep at least one
+            // subview per row so an over-wide pill still gets placed.
+            if !current.indices.isEmpty && x + size.width > maxWidth {
+                rows.append(current)
+                current = Row()
+                x = 0
+            }
+            current.indices.append(i)
+            current.height = max(current.height, size.height)
+            x += size.width + spacing
+        }
+        if !current.indices.isEmpty { rows.append(current) }
+
+        let width = rows.map { row in
+            row.indices.reduce(CGFloat(0)) { $0 + sizes[$1].width + spacing } - spacing
+        }.max() ?? 0
+        let height = rows.reduce(CGFloat(0)) { $0 + $1.height }
+            + lineSpacing * CGFloat(max(rows.count - 1, 0))
+        return (rows, CGSize(width: max(width, 0), height: height))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let (_, size) = arrange(maxWidth: maxWidth, sizes: sizes)
+        // Fill the proposed width when finite so the container aligns to its parent;
+        // fall back to the intrinsic content width when width is unconstrained.
+        return CGSize(width: maxWidth.isFinite ? maxWidth : size.width, height: size.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let (rows, _) = arrange(maxWidth: bounds.width, sizes: sizes)
+        var y = bounds.minY
+        for row in rows {
+            var x = bounds.minX
+            for i in row.indices {
+                let size = sizes[i]
+                // Center each subview vertically within its row so short items
+                // (e.g. an arrow) align with taller pills.
+                let yOffset = (row.height - size.height) / 2
+                subviews[i].place(
+                    at: CGPoint(x: x, y: y + yOffset),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(size)
+                )
+                x += size.width + spacing
+            }
+            y += row.height + lineSpacing
+        }
+    }
+}
