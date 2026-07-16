@@ -129,6 +129,8 @@ struct JourneyCard: View {
     }
 
     private var metaTag: String {
+        let pending = journey.transfers.filter { $0.verdictKind.isPending }.count
+        if pending > 0 { return "checking…" }
         let tights = journey.transfers.filter { $0.verdictKind == .tight }.count
         let unknowns = journey.transfers.filter { if case .unknown = $0.verdictKind { return true }; return false }.count
         if unknowns > 0 { return "\(unknowns) unknown" }

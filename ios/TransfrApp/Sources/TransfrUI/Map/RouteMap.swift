@@ -306,6 +306,7 @@ private extension Verdict {
         case .tight: return "tight"
         case .infeasible: return "won't make it"
         case .unknown: return "unknown"
+        case .pending: return "checking…"
         }
     }
 }

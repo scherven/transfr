@@ -45,6 +45,16 @@ public struct Transfer: Codable, Hashable, Sendable {
     public var verdict: String
     public var reason: String?
 
+    public init(atStation: String? = nil, relationId: Int? = nil,
+                arrivalPlatform: String? = nil, departurePlatform: String? = nil,
+                layoverS: Double? = nil, walkTimeS: Double? = nil, walkDistanceM: Double? = nil,
+                verdict: String, reason: String? = nil) {
+        self.atStation = atStation; self.relationId = relationId
+        self.arrivalPlatform = arrivalPlatform; self.departurePlatform = departurePlatform
+        self.layoverS = layoverS; self.walkTimeS = walkTimeS; self.walkDistanceM = walkDistanceM
+        self.verdict = verdict; self.reason = reason
+    }
+
     /// The typed verdict, combining the raw string with its reason.
     public var verdictKind: Verdict { Verdict(raw: verdict, reason: reason) }
 }
@@ -72,6 +82,42 @@ public struct JourneysResponse: Codable, Sendable {
     public var destination: Place
     public var departureTime: String?
     public var journeys: [Journey]
+}
+
+// MARK: - Streaming assessment (/assess) — mirrors api/schemas.py
+
+/// One change of train to assess, built from a journey's legs: the arrival end of
+/// the incoming train and the departure end of the onward train. Sent to `/assess`
+/// to fill in a `pending` transfer's real verdict behind a fast
+/// `/journeys?assess=false`.
+public struct AssessInterchange: Codable, Hashable, Sendable {
+    public var atStation: String?
+    public var arrLat: Double?
+    public var arrLon: Double?
+    public var arrPlatform: String?
+    public var arrTime: String?
+    public var depLat: Double?
+    public var depLon: Double?
+    public var depPlatform: String?
+    public var depTime: String?
+
+    public init(atStation: String? = nil,
+                arrLat: Double? = nil, arrLon: Double? = nil, arrPlatform: String? = nil, arrTime: String? = nil,
+                depLat: Double? = nil, depLon: Double? = nil, depPlatform: String? = nil, depTime: String? = nil) {
+        self.atStation = atStation
+        self.arrLat = arrLat; self.arrLon = arrLon; self.arrPlatform = arrPlatform; self.arrTime = arrTime
+        self.depLat = depLat; self.depLon = depLon; self.depPlatform = depPlatform; self.depTime = depTime
+    }
+}
+
+public struct AssessRequest: Codable, Sendable {
+    public var interchanges: [AssessInterchange]
+    public init(interchanges: [AssessInterchange]) { self.interchanges = interchanges }
+}
+
+public struct AssessResponse: Codable, Sendable {
+    public var transfers: [Transfer]
+    public init(transfers: [Transfer]) { self.transfers = transfers }
 }
 
 public struct StationSuggestion: Codable, Hashable, Sendable, Identifiable {

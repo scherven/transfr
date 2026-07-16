@@ -40,13 +40,17 @@ public struct TransfrClient: Sendable {
     /// GET /journeys?from=&to=&time=&max= — the product endpoint. `time` is an
     /// ISO-8601 departure time (the server calls the query param `time`, not
     /// `when`; see `api/main.py:get_journeys`).
+    /// `assess: false` returns the itineraries instantly with `pending` transfers
+    /// (no server-side pathfinding), to be filled in via `assess(_:)` — the
+    /// progressive load. Defaults true (the full product path).
     public func journeys(from: String, to: String, when: String? = nil,
-                         max: Int? = nil) async throws -> JourneysResponse {
+                         max: Int? = nil, assess: Bool = true) async throws -> JourneysResponse {
         var comps = URLComponents(url: baseURL.appendingPathComponent("journeys"),
                                   resolvingAgainstBaseURL: false)
         var items = [URLQueryItem(name: "from", value: from), URLQueryItem(name: "to", value: to)]
         if let when { items.append(URLQueryItem(name: "time", value: when)) }
         if let max { items.append(URLQueryItem(name: "max", value: String(max))) }
+        if !assess { items.append(URLQueryItem(name: "assess", value: "false")) }
         comps?.queryItems = items
         return try await get(comps?.url)
     }
@@ -118,6 +122,23 @@ public struct TransfrClient: Sendable {
             throw TransfrClientError.badStatus(http.statusCode)
         }
         return try TransfrJSON.decode(WalksResponse.self, from: data)
+    }
+
+    /// POST /assess — assess a batch of changes of train (the streamed verdicts a
+    /// fast `/journeys?assess=false` deferred). Called with one interchange per
+    /// request, fired concurrently, it fills a journey's verdicts in as each
+    /// pathfind returns.
+    public func assess(_ interchanges: [AssessInterchange]) async throws -> AssessResponse {
+        let url = baseURL.appendingPathComponent("assess")
+        var req = authorized(url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try TransfrJSON.encoder.encode(AssessRequest(interchanges: interchanges))
+        let (data, response) = try await transport.data(for: req)
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw TransfrClientError.badStatus(http.statusCode)
+        }
+        return try TransfrJSON.decode(AssessResponse.self, from: data)
     }
 
     private func get<T: Decodable>(_ url: URL?) async throws -> T {

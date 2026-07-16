@@ -1,67 +1,60 @@
 import SwiftUI
 import TransfrCore
 
-/// The transition screen between the journey timeline and the walk carousel.
+/// The transition between the results list and a journey's timeline.
 ///
-/// Progressive load (DESIGN §13.9): `/journeys` returns fast and the timeline
-/// shows immediately, while each transfer's drawable geometry streams in behind
-/// it. When the user dives into a change whose walk hasn't landed yet, this screen
-/// stands in — it shows every transfer filling in live (spinner → walk time, or a
-/// clean "no map here"), and slides on to the carousel the moment *their* walk is
-/// ready. In the common case the prefetch has already finished and `openTransfers`
-/// skips straight past this, so it only ever appears when it has something to say.
+/// Progressive load: `/journeys?assess=false` returns the itineraries instantly
+/// with `pending` transfers, and the real verdicts stream in behind the list via
+/// `/assess`. When you pick a journey whose walks are still resolving, this screen
+/// stands in — it shows each change of train filling in live (spinner → verdict +
+/// walk time) and slides on to the timeline the moment they're all in. When the
+/// verdicts already landed (the common, fast case), `select` skips straight past
+/// this to the timeline, so it only appears when it has something to show.
 struct PreparingWalksView: View {
     @Environment(TripModel.self) private var model
     @Environment(SettingsStore.self) private var settings
-    let startIndex: Int
 
     @State private var proceeded = false
 
     private var transfers: [Transfer] { model.transfers }
-    private var prefetch: TripModel.WalkPrefetchState { model.walkPrefetch }
+    private var settled: Int { transfers.filter { !$0.verdictKind.isPending }.count }
+    private var allSettled: Bool { !transfers.isEmpty && settled == transfers.count }
     private var imperial: Bool { settings.units == .imperial }
-
-    private var targetSettled: Bool {
-        switch model.walkStatus(at: startIndex) { case .ready, .unavailable: true; default: false }
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                progressHeader
+                header
                 VStack(spacing: 10) {
-                    ForEach(Array(transfers.enumerated()), id: \.offset) { i, t in
-                        row(index: i, transfer: t)
+                    ForEach(Array(transfers.enumerated()), id: \.offset) { _, t in
+                        row(t)
                     }
                 }
             }
             .padding(20)
         }
         .background(Theme.paper.ignoresSafeArea())
-        .navigationTitle("Getting ready")
+        .navigationTitle("Checking your connection")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .bottom) { bottomBar }
-        // The prefetch lives on the model (it survives this view), but seed it
-        // defensively in case we arrived without the timeline having started it.
-        .task { model.prefetchWalks(stepFree: settings.stepFree) }
-        // Slide on as soon as the tapped transfer's drawing is ready — a short
-        // beat so its checkmark is seen, never a jarring instant cut.
-        .onChange(of: prefetch) { advanceIfReady() }
+        // Slide on once every transfer's verdict is in — a short beat so the last
+        // one is seen resolving, never a jarring instant cut.
+        .onChange(of: allSettled) { advanceIfReady() }
         .onAppear { advanceIfReady() }
     }
 
     private func advanceIfReady() {
-        guard !proceeded, targetSettled else { return }
+        guard !proceeded, allSettled else { return }
         proceeded = true
         Task {
             try? await Task.sleep(nanoseconds: 350_000_000)
-            model.proceedToWalks(startIndex: startIndex)
+            model.proceedToTimeline()
         }
     }
 
     // MARK: Header
 
-    private var progressHeader: some View {
+    private var header: some View {
         Panel {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
@@ -71,72 +64,61 @@ struct PreparingWalksView: View {
                             .foregroundStyle(Theme.accent)
                     }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Drawing your transfers").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.ink)
+                        Text("Checking your transfers").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.ink)
                         Text(subtitle).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.ink3)
                     }
                     Spacer()
                 }
-                ProgressView(value: Double(prefetch.settled), total: Double(max(prefetch.total, 1)))
+                ProgressView(value: Double(settled), total: Double(max(transfers.count, 1)))
                     .tint(Theme.accent)
             }
         }
     }
 
     private var subtitle: String {
-        if prefetch.isComplete { return "ready · \(prefetch.readyCount) walk\(prefetch.readyCount == 1 ? "" : "s") mapped" }
-        return "\(prefetch.settled) of \(prefetch.total) ready"
+        allSettled ? "all clear · \(transfers.count) transfer\(transfers.count == 1 ? "" : "s") assessed"
+                   : "\(settled) of \(transfers.count) assessed"
     }
 
     // MARK: Transfer row
 
-    @ViewBuilder
-    private func row(index i: Int, transfer t: Transfer) -> some View {
-        let isTarget = i == startIndex
-        HStack(spacing: 12) {
-            statusIcon(model.walkStatus(at: i))
-                .frame(width: 24)
+    private func row(_ t: Transfer) -> some View {
+        let v = t.verdictKind
+        return HStack(spacing: 12) {
+            statusIcon(v).frame(width: 24)
             VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(t.atStation ?? "—").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
-                    if isTarget {
-                        Text("your walk").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.accent)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(Theme.accentSoft))
-                    }
-                }
-                Text(detail(i, t)).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.ink3)
+                Text(t.atStation ?? "—").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                Text(detail(t)).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.ink3)
             }
             Spacer()
             PlatformChip(text: "\(t.arrivalPlatform ?? "?")→\(t.departurePlatform ?? "?")")
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(isTarget ? Theme.accentSoft : Theme.panel))
+            .fill(v.isPending ? Theme.panel : v.softColor))
         .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .strokeBorder(isTarget ? Theme.accent.opacity(0.35) : Theme.line, lineWidth: 1))
+            .strokeBorder(v.isPending ? Theme.line : v.color.opacity(0.28), lineWidth: 1))
     }
 
     @ViewBuilder
-    private func statusIcon(_ status: TripModel.WalkLoad) -> some View {
-        switch status {
-        case .loading, .pending:
+    private func statusIcon(_ v: Verdict) -> some View {
+        if v.isPending {
             ProgressView().controlSize(.small)
-        case .ready:
-            Image(systemName: "checkmark.circle.fill").font(.system(size: 18)).foregroundStyle(Theme.go)
-        case .unavailable:
-            Image(systemName: "minus.circle").font(.system(size: 17)).foregroundStyle(Theme.nodata)
+        } else {
+            Image(systemName: v.iconName).font(.system(size: 15, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(Circle().fill(v.color))
         }
     }
 
-    private func detail(_ i: Int, _ t: Transfer) -> String {
-        switch model.walkStatus(at: i) {
-        case .ready:
-            return "\(Fmt.walkTime(t.walkTimeS)) · \(Fmt.distance(t.walkDistanceM, imperial: imperial))"
-        case .unavailable:
-            return "no map here"
-        case .loading, .pending:
-            return "resolving platforms…"
+    private func detail(_ t: Transfer) -> String {
+        let v = t.verdictKind
+        if v.isPending { return "resolving platforms…" }
+        if let walk = t.walkTimeS {
+            return "\(v.label) · \(Fmt.walkTime(walk)) · \(Fmt.distance(t.walkDistanceM, imperial: imperial))"
         }
+        return v.label
     }
 
     // MARK: Bottom
@@ -144,10 +126,10 @@ struct PreparingWalksView: View {
     private var bottomBar: some View {
         Button {
             proceeded = true
-            model.proceedToWalks(startIndex: startIndex)
+            model.proceedToTimeline()
         } label: {
             HStack {
-                Text(targetSettled ? "View walks" : "Go ahead")
+                Text(allSettled ? "View connection" : "Go ahead")
                 Image(systemName: "arrow.right")
             }
         }

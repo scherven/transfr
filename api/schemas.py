@@ -60,6 +60,40 @@ class Journey(BaseModel):
     transfers: List[Transfer]
 
 
+# ---------------------------------------------------------------------------
+# Streaming assessment -- /assess
+#
+# `/journeys?assess=false` returns the itineraries instantly with `pending`
+# transfers; the client then streams each real verdict in by POSTing the
+# interchange fields it already holds (from the journey's legs) to /assess. The
+# request mirrors assess_transfer's inputs exactly; the response is the same
+# Transfer the enriched /journeys would have carried.
+# ---------------------------------------------------------------------------
+
+
+class AssessInterchange(BaseModel):
+    """One change of train to assess: the arrival end (of the incoming train) and
+    the departure end (of the onward train). `at_station` is a display fallback."""
+
+    at_station: Optional[str] = None
+    arr_lat: Optional[float] = None
+    arr_lon: Optional[float] = None
+    arr_platform: Optional[str] = None
+    arr_time: Optional[str] = None
+    dep_lat: Optional[float] = None
+    dep_lon: Optional[float] = None
+    dep_platform: Optional[str] = None
+    dep_time: Optional[str] = None
+
+
+class AssessRequest(BaseModel):
+    interchanges: List[AssessInterchange] = Field(default_factory=list)
+
+
+class AssessResponse(BaseModel):
+    transfers: List[Transfer]
+
+
 class JourneysResponse(BaseModel):
     origin: Place
     destination: Place

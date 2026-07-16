@@ -40,7 +40,7 @@ from search_context import list_platform_refs
 from api import config, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
-from api.pipeline import plan_journeys
+from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
 from api.transfers import STATION_UNRESOLVED
 from api.walks import build_walk, build_walks
@@ -111,16 +111,34 @@ def get_journeys(
     to: str = Query(min_length=1, description="destination station name"),
     time: Optional[str] = Query(default=None, description="ISO 8601 departure time; defaults to now"),
     max: int = Query(default=config.DEFAULT_MAX_JOURNEYS, ge=1, le=config.MAX_JOURNEYS_LIMIT),
+    assess: bool = Query(default=True, description="assess each transfer's walkability; "
+                         "false returns pending transfers instantly to be streamed via /assess"),
     conn=Depends(get_conn),
 ):
     when = _parse_when(time)
     try:
-        return plan_journeys(conn, from_, to, when, max_journeys=max, buffer_s=config.BUFFER_S)
+        return plan_journeys(conn, from_, to, when, max_journeys=max,
+                             buffer_s=config.BUFFER_S, assess=assess)
     except ValueError as e:
         # unresolvable origin/destination name
         raise HTTPException(status_code=404, detail=str(e))
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail=f"journey provider error: {e}")
+
+
+@app.post("/assess", response_model=schemas.AssessResponse, dependencies=_PROTECTED)
+def post_assess(req: schemas.AssessRequest, conn=Depends(get_conn)):
+    """Assess a batch of changes of train, streaming the verdicts a fast
+    `/journeys?assess=false` deferred. The client sends the interchange fields it
+    already holds (from the journey's legs); each comes back as a full Transfer.
+    Called with one interchange per request, fired concurrently, it fills a
+    journey's verdicts in as fast as each pathfind returns."""
+    if len(req.interchanges) > config.MAX_ASSESS_BATCH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"too many interchanges: {len(req.interchanges)} > {config.MAX_ASSESS_BATCH}",
+        )
+    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S)
 
 
 @app.get("/transfer", response_model=schemas.PlatformWalkResponse, dependencies=_PROTECTED)
