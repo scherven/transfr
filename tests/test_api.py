@@ -247,6 +247,63 @@ def test_station_platforms_missing_lat_is_422(client):
 
 
 # ---------------------------------------------------------------------------
+# /facilities (nearest facility; POI layer degrades honestly)
+#
+# HTTP-contract only: build_facilities is stubbed so these assert routing,
+# validation, and response shape -- the ranking/degradation logic is
+# test_facilities.py.
+# ---------------------------------------------------------------------------
+
+def test_facilities_found(client, monkeypatch):
+    def _fake(conn, lat, lon, category, from_platform=None, **kw):
+        return schemas.FacilitiesResponse(
+            lat=lat, lon=lon, relation_id=5688517, station="Berlin Hbf",
+            category=category, found=True,
+            facilities=[schemas.Facility(name="WC", category="amenity", subtype="toilets",
+                                         level="0", distance_m=7.2)],
+        )
+
+    monkeypatch.setattr(main, "build_facilities", _fake)
+    r = client.get("/facilities", params={"lat": 52.525, "lon": 13.369, "category": "toilets"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is True and body["station"] == "Berlin Hbf"
+    assert body["facilities"][0]["subtype"] == "toilets"
+    assert body["facilities"][0]["distance_m"] == 7.2
+
+
+def test_facilities_forwards_from_platform(client, monkeypatch):
+    captured = {}
+
+    def _fake(conn, lat, lon, category, from_platform=None, **kw):
+        captured.update(category=category, from_platform=from_platform)
+        return schemas.FacilitiesResponse(lat=lat, lon=lon, category=category, found=False,
+                                          reason="no_poi_layer")
+
+    monkeypatch.setattr(main, "build_facilities", _fake)
+    r = client.get("/facilities", params={"lat": 52.5, "lon": 13.3, "category": "coffee",
+                                          "from_platform": "1"})
+    assert r.status_code == 200
+    assert captured == {"category": "coffee", "from_platform": "1"}
+
+
+def test_facilities_degraded_reason_passes_through(client, monkeypatch):
+    monkeypatch.setattr(main, "build_facilities",
+                        lambda *a, **k: schemas.FacilitiesResponse(
+                            lat=0.0, lon=0.0, category="toilets", found=False,
+                            reason="no_poi_layer", facilities=[]))
+    r = client.get("/facilities", params={"lat": 0.0, "lon": 0.0, "category": "toilets"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["found"] is False and body["reason"] == "no_poi_layer"
+    assert body["facilities"] == []
+
+
+def test_facilities_missing_category_is_422(client):
+    assert client.get("/facilities", params={"lat": 52.5, "lon": 13.3}).status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # /walk and /walks (walk geometry delivery)
 #
 # HTTP-contract only: build_walk/build_walks are stubbed so these assert routing,

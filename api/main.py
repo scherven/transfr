@@ -14,6 +14,9 @@ Endpoints:
   GET  /station-platforms?lat=&lon=              the platforms (+ relation_id) at the
                                                  station nearest a coordinate; powers
                                                  the walk-only door's platform pickers
+  GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
+                                                 station, nearest first; degrades to a
+                                                 typed reason when the POI layer is absent
   GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
                                                  one transfer's drawable walk geometry
                                                  (viz_export); cacheable
@@ -40,6 +43,7 @@ from search_context import list_platform_refs
 from api import config, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
+from api.facilities import build_facilities
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
 from api.transfers import STATION_UNRESOLVED
@@ -187,6 +191,24 @@ def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
         lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
         found=True, platforms=refs,
     )
+
+
+@app.get("/facilities", response_model=schemas.FacilitiesResponse, dependencies=_PROTECTED)
+def get_facilities(
+    lat: float,
+    lon: float,
+    category: str = Query(min_length=1, description="facility category, e.g. toilets/coffee/atm"),
+    from_platform: Optional[str] = Query(default=None, min_length=1,
+                                         description="optional platform anchor for a routed walk"),
+    conn=Depends(get_conn),
+):
+    """Facilities of `category` near the station nearest (lat, lon), nearest first.
+
+    The POI layer is the optional `viz_export` details extract (amenity/shop/...);
+    where it isn't producible on this host the response degrades to `found=False`
+    with `reason="no_poi_layer"` rather than guessing. With `from_platform`, each
+    facility also carries a routed walk to its nearest platform."""
+    return build_facilities(conn, lat, lon, category, from_platform=from_platform)
 
 
 @app.get("/walk", response_model=schemas.WalkResult, dependencies=_PROTECTED)

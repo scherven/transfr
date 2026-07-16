@@ -29,6 +29,11 @@ public protocol JourneyRepository: Sendable {
     /// pickers adapt to the entered station.
     func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse
 
+    /// Facilities (POIs) of a category near the station nearest a coordinate,
+    /// nearest first. May be `found == false` with a typed `reason` when the POI
+    /// layer isn't available for that station — the view shows that honestly.
+    func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse
+
     /// One transfer's drawable walk geometry, keyed by the triple a `Transfer`
     /// already carries. May be `ok == false` when no geometry exists yet.
     func walk(for key: WalkKey) async throws -> WalkResult
@@ -70,6 +75,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
         try await client.stationPlatforms(lat: lat, lon: lon)
+    }
+
+    public func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+        try await client.facilities(lat: lat, lon: lon, category: category)
     }
 
     public func walk(for key: WalkKey) async throws -> WalkResult {

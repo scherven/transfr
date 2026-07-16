@@ -90,6 +90,39 @@ struct ContractDecodeTests {
         #expect(pw.walkDistanceM == 107.0)
     }
 
+    // MARK: - /facilities contract (nearest facility; honest degradation)
+
+    @Test func decodesFacilitiesFound() throws {
+        let data = try Self.fixture("facilities_berlin_toilets")
+        let r = try TransfrJSON.decode(FacilitiesResponse.self, from: data)
+        #expect(r.found)
+        #expect(r.station == "Berlin, S Hauptbahnhof")
+        #expect(r.relationId == 5688520)
+        #expect(r.facilities.count == 2)
+        // snake_case → camelCase across the row's fields, nearest first.
+        let nearest = try #require(r.facilities.first)
+        #expect(nearest.subtype == "toilets")
+        #expect(nearest.distanceM == 7.2)
+        #expect(nearest.nearestPlatform == "1")
+        #expect(nearest.walkTimeS == 33.0)
+        #expect(nearest.walkDistanceM == 38.0)
+        // A facility without a routed anchor keeps distance only.
+        #expect(r.facilities[1].nearestPlatform == nil)
+        #expect(r.facilities[1].walkTimeS == nil)
+        #expect(r.facilities[1].level == "2")
+    }
+
+    @Test func decodesFacilitiesDegraded() throws {
+        // The honest-degradation state: layer absent → found=false + typed reason.
+        let data = try Self.fixture("facilities_no_layer")
+        let r = try TransfrJSON.decode(FacilitiesResponse.self, from: data)
+        #expect(!r.found)
+        #expect(r.reason == "no_poi_layer")
+        #expect(r.facilities.isEmpty)
+        // The station still resolved even though its POIs aren't available.
+        #expect(r.station == "Berlin, S Hauptbahnhof")
+    }
+
     // MARK: - /station-platforms contract (the walk-only door)
 
     @Test func decodesStationPlatforms() throws {

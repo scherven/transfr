@@ -126,6 +126,14 @@ public final class TripModel {
         try? await repo.platforms(lat: lat, lon: lon)
     }
 
+    /// Facilities of a category near a coordinate (the Nearest-facility tool).
+    /// Fails soft to nil only on a network/transport error; a resolved-but-empty
+    /// or POI-layer-absent result comes back as a `FacilitiesResponse` with
+    /// `found == false` and a typed `reason` so the view can say so honestly.
+    public func facilities(lat: Double, lon: Double, category: String) async -> FacilitiesResponse? {
+        try? await repo.facilities(lat: lat, lon: lon, category: category)
+    }
+
     /// Pick a journey. Lands on its timeline straight away when its verdicts are
     /// already in; otherwise routes through the transition screen so the still-
     /// streaming verdicts are shown filling in, then advances to the timeline.

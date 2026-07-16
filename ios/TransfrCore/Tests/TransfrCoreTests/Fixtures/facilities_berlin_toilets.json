@@ -1,0 +1,35 @@
+{
+  "lat": 52.5251,
+  "lon": 13.3694,
+  "relation_id": 5688520,
+  "station": "Berlin, S Hauptbahnhof",
+  "category": "toilets",
+  "found": true,
+  "reason": null,
+  "facilities": [
+    {
+      "name": "WC Center Berlin-Hauptbahnhof",
+      "category": "amenity",
+      "subtype": "toilets",
+      "level": "0",
+      "distance_m": 7.2,
+      "lat": 52.5252,
+      "lon": 13.3695,
+      "nearest_platform": "1",
+      "walk_time_s": 33.0,
+      "walk_distance_m": 38.0
+    },
+    {
+      "name": "rail&fresh",
+      "category": "amenity",
+      "subtype": "toilets",
+      "level": "2",
+      "distance_m": 35.0,
+      "lat": 52.5249,
+      "lon": 13.369,
+      "nearest_platform": null,
+      "walk_time_s": null,
+      "walk_distance_m": null
+    }
+  ]
+}
