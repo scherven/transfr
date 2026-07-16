@@ -126,6 +126,14 @@ public final class TripModel {
         try? await repo.platforms(lat: lat, lon: lon)
     }
 
+    /// The "full station walk" from one source platform: the real walk to every
+    /// other platform at the resolved station, nearest-first (the §6.10 Advanced
+    /// tool). Fails soft to nil — the tool then shows its degraded/empty state
+    /// rather than throwing.
+    public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async -> StationWalkResponse? {
+        try? await repo.stationWalk(lat: lat, lon: lon, fromPlatform: fromPlatform, stepFree: stepFree)
+    }
+
     /// Pick a journey. Lands on its timeline straight away when its verdicts are
     /// already in; otherwise routes through the transition screen so the still-
     /// streaming verdicts are shown filling in, then advances to the timeline.

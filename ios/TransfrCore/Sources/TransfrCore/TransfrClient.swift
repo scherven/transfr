@@ -93,6 +93,24 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
+    /// GET /station-walk?lat=&lon=&from_platform=&step_free= — the "full station
+    /// walk": from one source platform, the real walk to every other platform at
+    /// the station nearest a coordinate, one pathfind each, sorted nearest-first.
+    /// Powers the Advanced tool of the same name. (Server param is `from_platform`;
+    /// see `api/main.py:get_station_walk`.)
+    public func stationWalk(lat: Double, lon: Double, fromPlatform: String,
+                            stepFree: Bool = false) async throws -> StationWalkResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("station-walk"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lon", value: String(lon)),
+            URLQueryItem(name: "from_platform", value: fromPlatform),
+            URLQueryItem(name: "step_free", value: stepFree ? "true" : "false"),
+        ]
+        return try await get(comps?.url)
+    }
+
     /// GET /walk?relation_id=&from_platform=&to_platform=&step_free= — one
     /// transfer's drawable walk geometry (the `viz_export` document). Keyed by the
     /// triple a `Transfer` already carries, so callers forward them verbatim.

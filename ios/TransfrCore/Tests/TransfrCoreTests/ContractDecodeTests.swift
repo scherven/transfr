@@ -103,4 +103,29 @@ struct ContractDecodeTests {
         #expect(sp.platforms.count == 14)
         #expect(sp.platforms.first == "1" && sp.platforms.last == "16")
     }
+
+    // MARK: - /station-walk contract (the "full station walk" Advanced tool)
+
+    @Test func decodesStationWalk() throws {
+        let data = try Self.fixture("station_walk_berlin")
+        let sw = try TransfrJSON.decode(StationWalkResponse.self, from: data)
+        #expect(sw.found)
+        #expect(sw.relationId == 5688520)
+        #expect(sw.station == "Berlin, S Hauptbahnhof")
+        #expect(sw.fromPlatform == "1")
+        #expect(sw.stepFree == false)
+        #expect(sw.results.count == 4)
+        // snake_case to_platform / walk_time_s / walk_distance_m → camelCase.
+        #expect(sw.results.first?.toPlatform == "2")
+        #expect(sw.results.first?.walkTimeS == 5.3)
+        #expect(sw.results.first?.walkDistanceM == 7.4)
+        // Reachable rows are nearest-first (ascending walk distance)…
+        let reachable = sw.results.filter(\.found)
+        #expect(reachable.map(\.walkDistanceM) == reachable.map(\.walkDistanceM).sorted { ($0 ?? 0) < ($1 ?? 0) })
+        // …and an unreachable platform decodes as a found=false row with a reason.
+        let last = try #require(sw.results.last)
+        #expect(last.found == false)
+        #expect(last.reason == "platform_not_found")
+        #expect(last.walkTimeS == nil)
+    }
 }

@@ -30,6 +30,9 @@ final class PreparingWalksSnapshotTests: XCTestCase {
         func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
             throw RepositoryError.notAvailable("platforms")
         }
+        func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+            throw RepositoryError.notAvailable("stationWalk")
+        }
         func walk(for key: WalkKey) async throws -> WalkResult {
             WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
                        toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)

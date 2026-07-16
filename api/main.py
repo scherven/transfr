@@ -14,6 +14,11 @@ Endpoints:
   GET  /station-platforms?lat=&lon=              the platforms (+ relation_id) at the
                                                  station nearest a coordinate; powers
                                                  the walk-only door's platform pickers
+  GET  /station-walk?lat=&lon=&from_platform=&step_free=
+                                                 the 'full station walk' tool: from one
+                                                 source platform, the walk to every other
+                                                 platform at the nearest station,
+                                                 nearest-first (one pathfind each)
   GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
                                                  one transfer's drawable walk geometry
                                                  (viz_export); cacheable
@@ -42,6 +47,7 @@ from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
+from api.station_walk import build_station_walk
 from api.transfers import STATION_UNRESOLVED
 from api.walks import build_walk, build_walks
 
@@ -187,6 +193,22 @@ def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
         lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
         found=True, platforms=refs,
     )
+
+
+@app.get("/station-walk", response_model=schemas.StationWalkResponse, dependencies=_PROTECTED)
+def get_station_walk(
+    lat: float,
+    lon: float,
+    from_platform: str = Query(min_length=1, description="source platform ref to walk from"),
+    step_free: bool = Query(default=False, description="route without elevators"),
+    conn=Depends(get_conn),
+):
+    """The 'full station walk' advanced tool: from one source platform, the real
+    walk to every OTHER platform at the station nearest (lat, lon), one pathfind
+    each, sorted nearest-first. Honest degradation: an unreachable platform is a
+    `found=False` row with core/'s reason; a coordinate with no station near it
+    returns a top-level `found=False`. `step_free` routes elevator-free."""
+    return build_station_walk(conn, lat, lon, from_platform, step_free)
 
 
 @app.get("/walk", response_model=schemas.WalkResult, dependencies=_PROTECTED)

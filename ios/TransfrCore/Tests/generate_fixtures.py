@@ -22,6 +22,7 @@ sys.path.insert(0, REPO)
 from api.schemas import (  # noqa: E402
     Place, Leg, Transfer, Journey, JourneysResponse,
     StationSuggestion, PlatformWalkResponse,
+    StationWalkRow, StationWalkResponse,
     WalkKey, WalkResult, WalksResponse,
 )
 
@@ -92,6 +93,22 @@ pw = PlatformWalkResponse(lat=52.525, lon=13.369, relation_id=5688517, station="
                           from_platform="1", to_platform="16", found=True,
                           walk_time_s=122.0, walk_distance_m=107.0)
 write("platform_walk_berlin.json", pw.model_dump_json(indent=2))
+
+# --- /station-walk: the 'full station walk' tool -----------------------------
+# From Berlin Hbf platform 1, the walk to every other platform, nearest-first
+# (reachable by ascending distance, then one unreachable row). Mirrors what the
+# real endpoint returns from the Berlin Hbf coordinate.
+sw = StationWalkResponse(
+    lat=52.5251, lon=13.3694, relation_id=5688520, station="Berlin, S Hauptbahnhof",
+    from_platform="1", step_free=False, found=True,
+    results=[
+        StationWalkRow(to_platform="2", found=True, walk_time_s=5.3, walk_distance_m=7.4),
+        StationWalkRow(to_platform="4", found=True, walk_time_s=81.6, walk_distance_m=81.5),
+        StationWalkRow(to_platform="16", found=True, walk_time_s=122.0, walk_distance_m=107.0),
+        StationWalkRow(to_platform="99", found=False, reason="platform_not_found"),
+    ],
+)
+write("station_walk_berlin.json", sw.model_dump_json(indent=2))
 
 # --- viz_export goldens (copied from real core/viz_out output) ---------------
 for src, dst in [("5688517_1_16.json", "viz_berlin_1_16.json"),
