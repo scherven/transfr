@@ -20,9 +20,16 @@ struct WalkScene {
     let endRef: String
     let startLevel: Int
     let endLevel: Int
-    /// World XY bounds over ways + path — shared by every view so switching level
-    /// (or rotating the 3D) never rescales the scene under you.
+    /// World XY bounds — framed on the **path** (+ a little breathing room), so
+    /// the walk fills every view. Shared by all of them so switching level (or
+    /// rotating the 3D) never rescales the scene under you.
     let minX: CGFloat, maxX: CGFloat, minY: CGFloat, maxY: CGFloat
+    /// The platform slab the walk starts / ends on — the nearest mapped `platform`
+    /// way to each endpoint. The one piece of the station's mapped web the plans
+    /// keep (faint, for orientation); everything else the search merely touched is
+    /// dropped so the walk itself reads (mirrors `core/viz/viz_render.py`).
+    let startPlatform: VizExport.Way?
+    let endPlatform: VizExport.Way?
 
     init(_ e: VizExport) {
         export = e
@@ -47,16 +54,44 @@ struct WalkScene {
         startLevel = lvl(e.path.endpoints?.start.xyz.z ?? pathPoints.first?.z ?? 0)
         endLevel   = lvl(e.path.endpoints?.end.xyz.z ?? pathPoints.last?.z ?? 0)
 
+        // Frame tightly on the PATH (+ margin) — the walk fills the view. We no
+        // longer draw the station's full mapped web, so framing on every way (as
+        // this once did) would strand a small path in a huge empty frame. Mirrors
+        // core/viz/viz_render.py's `_focus_window` (path bbox + margin).
         var lo = CGPoint(x: CGFloat.greatestFiniteMagnitude, y: CGFloat.greatestFiniteMagnitude)
         var hi = CGPoint(x: -CGFloat.greatestFiniteMagnitude, y: -CGFloat.greatestFiniteMagnitude)
         func extend(_ p: Point3) {
             lo.x = min(lo.x, CGFloat(p.x)); hi.x = max(hi.x, CGFloat(p.x))
             lo.y = min(lo.y, CGFloat(p.y)); hi.y = max(hi.y, CGFloat(p.y))
         }
-        for w in e.ways { for p in w.points { extend(p) } }
-        for p in pathPoints { extend(p) }
-        if lo.x > hi.x { lo = .zero; hi = CGPoint(x: 1, y: 1) }  // empty guard
-        minX = lo.x; maxX = hi.x; minY = lo.y; maxY = hi.y
+        if !pathPoints.isEmpty { for p in pathPoints { extend(p) } }
+        else { for w in e.ways { for p in w.points { extend(p) } } }   // no path: fall back to the web
+        if lo.x > hi.x { lo = .zero; hi = CGPoint(x: 1, y: 1) }         // empty guard
+        let margin = max(hi.x - lo.x, hi.y - lo.y, 1) * 0.08 + 3        // world-metre breathing room
+        minX = lo.x - margin; maxX = hi.x + margin
+        minY = lo.y - margin; maxY = hi.y + margin
+
+        // The slabs you step off / board on — nearest platform way to each
+        // endpoint, on that endpoint's floor. The only mapped-web geometry kept.
+        let startXYZ = e.path.endpoints?.start.xyz ?? pathPoints.first ?? Point3(x: 0, y: 0, z: 0)
+        let endXYZ   = e.path.endpoints?.end.xyz   ?? pathPoints.last  ?? Point3(x: 0, y: 0, z: 0)
+        startPlatform = found ? Self.nearestPlatform(e.ways, to: startXYZ, level: startLevel, floorHeight: fh) : nil
+        endPlatform   = found ? Self.nearestPlatform(e.ways, to: endXYZ,   level: endLevel,   floorHeight: fh) : nil
+    }
+
+    /// Nearest mapped `platform` way to a point, among platforms touching `level`
+    /// — the slab the walk starts/ends on, for a faint orientation cue.
+    private static func nearestPlatform(_ ways: [VizExport.Way], to p: Point3,
+                                        level lvl: Int, floorHeight fh: CGFloat) -> VizExport.Way? {
+        func L(_ z: Float) -> Int { Int((CGFloat(z) / fh).rounded()) }
+        var best: VizExport.Way?
+        var bestD = Float.greatestFiniteMagnitude
+        for w in ways where w.kind == "platform" && w.points.contains(where: { L($0.z) == lvl }) {
+            var d = Float.greatestFiniteMagnitude
+            for q in w.points { let dx = q.x - p.x, dy = q.y - p.y; d = min(d, dx*dx + dy*dy) }
+            if d < bestD { bestD = d; best = w }
+        }
+        return best
     }
 
     func level(of z: Float) -> Int { Int((CGFloat(z) / floorHeight).rounded()) }
@@ -244,114 +279,125 @@ struct SectionGeometryCanvas: View {
 
 // MARK: - Levels (per-floor plan)
 
-/// A top-down floor plan for one level: platforms as slabs, walkways/connectors as
-/// lines, and the portion of the path on that level, with markers where it drops or
-/// climbs to another floor.
+/// A top-down floor plan for one level. Deliberately spare (like
+/// `core/viz/viz_render.py`): only the part of the route on this floor, the
+/// slab(s) it starts/ends on, and — drawn large and labelled — every point where
+/// it changes floor. The station's other platforms, walkways and stairs (dozens
+/// to hundreds of context ways) are NOT drawn; they only buried the walk.
 struct PlanGeometryCanvas: View {
     let scene: WalkScene
     let level: Int
 
     var body: some View {
         Canvas { ctx, size in
-            let fit = PlanFit(scene: scene, size: size, pad: 18)
-
-            // Context ways on this level.
-            for way in scene.export.ways where wayTouches(way, level: level, scene: scene) {
-                guard way.points.count >= 2 else { continue }
-                var p = Path()
-                p.move(to: fit.map(way.points[0]))
-                for pt in way.points.dropFirst() { p.addLine(to: fit.map(pt)) }
-                switch way.kind {
-                case "platform":
-                    ctx.stroke(p, with: .color(Theme.panel3), style: StrokeStyle(lineWidth: 9, lineCap: .round, lineJoin: .round))
-                    ctx.stroke(p, with: .color(Theme.line), style: StrokeStyle(lineWidth: 1))
-                case "walkway":
-                    ctx.stroke(p, with: .color(Theme.ink3.opacity(0.35)), style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                case "stairs", "escalator", "ramp", "elevator":
-                    ctx.stroke(p, with: .color(WalkConnector.color(way.kind)), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                default:
-                    ctx.stroke(p, with: .color(Theme.line2), style: StrokeStyle(lineWidth: 1))
-                }
-            }
+            let fit = PlanFit(scene: scene, size: size, pad: 24)
 
             guard scene.found, scene.pathPoints.count >= 2 else {
-                if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
+                drawUnavailable(ctx, size, scene.found ? "No path geometry" : "Platforms not connected")
                 return
             }
 
-            // Path segments whose both ends are on this level.
+            // Faint orientation: only the platform slab(s) the walk begins/ends on
+            // this floor — not the station's other platforms.
+            if scene.startLevel == level, let w = scene.startPlatform { drawPlatformSlab(ctx, w, fit) }
+            if scene.endLevel == level, let w = scene.endPlatform, w.id != scene.startPlatform?.id {
+                drawPlatformSlab(ctx, w, fit)
+            }
+
+            // The route, only where both ends of a segment sit on this floor.
             let pts = scene.pathPoints
-            var path = Path()
+            var route = Path()
             var started = false
             for i in 1..<pts.count {
                 guard scene.level(of: pts[i-1].z) == level, scene.level(of: pts[i].z) == level else { started = false; continue }
-                if !started { path.move(to: fit.map(pts[i-1])); started = true }
-                path.addLine(to: fit.map(pts[i]))
+                if !started { route.move(to: fit.map(pts[i-1])); started = true }
+                route.addLine(to: fit.map(pts[i]))
             }
-            ctx.stroke(path, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+            ctx.stroke(route, with: .color(Theme.accent),
+                       style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
 
-            // Where the path enters/leaves this level.
+            // Endpoints on this floor, with their platform ref.
+            if scene.startLevel == level, let s = pts.first {
+                endpoint(ctx, fit.map(s), Theme.go)
+                drawChip(ctx, "Pl \(scene.startRef)", center: CGPoint(x: fit.map(s).x, y: fit.map(s).y - 16),
+                         textColor: .white, fill: Theme.go)
+            }
+            if scene.endLevel == level, let e = pts.last {
+                endpoint(ctx, fit.map(e), Theme.accent)
+                drawChip(ctx, "Pl \(scene.endRef)", center: CGPoint(x: fit.map(e).x, y: fit.map(e).y - 16),
+                         textColor: .white, fill: Theme.accent)
+            }
+
+            // The decision this view exists to answer: every place the route drops
+            // or climbs to another floor, drawn big and directional and labelled by
+            // connector + destination floor (from THIS floor's point of view).
+            var marks: [(CGPoint, String, Bool, Int)] = []
             for t in scene.transitions {
                 let fromL = scene.level(of: t.from.z), toL = scene.level(of: t.to.z)
-                if fromL == level || toL == level {
-                    let side = fromL == level ? t.from : t.to
-                    let up = toL > fromL
-                    let onThisLevelGoing = (fromL == level) ? (up ? "▲" : "▼") : "•"
-                    connectorMark(ctx, fit.map(side), WalkConnector.color(t.kind), onThisLevelGoing)
-                }
+                guard fromL != toL, fromL == level || toL == level else { continue }
+                let here  = (fromL == level) ? t.from : t.to
+                let other = (fromL == level) ? toL : fromL
+                marks.append((fit.map(here), t.kind, other > level, other))
             }
+            drawTransitionMarks(ctx, marks)
 
-            // Endpoints if they sit on this level.
-            if scene.startLevel == level, let s = pts.first { endpoint(ctx, fit.map(s), Theme.go) }
-            if scene.endLevel == level, let e = pts.last { endpoint(ctx, fit.map(e), Theme.accent) }
+            // Which floor you're looking at (top-left, always on top).
+            drawChip(ctx, WalkScene.label(forLevel: level), center: CGPoint(x: 34, y: 18),
+                     textColor: Theme.ink2, fill: Theme.panel3, weight: .heavy)
         }
     }
 }
 
 // MARK: - 3D (draggable axonometric)
 
-/// An exploded-floor isometric view of the whole walk — the "3D" renderer, drawn
-/// straight from the same export (no WebView/SceneKit needed). Drag to rotate.
+/// An exploded-floor axonometric of the walk — the "3D" renderer, drawn straight
+/// from the same export (no WebView/SceneKit needed). Drag to rotate.
+///
+/// Like `core/viz/viz_render.py`, it draws only the walk: faint reference planes
+/// at the floors it uses, the route, and each floor-change as ONE riser coloured
+/// by the connector you take. It no longer projects the station's whole mapped
+/// web — those context stairs/escalators, each spanning two floors, exploded into
+/// a forest of near-vertical lines that buried the route.
 struct IsoGeometryCanvas: View {
     let scene: WalkScene
     @State private var rotation: Double = 0.5   // start slightly turned so it reads 3D
 
     var body: some View {
         Canvas { ctx, size in
-            let iso = IsoFit(scene: scene, size: size, angle: rotation, pad: 22)
+            let iso = IsoFit(scene: scene, size: size, angle: rotation, pad: 26)
 
-            // Ways, drawn low floors first so upper floors overlay.
-            let ways = scene.export.ways.sorted { wayLevel($0, scene) < wayLevel($1, scene) }
-            for way in ways where way.points.count >= 2 {
-                var p = Path()
-                p.move(to: iso.map(way.points[0]))
-                for pt in way.points.dropFirst() { p.addLine(to: iso.map(pt)) }
-                switch way.kind {
-                case "platform":
-                    ctx.stroke(p, with: .color(Theme.panel3), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                case "walkway":
-                    ctx.stroke(p, with: .color(Theme.ink3.opacity(0.28)), style: StrokeStyle(lineWidth: 1.5))
-                case "stairs", "escalator", "ramp", "elevator":
-                    ctx.stroke(p, with: .color(WalkConnector.color(way.kind).opacity(0.9)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                default:
-                    ctx.stroke(p, with: .color(Theme.line2), style: StrokeStyle(lineWidth: 1))
-                }
-            }
+            // Faint floor reference planes at the levels the walk uses, low → high
+            // so upper floors overlay — the vertical scaffold that makes the
+            // level-stack legible.
+            for lvl in scene.pathLevels { drawLevelPlane(ctx, level: lvl, scene: scene, iso: iso) }
 
             guard scene.found, scene.pathPoints.count >= 2 else {
                 if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
                 return
             }
 
-            // The route on top.
+            // The route.
             let pts = scene.pathPoints
             var route = Path()
             route.move(to: iso.map(pts[0]))
             for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
             ctx.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
 
+            // Each level change as one riser in its connector colour, over the
+            // route — so "which connector between floors" reads (the plain route is
+            // otherwise a single colour through a vertical move).
+            for t in scene.transitions {
+                var riser = Path(); riser.move(to: iso.map(t.from)); riser.addLine(to: iso.map(t.to))
+                ctx.stroke(riser, with: .color(WalkConnector.color(t.kind)),
+                           style: StrokeStyle(lineWidth: 5.5, lineCap: .round, lineJoin: .round))
+            }
+
             endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
             endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
+            ctx.drawGeoText("Pl \(scene.startRef)", .system(size: 10, weight: .bold, design: .monospaced),
+                            Theme.ink, at: CGPoint(x: iso.map(pts.first!).x, y: iso.map(pts.first!).y - 12), anchor: .center)
+            ctx.drawGeoText("Pl \(scene.endRef)", .system(size: 10, weight: .bold, design: .monospaced),
+                            Theme.ink, at: CGPoint(x: iso.map(pts.last!).x, y: iso.map(pts.last!).y - 12), anchor: .center)
         }
         .contentShape(Rectangle())
         .gesture(
@@ -405,7 +451,9 @@ private struct IsoFit {
         let lu = levelUnit
 
         // Pre-project the 8 bounding corners (XY box × level range) to find extents.
-        let loL = CGFloat(scene.levelsAsc.first ?? 0), hiL = CGFloat(scene.levelsAsc.last ?? 0)
+        // Range is the levels the walk actually visits — the only ones now drawn —
+        // so the floor stack fills the frame with no empty floors above/below.
+        let loL = CGFloat(scene.pathLevels.first ?? 0), hiL = CGFloat(scene.pathLevels.last ?? 0)
         var lo = CGPoint(x: CGFloat.greatestFiniteMagnitude, y: CGFloat.greatestFiniteMagnitude)
         var hi = CGPoint(x: -CGFloat.greatestFiniteMagnitude, y: -CGFloat.greatestFiniteMagnitude)
         for x in [scene.minX, scene.maxX] {
@@ -446,13 +494,84 @@ private struct IsoFit {
 
 // MARK: - Shared drawing helpers
 
-/// A way belongs to a level if any of its points sit on it (connectors span two,
-/// so they show on both floors they link).
-private func wayTouches(_ way: VizExport.Way, level: Int, scene: WalkScene) -> Bool {
-    way.points.contains { scene.level(of: $0.z) == level }
+/// A single platform slab (a `platform` way), faint — the "which slab am I on"
+/// orientation the plans keep. Fill-thick stroke + a hairline edge.
+private func drawPlatformSlab(_ ctx: GraphicsContext, _ way: VizExport.Way, _ fit: PlanFit) {
+    guard way.points.count >= 2 else { return }
+    var p = Path(); p.move(to: fit.map(way.points[0]))
+    for pt in way.points.dropFirst() { p.addLine(to: fit.map(pt)) }
+    ctx.stroke(p, with: .color(Theme.panel3), style: StrokeStyle(lineWidth: 11, lineCap: .round, lineJoin: .round))
+    ctx.stroke(p, with: .color(Theme.line), style: StrokeStyle(lineWidth: 1))
 }
-private func wayLevel(_ way: VizExport.Way, _ scene: WalkScene) -> Int {
-    way.points.map { scene.level(of: $0.z) }.min() ?? 0
+
+/// A faint labelled reference plane for one floor in the 3D view — the XY frame
+/// box drawn at that level's height, so the exploded stack reads. The floor label
+/// stacks up the left edge like numbers up a shaft.
+private func drawLevelPlane(_ ctx: GraphicsContext, level lvl: Int, scene: WalkScene, iso: IsoFit) {
+    let z = Float(CGFloat(lvl) * scene.floorHeight)
+    let corners = [
+        Point3(x: Float(scene.minX), y: Float(scene.minY), z: z),
+        Point3(x: Float(scene.maxX), y: Float(scene.minY), z: z),
+        Point3(x: Float(scene.maxX), y: Float(scene.maxY), z: z),
+        Point3(x: Float(scene.minX), y: Float(scene.maxY), z: z),
+    ].map { iso.map($0) }
+    var quad = Path(); quad.move(to: corners[0])
+    for c in corners.dropFirst() { quad.addLine(to: c) }
+    quad.closeSubpath()
+    ctx.fill(quad, with: .color(Theme.ink3.opacity(0.05)))
+    ctx.stroke(quad, with: .color(Theme.line), lineWidth: 1)
+    if let left = corners.min(by: { $0.x < $1.x }) {
+        ctx.drawGeoText(WalkScene.label(forLevel: lvl),
+                        .system(size: 10, weight: .bold, design: .monospaced),
+                        Theme.ink3, at: CGPoint(x: left.x - 6, y: left.y), anchor: .trailing)
+    }
+}
+
+/// Draw the level-change markers for a plan: a bold connector-coloured disc with
+/// an up/down chevron at each spot, then a label ("Escalator ↑ L+1") to its right,
+/// dodged downward so labels never overlap.
+private func drawTransitionMarks(_ ctx: GraphicsContext, _ marks: [(CGPoint, String, Bool, Int)]) {
+    let r: CGFloat = 12
+    for (p, kind, up, _) in marks {
+        ctx.fill(Path(ellipseIn: CGRect(x: p.x-r-2.5, y: p.y-r-2.5, width: 2*r+5, height: 2*r+5)), with: .color(Theme.paper))
+        ctx.fill(Path(ellipseIn: CGRect(x: p.x-r, y: p.y-r, width: 2*r, height: 2*r)), with: .color(WalkConnector.color(kind)))
+        ctx.stroke(Path(ellipseIn: CGRect(x: p.x-r, y: p.y-r, width: 2*r, height: 2*r)), with: .color(Theme.paper), lineWidth: 1.5)
+        ctx.drawGeoText(up ? "▲" : "▼", .system(size: 11, weight: .black), .white, at: p, anchor: .center)
+    }
+    var placed: [CGRect] = []
+    for (p, kind, up, other) in marks {
+        let text = "\(WalkConnector.label(kind)) \(up ? "↑" : "↓") \(WalkScene.label(forLevel: other))"
+        var resolved = ctx.resolve(Text(text).font(.system(size: 11, weight: .semibold)))
+        let ts = resolved.measure(in: CGSize(width: 500, height: 100))
+        var center = CGPoint(x: p.x + r + 8 + ts.width/2, y: p.y)
+        var rect = chipRect(center: center, textSize: ts)
+        var guardN = 0
+        while placed.contains(where: { $0.insetBy(dx: -2, dy: -2).intersects(rect) }) && guardN < 16 {
+            center.y += rect.height + 3
+            rect = chipRect(center: center, textSize: ts)
+            guardN += 1
+        }
+        placed.append(rect)
+        ctx.fill(Path(roundedRect: rect, cornerRadius: rect.height/2), with: .color(WalkConnector.color(kind)))
+        resolved.shading = .color(.white)
+        ctx.draw(resolved, at: center, anchor: .center)
+    }
+}
+
+private func chipRect(center: CGPoint, textSize ts: CGSize, padX: CGFloat = 6, padY: CGFloat = 3) -> CGRect {
+    CGRect(x: center.x - ts.width/2 - padX, y: center.y - ts.height/2 - padY,
+           width: ts.width + 2*padX, height: ts.height + 2*padY)
+}
+
+/// A small rounded label chip centred at `center` (endpoint refs, the floor tag).
+private func drawChip(_ ctx: GraphicsContext, _ text: String, center: CGPoint,
+                      textColor: Color, fill: Color, weight: Font.Weight = .semibold) {
+    var resolved = ctx.resolve(Text(text).font(.system(size: 11, weight: weight, design: .monospaced)))
+    let ts = resolved.measure(in: CGSize(width: 500, height: 100))
+    let rect = chipRect(center: center, textSize: ts)
+    ctx.fill(Path(roundedRect: rect, cornerRadius: rect.height/2), with: .color(fill))
+    resolved.shading = .color(textColor)
+    ctx.draw(resolved, at: center, anchor: .center)
 }
 
 private func riserKey(_ a: Point3, _ b: Point3) -> String {
@@ -472,12 +591,6 @@ private func endpoint(_ ctx: GraphicsContext, _ p: CGPoint, _ c: Color, r: CGFlo
     ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)), with: .color(c))
     ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)),
                with: .color(Theme.paper), lineWidth: 1.5)
-}
-
-private func connectorMark(_ ctx: GraphicsContext, _ p: CGPoint, _ c: Color, _ glyph: String) {
-    let r: CGFloat = 8
-    ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)), with: .color(c))
-    ctx.drawGeoText(glyph, .system(size: 9, weight: .bold), .white, at: p, anchor: .center)
 }
 
 private func drawUnavailable(_ ctx: GraphicsContext, _ size: CGSize, _ text: String) {
