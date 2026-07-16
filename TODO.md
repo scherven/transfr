@@ -238,8 +238,10 @@ The spine is done — this is a punch-list, not a teardown:
 
 ## UI polish
 
-- **Loading screen** — the `t` from the favicon expands; the red dot writes out the
-  rest of "transfr".
+- ~~**Loading screen** — the `t` from the favicon expands; the red dot writes out the
+  rest of "transfr".~~ — **done** (SwiftUI `LaunchView.swift`: camera dolly off the
+  favicon `t` → wordmark, red pen writes "ransfr", end pose = the main-screen
+  wordmark; plays once on cold launch then reveals InputView; respects reduced motion).
 - **Main screen wordmark** — put a green dot on top of the `t` and a red dot at the
   end of the `r`.
 - **"Recent" as its own section** (or surfaced per-section).
