@@ -55,9 +55,9 @@ struct InputView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                Text("transfr")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(Theme.accent)   // the launch mark's end colour
+                // The brand wordmark — the SAME mark the launch animation lands, so
+                // the fly-up hand-off is pixel-identical. Its frame is the fly target.
+                Wordmark(height: 40)
                     .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
                     .padding(.top, 4)
 

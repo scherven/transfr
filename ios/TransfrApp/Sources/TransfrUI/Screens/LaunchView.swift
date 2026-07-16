@@ -435,3 +435,24 @@ struct WordmarkAnchorKey: PreferenceKey {
         value = value ?? nextValue()
     }
 }
+
+/// The brand wordmark as a title: the launch mark's END POSE (blue, green dot on
+/// the t, red dot on the r), rendered tightly into its own bounds. It is the very
+/// same `LaunchMark` the launch animation lands (`t == flyEnd` ⇒ fully written and
+/// "landed" onto its frame), so when the flying mark settles onto this view the
+/// hand-off is pixel-identical — same letterforms, stroke width, and dots — and the
+/// crossfade shows no seam. Sized by `height`; width follows the mark's aspect.
+struct Wordmark: View {
+    var height: CGFloat = 40
+    private var aspect: CGFloat {
+        LaunchGeometry.wordmarkStageBounds.width / LaunchGeometry.wordmarkStageBounds.height
+    }
+    var body: some View {
+        GeometryReader { geo in
+            LaunchMark(t: LaunchPhase.flyEnd, targetRect: CGRect(origin: .zero, size: geo.size))
+        }
+        .frame(width: height * aspect, height: height)
+        .accessibilityElement()
+        .accessibilityLabel("transfr")
+    }
+}
