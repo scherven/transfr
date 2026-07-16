@@ -311,19 +311,30 @@ struct PlanGeometryCanvas: View {
 
 // MARK: - 3D (draggable axonometric)
 
-/// An exploded-floor isometric view of the whole walk — the "3D" renderer, drawn
-/// straight from the same export (no WebView/SceneKit needed). Drag to rotate.
+/// The interactive exploded-floor 3D of a station — drag to rotate, pinch or the
+/// +/− buttons to zoom. Platforms are labelled and lifted to their real floor and
+/// level tabs run down the left edge. Default (walk) mode draws the route and only
+/// the connectors the walk uses; `browse` mode (the station map) shows every
+/// connector and no route. One renderer, used by the walk views and the map.
 struct IsoGeometryCanvas: View {
     let scene: WalkScene
-    @State private var rotation: Double = 0.5   // start slightly turned so it reads 3D
+    var browse: Bool = false
+    @State private var yaw: Double = 0.5
+    @GestureState private var dragYaw: Double = 0
+    @State private var zoom: CGFloat = 1
+    @GestureState private var pinch: CGFloat = 1
 
     var body: some View {
+        let liveYaw = yaw + dragYaw
+        let liveZoom = min(max(zoom * pinch, 0.6), 6)
         Canvas { ctx, size in
-            let iso = IsoFit(scene: scene, size: size, angle: rotation, pad: 22)
+            let iso = IsoFit(scene: scene, size: size, angle: liveYaw, zoom: liveZoom, pad: 24)
+            drawLevelTabs(ctx, iso)
 
             // Ways, drawn low floors first so upper floors overlay.
             let ways = scene.export.ways.sorted { wayLevel($0, scene) < wayLevel($1, scene) }
-            for way in ways where way.points.count >= 2 && way.walkRelevant != false {
+            for way in ways where way.points.count >= 2 {
+                if !browse && way.walkRelevant == false { continue }   // walk view: only the connectors it uses
                 var p = Path()
                 p.move(to: iso.map(way.points[0]))
                 for pt in way.points.dropFirst() { p.addLine(to: iso.map(pt)) }
@@ -353,30 +364,68 @@ struct IsoGeometryCanvas: View {
                 platformTag(ctx, iso.map(c), ref)
             }
 
+            // Route + its level changes (walk mode only; browse shows the station).
+            guard !browse else { return }
             guard scene.found, scene.pathPoints.count >= 2 else {
                 if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
                 return
             }
-
-            // The route on top.
             let pts = scene.pathPoints
             var route = Path()
             route.move(to: iso.map(pts[0]))
             for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
             ctx.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
-
+            for t in scene.transitions {   // colour each stair / escalator / lift riser on the path
+                var r = Path(); r.move(to: iso.map(t.from)); r.addLine(to: iso.map(t.to))
+                ctx.stroke(r, with: .color(WalkConnector.color(t.kind)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+            }
             endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
             endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
         }
         .contentShape(Rectangle())
         .gesture(
             DragGesture(minimumDistance: 0)
-                .onChanged { rotation = $0.translation.width / 90 }
+                .updating($dragYaw) { v, s, _ in s = v.translation.width / 90 }
+                .onEnded { yaw += $0.translation.width / 90 }
+        )
+        .simultaneousGesture(
+            MagnificationGesture()
+                .updating($pinch) { v, s, _ in s = v }
+                .onEnded { zoom = min(max(zoom * $0, 0.6), 6) }
         )
         .overlay(alignment: .bottomTrailing) {
-            Label("drag to rotate", systemImage: "hand.draw")
-                .font(.system(size: 10)).foregroundStyle(Theme.ink3)
-                .padding(6)
+            VStack(spacing: 6) {
+                zoomButton("plus") { zoom = min(zoom * 1.3, 6) }
+                zoomButton("minus") { zoom = max(zoom / 1.3, 0.6) }
+            }.padding(8)
+        }
+        .overlay(alignment: .bottomLeading) {
+            Label("drag · rotate    pinch · zoom", systemImage: "hand.draw")
+                .font(.system(size: 10)).foregroundStyle(Theme.ink3).padding(6)
+        }
+    }
+
+    private func zoomButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+                .frame(width: 30, height: 30)
+                .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
+                .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.line, lineWidth: 1))
+        }
+        .foregroundStyle(Theme.ink2).buttonStyle(.plain)
+    }
+
+    /// Level reference tabs down the left edge (L+2 … L−2), each at its floor's
+    /// projected height so you can read which band is which.
+    private func drawLevelTabs(_ ctx: GraphicsContext, _ iso: IsoFit) {
+        for lvl in scene.levelsAsc {
+            let ref = iso.map(Point3(x: Float(scene.minX),
+                                     y: Float((scene.minY + scene.maxY) / 2),
+                                     z: Float(CGFloat(lvl) * scene.floorHeight)))
+            var t = ctx.resolve(Text(WalkScene.label(forLevel: lvl))
+                .font(.system(size: 9, weight: .bold, design: .monospaced)))
+            t.shading = .color(Theme.ink3)
+            ctx.draw(t, at: CGPoint(x: 12, y: ref.y), anchor: .leading)
         }
     }
 }
@@ -406,16 +455,17 @@ private struct PlanFit {
 /// each level is lifted by a fixed screen gap. The fit is computed from the world
 /// box corners at the extreme levels, so nothing clips at any rotation.
 private struct IsoFit {
-    let cx: CGFloat, cy: CGFloat, norm: CGFloat, angle: Double, floorHeight: CGFloat
-    let scale: CGFloat, offX: CGFloat, offY: CGFloat, ix0: CGFloat, iy0: CGFloat
+    let angle: Double
+    let cx: CGFloat, cy: CGFloat, norm: CGFloat, floorHeight: CGFloat
+    let scale: CGFloat, scx: CGFloat, scy: CGFloat, qcx: CGFloat, qcy: CGFloat
     let levelUnit: CGFloat = 20
 
-    init(scene: WalkScene, size: CGSize, angle: Double, pad: CGFloat) {
+    init(scene: WalkScene, size: CGSize, angle: Double, zoom: CGFloat, pad: CGFloat) {
+        self.angle = angle
         cx = (scene.minX + scene.maxX) / 2
         cy = (scene.minY + scene.maxY) / 2
         let diag = max((scene.maxX - scene.minX).magnitude, (scene.maxY - scene.minY).magnitude)
         norm = 100 / max(diag, 0.001)
-        self.angle = angle
         floorHeight = scene.floorHeight
         let lu = levelUnit
 
@@ -432,11 +482,13 @@ private struct IsoFit {
                 }
             }
         }
+        // Fit the whole box, then zoom about the centre (the iso projection is
+        // affine, so the box centre projects to the centre of the projected box).
         let spanX = max(hi.x - lo.x, 0.001), spanY = max(hi.y - lo.y, 0.001)
-        scale = min((size.width - 2*pad) / spanX, (size.height - 2*pad) / spanY)
-        offX = pad + ((size.width - 2*pad) - spanX*scale) / 2
-        offY = pad + ((size.height - 2*pad) - spanY*scale) / 2
-        ix0 = lo.x; iy0 = lo.y
+        scale = min((size.width - 2*pad) / spanX, (size.height - 2*pad) / spanY) * zoom
+        scx = size.width / 2; scy = size.height / 2
+        let qc = Self.project(x: cx, y: cy, level: (loL + hiL) / 2, cx: cx, cy: cy, norm: norm, angle: angle, levelUnit: lu)
+        qcx = qc.x; qcy = qc.y
     }
 
     /// Rotate normalised XY, iso-project, and lift by level. Returns pre-fit coords.
@@ -455,7 +507,7 @@ private struct IsoFit {
         let level = (CGFloat(p.z) / floorHeight)
         let q = Self.project(x: CGFloat(p.x), y: CGFloat(p.y), level: level,
                              cx: cx, cy: cy, norm: norm, angle: angle, levelUnit: levelUnit)
-        return CGPoint(x: offX + (q.x - ix0) * scale, y: offY + (q.y - iy0) * scale)
+        return CGPoint(x: scx + (q.x - qcx) * scale, y: scy + (q.y - qcy) * scale)
     }
 }
 
