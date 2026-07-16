@@ -141,6 +141,42 @@ class StationPlatformsResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class StationWalkRow(BaseModel):
+    """One destination platform's walk FROM the chosen source platform (a row of
+    the /station-walk 'full station walk' tool). `found=False` (with `reason`) is
+    an honest 'these two don't connect' -- core/'s own reason
+    (platform_not_found / disconnected / exceeded_plausibility_bound) -- not an
+    error, so it renders as an unreachable row rather than failing the request."""
+
+    to_platform: str
+    found: bool
+    walk_time_s: Optional[float] = None
+    walk_distance_m: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class StationWalkResponse(BaseModel):
+    """Every OTHER platform's walk FROM one source platform at the station nearest
+    a coordinate -- the 'full station walk' advanced tool (one change of station,
+    not a journey). One find_shortest_path per platform, using the SAME settings a
+    transfer verdict uses (astar + stitch bridges per config), so a row's walk time
+    equals what a `/walk` between the same two refs would report. `results` is
+    sorted nearest-first: reachable rows by ascending walk distance, then the
+    unreachable ones. `found=False` at the top level (with `reason`) when no
+    station sits near the coordinate; individual unreachable platforms are
+    `found=False` rows inside a `found=True` response."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    from_platform: str
+    step_free: bool = False
+    found: bool
+    results: List[StationWalkRow] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
 class StationHealthPair(BaseModel):
     """One platform pair that does not plainly connect. `kind` is 'stitchable'
     (a route exists only once synthetic stitch bridges are enabled) or 'island'

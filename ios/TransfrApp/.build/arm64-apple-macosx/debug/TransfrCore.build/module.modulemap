@@ -1,4 +1,4 @@
 module TransfrCore {
-    header "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrCore.build/TransfrCore-Swift.h"
+    header "/private/tmp/claude-501/-Users-simonchervenak-Documents-GitHub-transfr/4c697f26-fb6a-4253-8cfb-c9b810ff4395/scratchpad/merge-work/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrCore.build/TransfrCore-Swift.h"
     requires objc
 }

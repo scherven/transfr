@@ -162,6 +162,58 @@ public struct StationPlatformsResponse: Codable, Sendable {
     }
 }
 
+// MARK: - Full station walk (/station-walk) — mirrors api/schemas.py
+
+/// One destination platform's walk FROM the chosen source platform — a row of the
+/// "full station walk" tool. `found == false` (with `reason`, one of core/'s own:
+/// `platform_not_found` / `disconnected` / `exceeded_plausibility_bound`) is an
+/// honest "these two don't connect", rendered as an unreachable row — never an
+/// error.
+public struct StationWalkRow: Codable, Hashable, Sendable, Identifiable {
+    public var toPlatform: String
+    public var found: Bool
+    public var walkTimeS: Double?
+    public var walkDistanceM: Double?
+    public var reason: String?
+
+    /// The destination ref is unique within one response, so it is a stable id.
+    public var id: String { toPlatform }
+
+    public init(toPlatform: String, found: Bool, walkTimeS: Double? = nil,
+                walkDistanceM: Double? = nil, reason: String? = nil) {
+        self.toPlatform = toPlatform; self.found = found
+        self.walkTimeS = walkTimeS; self.walkDistanceM = walkDistanceM; self.reason = reason
+    }
+}
+
+/// Every OTHER platform's walk FROM one source platform at the station nearest a
+/// coordinate — the "full station walk" advanced tool (mirrors
+/// `api/schemas.StationWalkResponse`). One pathfind per platform, `results` sorted
+/// nearest-first (reachable by ascending walk distance, then the unreachable ones).
+/// `found == false` (with `reason`) at the top level when no station sits near the
+/// coordinate; individual unreachable platforms are `found == false` *rows* inside
+/// a `found == true` response. `relationId` is the id a subsequent `/walk` between
+/// the source and a chosen row uses, so a tapped row resolves the same station.
+public struct StationWalkResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var relationId: Int?
+    public var station: String?
+    public var fromPlatform: String
+    public var stepFree: Bool
+    public var found: Bool
+    public var results: [StationWalkRow]
+    public var reason: String?
+
+    public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
+                fromPlatform: String, stepFree: Bool = false, found: Bool,
+                results: [StationWalkRow] = [], reason: String? = nil) {
+        self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
+        self.fromPlatform = fromPlatform; self.stepFree = stepFree; self.found = found
+        self.results = results; self.reason = reason
+    }
+}
+
 // MARK: - Nearest facility (/facilities) — mirrors api/schemas.py
 
 /// One mapped facility (a POI) near a station, ranked by straight-line distance

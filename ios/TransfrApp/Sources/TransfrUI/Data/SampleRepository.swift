@@ -57,6 +57,25 @@ public struct SampleRepository: JourneyRepository {
                                         found: true, platforms: refs)
     }
 
+    public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+        try? await Task.sleep(for: .milliseconds(180))
+        // Reuse the same nearest-seed platform set the walk-only door uses, then
+        // synthesize a plausible nearest-first walk to each OTHER platform so the
+        // tool populates offline. relationId 0 marks the sample tier (no real
+        // geometry), so a tapped row's WalkLookup falls back to its schematic —
+        // exactly like platforms(...) / walk(for:).
+        let p = try await platforms(lat: lat, lon: lon)
+        let others = p.platforms.filter { $0 != fromPlatform }
+        let rows = others.enumerated().map { i, ref in
+            StationWalkRow(toPlatform: ref, found: true,
+                           walkTimeS: Double(20 + i * 14),
+                           walkDistanceM: Double(15 + i * 18))
+        }
+        return StationWalkResponse(lat: lat, lon: lon, relationId: 0, station: p.station,
+                                   fromPlatform: fromPlatform, stepFree: stepFree,
+                                   found: p.found, results: rows)
+    }
+
     public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
         try? await Task.sleep(for: .milliseconds(160))
         // No DB offline, so synthesize a plausible, mostly-connected breakdown from

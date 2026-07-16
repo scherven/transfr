@@ -9,12 +9,12 @@
         "packageRef" : {
           "identity" : "transfrcore",
           "kind" : "fileSystem",
-          "location" : "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrCore",
+          "location" : "/private/tmp/claude-501/-Users-simonchervenak-Documents-GitHub-transfr/4c697f26-fb6a-4253-8cfb-c9b810ff4395/scratchpad/merge-work/ios/TransfrCore",
           "name" : "TransfrCore"
         },
         "state" : {
           "name" : "fileSystem",
-          "path" : "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrCore"
+          "path" : "/private/tmp/claude-501/-Users-simonchervenak-Documents-GitHub-transfr/4c697f26-fb6a-4253-8cfb-c9b810ff4395/scratchpad/merge-work/ios/TransfrCore"
         },
         "subpath" : "transfrcore"
       }

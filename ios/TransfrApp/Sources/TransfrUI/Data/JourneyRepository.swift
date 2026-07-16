@@ -29,6 +29,11 @@ public protocol JourneyRepository: Sendable {
     /// pickers adapt to the entered station.
     func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse
 
+    /// Every platform's walk FROM one source platform at the station nearest a
+    /// coordinate — the "full station walk" Advanced tool (§6.10). One pathfind per
+    /// platform, sorted nearest-first.
+    func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse
+
     /// Facilities (POIs) of a category near the station nearest a coordinate,
     /// nearest first. May be `found == false` with a typed `reason` when the POI
     /// layer isn't available for that station — the view shows that honestly.
@@ -79,6 +84,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
         try await client.stationPlatforms(lat: lat, lon: lon)
+    }
+
+    public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+        try await client.stationWalk(lat: lat, lon: lon, fromPlatform: fromPlatform, stepFree: stepFree)
     }
 
     public func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
