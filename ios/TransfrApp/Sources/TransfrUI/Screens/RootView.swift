@@ -32,6 +32,7 @@ public struct RootView: View {
                     case .settings:             SettingsView()
                     case .attributions:         AttributionsView()
                     case .advanced:             AdvancedView()
+                    case .stationMap:           StationMapView()
                     case .stationWalk:          StationWalkView()
                     case .nearestFacility:      NearestFacilityView()
                     case .mapHealth:            MapHealthView()

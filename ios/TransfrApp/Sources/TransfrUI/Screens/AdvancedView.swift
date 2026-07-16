@@ -8,6 +8,9 @@ struct AdvancedView: View {
         ScrollView {
             VStack(spacing: 0) {
                 SectionHeader(text: "This station")
+                NavRow(icon: "rotate.3d", title: "Station map (3D)",
+                       subtitle: "Rotate & zoom any station — platforms, stairs, escalators, lifts",
+                       route: .stationMap).padding(.bottom, 8)
                 NavRow(icon: "chart.line.uptrend.xyaxis", title: "Full station walk",
                        subtitle: "Distance & time from one platform to every other",
                        route: .stationWalk).padding(.bottom, 8)

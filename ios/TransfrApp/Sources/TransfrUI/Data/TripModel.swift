@@ -356,6 +356,7 @@ public enum Route: Hashable {
     case attributions
     // Advanced hub (§6.10)
     case advanced
+    case stationMap
     case stationWalk
     case nearestFacility
     case mapHealth
