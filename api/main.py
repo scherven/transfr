@@ -14,6 +14,9 @@ Endpoints:
   GET  /station-platforms?lat=&lon=              the platforms (+ relation_id) at the
                                                  station nearest a coordinate; powers
                                                  the walk-only door's platform pickers
+  GET  /station-health?lat=&lon=                 one station's platform-connectivity
+                                                 breakdown (connected/stitchable/island
+                                                 over every pair); the Map-health tool
   GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
                                                  one transfer's drawable walk geometry
                                                  (viz_export); cacheable
@@ -42,6 +45,7 @@ from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
+from api.station_health import build_station_health
 from api.transfers import STATION_UNRESOLVED
 from api.walks import build_walk, build_walks
 
@@ -187,6 +191,17 @@ def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
         lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
         found=True, platforms=refs,
     )
+
+
+@app.get("/station-health", response_model=schemas.StationHealthResponse, dependencies=_PROTECTED)
+def get_station_health(lat: float, lon: float, conn=Depends(get_conn)):
+    """One station's platform-connectivity breakdown for the Map-health tool: the
+    station nearest (lat, lon), with every unordered platform pair bucketed
+    connected / stitchable / island (two find_shortest_path passes each -- plain,
+    then with stitch bridges). A very large station is sampled to bound the pair
+    count (see api/station_health.py); `found=False` when nothing resolves near
+    the coordinate."""
+    return build_station_health(conn, lat, lon)
 
 
 @app.get("/walk", response_model=schemas.WalkResult, dependencies=_PROTECTED)

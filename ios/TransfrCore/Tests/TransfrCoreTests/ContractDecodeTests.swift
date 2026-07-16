@@ -103,4 +103,25 @@ struct ContractDecodeTests {
         #expect(sp.platforms.count == 14)
         #expect(sp.platforms.first == "1" && sp.platforms.last == "16")
     }
+
+    // MARK: - /station-health contract (the Map-health per-station query)
+
+    @Test func decodesStationHealth() throws {
+        let data = try Self.fixture("station_health_berlin")
+        let h = try TransfrJSON.decode(StationHealthResponse.self, from: data)
+        #expect(h.found)
+        #expect(h.station == "Berlin, S Hauptbahnhof")
+        #expect(h.platformCount == 14)
+        // snake_case platform_count / connected_pct → camelCase; the three buckets
+        // sum to the evaluated pairs.
+        #expect(h.connected == 89 && h.stitchable == 1 && h.island == 1)
+        #expect(h.pairCount == 91)
+        #expect(h.connectedPct == 97.8)
+        #expect(!h.sampled)
+        // The example pairs carry their kind, stitchable first.
+        #expect(h.examples.count == 2)
+        #expect(h.examples[0].kind == "stitchable")
+        #expect(h.examples[0].fromPlatform == "9" && h.examples[0].toPlatform == "12")
+        #expect(h.examples[1].kind == "island")
+    }
 }
