@@ -6,12 +6,8 @@ import TransfrCore
 /// jumps into the carousel at that change.
 struct JourneyView: View {
     @Environment(TripModel.self) private var model
-    @Environment(SettingsStore.self) private var settings
 
     private var journey: Journey? { model.selected }
-
-    /// Re-seeds the prefetch when the journey or the step-free variant changes.
-    private var prefetchKey: String { "\(journey?.id ?? "")|\(settings.stepFree)" }
 
     var body: some View {
         ScrollView {
@@ -21,7 +17,6 @@ struct JourneyView: View {
                         .frame(height: 200)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.line, lineWidth: 1))
-                    walkPrefetchStrip
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(rows(for: journey)) { row in
                             TimelineRow(row: row)
@@ -38,38 +33,6 @@ struct JourneyView: View {
             ToolbarItem(placement: .principal) { principal }
         }
         .safeAreaInset(edge: .bottom) { bottomBar }
-        // The journey screen showing is the cue to start streaming its walks in.
-        // prefetchWalks is idempotent and lives on the model, so this only kicks
-        // off real work once per journey+variant and keeps running as the user
-        // navigates deeper.
-        .task(id: prefetchKey) { model.prefetchWalks(stepFree: settings.stepFree) }
-    }
-
-    /// A slim, self-dismissing strip that shows the walks streaming in once the
-    /// timeline appears — the visible half of the progressive load. Gone the
-    /// moment every transfer has settled (the fast, common case blinks past).
-    @ViewBuilder
-    private var walkPrefetchStrip: some View {
-        let p = model.walkPrefetch
-        if p.total > 0 && !p.isComplete {
-            HStack(spacing: 10) {
-                ProgressView().controlSize(.small)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Preparing your walks")
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
-                    ProgressView(value: Double(p.settled), total: Double(max(p.total, 1)))
-                        .tint(Theme.accent)
-                }
-                Text("\(p.settled)/\(p.total)")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                    .foregroundStyle(Theme.ink3)
-            }
-            .padding(12)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.panel))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
-            .transition(.opacity.combined(with: .move(edge: .top)))
-            .animation(.snappy, value: p)
-        }
     }
 
     private var principal: some View {
@@ -92,7 +55,7 @@ struct JourneyView: View {
             .buttonStyle(GhostButtonStyle())
 
             Button {
-                model.openTransfers(startIndex: 0)
+                model.path.append(.carousel(startIndex: 0))
             } label: {
                 Label("Transfers (\(model.transfers.count))", systemImage: "figure.walk")
             }
@@ -233,7 +196,7 @@ private struct TimelineRow: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(row.station ?? "—").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.ink)
                 if let t = row.transfer, let idx = row.transferIndex {
-                    TransferCard(transfer: t) { model.openTransfers(startIndex: idx) }
+                    TransferCard(transfer: t) { model.path.append(.carousel(startIndex: idx)) }
                 }
             }
         }
@@ -302,6 +265,7 @@ struct TransferCard: View {
         case .tight:      return "Tight — move promptly"
         case .infeasible: return "Very likely to miss"
         case .unknown:    return "No platform data here"
+        case .pending:    return "Checking this transfer…"
         }
     }
 

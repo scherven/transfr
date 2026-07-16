@@ -12,10 +12,25 @@ public struct SampleRepository: JourneyRepository {
         self.latency = latency
     }
 
-    public func journeys(from: String, to: String, when: Date?) async throws -> JourneysResponse {
+    public func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
         try? await Task.sleep(for: latency)
         let data = try Self.bundled("sample_journeys")
+        // `assess` is ignored: the offline tier is instant and its verdicts are
+        // baked into the bundle, so there's nothing to defer and stream. The
+        // journeys come back already assessed, so plan() finds no pending
+        // transfers and skips the streaming path entirely.
         return try TransfrJSON.decode(JourneysResponse.self, from: data)
+    }
+
+    public func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] {
+        // The offline tier can't pathfind; echo each interchange as unknown. Not
+        // reached in the normal flow (journeys() already returns assessed sample
+        // data), but kept honest for the contract.
+        interchanges.map {
+            Transfer(atStation: $0.atStation, arrivalPlatform: $0.arrPlatform,
+                     departurePlatform: $0.depPlatform, verdict: "unknown",
+                     reason: "sample_no_assessment")
+        }
     }
 
     public func stations(query: String) async throws -> [StationSuggestion] {

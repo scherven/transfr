@@ -9,20 +9,23 @@ the transfer assessment stubbed -- no network, no DB.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from api import schemas
+from api.bridge import map_track_to_ref
 from api.transfers import (
     DEFAULT_ALGORITHM, DEFAULT_BUFFER_S,
-    FEASIBLE, INFEASIBLE, TIGHT, UNKNOWN,
-    assess_transfer,
+    FEASIBLE, INFEASIBLE, PENDING, TIGHT, UNKNOWN,
+    TransferAssessment, assess_transfer, layover_seconds,
 )
 from api.transitous import interchanges, search, transit_legs
 
 # Journey-level rollup: the worst transfer wins. A definite infeasible dominates
 # an unknown (a broken leg breaks the trip regardless of the unknowns); unknown
 # dominates tight/feasible (we can't promise a trip with an unassessable change).
-_VERDICT_RANK = {INFEASIBLE: 0, UNKNOWN: 1, TIGHT: 2, FEASIBLE: 3}
+# `pending` sinks below all of them: a journey with any not-yet-assessed transfer
+# reads as pending until its verdicts stream in (see enrich `assess=False`).
+_VERDICT_RANK = {PENDING: -1, INFEASIBLE: 0, UNKNOWN: 1, TIGHT: 2, FEASIBLE: 3}
 
 
 def rollup_verdict(verdicts: List[str]) -> str:
@@ -60,6 +63,22 @@ def _leg(d: Dict[str, Any]) -> schemas.Leg:
     )
 
 
+def _transfer(a: TransferAssessment, fallback_station: Optional[str]) -> schemas.Transfer:
+    """Shape a TransferAssessment into the wire Transfer (shared by `/journeys`
+    enrichment and the `/assess` streaming endpoint)."""
+    return schemas.Transfer(
+        at_station=a.station_name or fallback_station,
+        relation_id=a.relation_id,
+        arrival_platform=a.arrival_platform,
+        departure_platform=a.departure_platform,
+        layover_s=a.layover_s,
+        walk_time_s=a.walk_time_s,
+        walk_distance_m=a.walk_distance_m,
+        verdict=a.verdict,
+        reason=a.reason,
+    )
+
+
 def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
             buffer_s: float, algorithm: str,
             resolve_cache: Dict[Any, Any] = None) -> schemas.Transfer:
@@ -72,32 +91,47 @@ def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
         dep_platform=depart.get("departure_platform"), dep_time=depart.get("departure"),
         buffer_s=buffer_s, algorithm=algorithm, resolve_cache=resolve_cache,
     )
+    return _transfer(a, arr.get("name"))
+
+
+def _pending_transfer(arrive: Dict[str, Any], depart: Dict[str, Any]) -> schemas.Transfer:
+    """The un-assessed placeholder for a change of train: everything the client
+    needs to render the row and later request its verdict (station, mapped
+    platforms, layover) but no walk/verdict -- computed with no DB, so
+    `/journeys?assess=false` returns instantly."""
+    arr, dep = arrive.get("destination") or {}, depart.get("origin") or {}
     return schemas.Transfer(
-        at_station=a.station_name or arr.get("name"),
-        relation_id=a.relation_id,
-        arrival_platform=a.arrival_platform,
-        departure_platform=a.departure_platform,
-        layover_s=a.layover_s,
-        walk_time_s=a.walk_time_s,
-        walk_distance_m=a.walk_distance_m,
-        verdict=a.verdict,
-        reason=a.reason,
+        at_station=arr.get("name"),
+        relation_id=None,
+        arrival_platform=map_track_to_ref(arrive.get("arrival_platform")),
+        departure_platform=map_track_to_ref(depart.get("departure_platform")),
+        layover_s=layover_seconds(arrive.get("arrival"), depart.get("departure")),
+        walk_time_s=None, walk_distance_m=None,
+        verdict=PENDING, reason=None,
     )
 
 
 def enrich(conn, search_result: Dict[str, Any], *,
            buffer_s: float = DEFAULT_BUFFER_S,
-           algorithm: str = DEFAULT_ALGORITHM) -> schemas.JourneysResponse:
+           algorithm: str = DEFAULT_ALGORITHM,
+           assess: bool = True) -> schemas.JourneysResponse:
+    """Build the typed journeys response. With `assess=True` every change of train
+    is walk-assessed (the full product path). With `assess=False` the transfers
+    come back `pending` -- no DB, no pathfinding -- so the itinerary list renders
+    instantly and the client streams the verdicts in afterwards via `/assess`."""
     journeys_out: List[schemas.Journey] = []
     # One change of train (same station + platforms) commonly recurs across a
     # search's journeys; its walk is clock-independent, so pathfind it once and
     # reuse across every itinerary in this response.
     resolve_cache: Dict[Any, Any] = {}
     for j in search_result.get("journeys", []):
-        transfers = [
-            _assess(conn, arrive, depart, buffer_s, algorithm, resolve_cache)
-            for arrive, depart in interchanges(j)
-        ]
+        if assess:
+            transfers = [
+                _assess(conn, arrive, depart, buffer_s, algorithm, resolve_cache)
+                for arrive, depart in interchanges(j)
+            ]
+        else:
+            transfers = [_pending_transfer(arrive, depart) for arrive, depart in interchanges(j)]
         n_changes = j.get("num_changes")
         if n_changes is None:
             n_changes = max(0, len(transit_legs(j)) - 1)
@@ -116,6 +150,28 @@ def enrich(conn, search_result: Dict[str, Any], *,
         departure_time=search_result.get("departure_time"),
         journeys=journeys_out,
     )
+
+
+def assess_interchanges(conn, interchanges_in: List["schemas.AssessInterchange"], *,
+                        buffer_s: float = DEFAULT_BUFFER_S,
+                        algorithm: str = DEFAULT_ALGORITHM) -> schemas.AssessResponse:
+    """Assess a batch of already-searched changes of train (the `/assess`
+    endpoint): the same per-transfer work `enrich` does, but keyed on the
+    interchange fields the client already holds, so verdicts can stream in behind
+    a fast `/journeys?assess=false`. Shares one resolve cache across the batch."""
+    resolve_cache: Dict[Any, Any] = {}
+    out: List[schemas.Transfer] = []
+    for ic in interchanges_in:
+        a = assess_transfer(
+            conn,
+            arr_lat=ic.arr_lat, arr_lon=ic.arr_lon,
+            arr_platform=ic.arr_platform, arr_time=ic.arr_time,
+            dep_lat=ic.dep_lat, dep_lon=ic.dep_lon,
+            dep_platform=ic.dep_platform, dep_time=ic.dep_time,
+            buffer_s=buffer_s, algorithm=algorithm, resolve_cache=resolve_cache,
+        )
+        out.append(_transfer(a, ic.at_station))
+    return schemas.AssessResponse(transfers=out)
 
 
 def plan_journeys(conn, origin: str, destination: str, when: datetime,

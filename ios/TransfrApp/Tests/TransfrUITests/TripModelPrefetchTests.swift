@@ -2,50 +2,65 @@ import XCTest
 import TransfrCore
 @testable import TransfrUI
 
-/// The progressive walk load: once a journey is chosen, its transfers' geometry
-/// streams into the cache behind the timeline, and the transition screen / walk
-/// screens read it back instantly. These tests drive `TripModel` with a stub
-/// repository (a controllable delay + a call counter) and assert the streaming,
-/// the cache reuse, and the transition-screen routing — no server, no UI.
-final class TripModelPrefetchTests: XCTestCase {
+/// The progressive load: `/journeys?assess=false` returns the itineraries
+/// instantly with `pending` transfers, then each real verdict streams in via
+/// `/assess` and updates `response` in place. These drive `TripModel` with a stub
+/// repository (pending journeys + a delayed, counted `assess`) and assert the
+/// streaming, the live update of the selected journey, and the transition routing.
+final class TripModelStreamingTests: XCTestCase {
 
-    /// A repository whose `walk` resolves after a set delay and counts its calls,
-    /// so we can prove the prefetch fetches each walk once and `walk(for:)` then
-    /// serves the cache. An actor so the counter is safe across concurrent fetches.
+    /// Returns a fixed journeys response with `pending` transfers, and an `assess`
+    /// that (after an optional delay) marks each interchange `feasible`. Counts
+    /// assess calls so we can prove one fires per transfer.
     actor StubRepo: JourneyRepository {
-        let delayNs: UInt64
-        private(set) var walkCalls = 0
-        init(delayNs: UInt64) { self.delayNs = delayNs }
+        let assessDelayNs: UInt64
+        private(set) var assessCalls = 0
+        init(assessDelayNs: UInt64 = 0) { self.assessDelayNs = assessDelayNs }
 
-        func walk(for key: WalkKey) async throws -> WalkResult {
-            walkCalls += 1
-            if delayNs > 0 { try? await Task.sleep(nanoseconds: delayNs) }
-            return WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
-                              toPlatform: key.toPlatform, stepFree: key.stepFree, ok: true)
+        func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
+            let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+            return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
         }
-        func journeys(from: String, to: String, when: Date?) async throws -> JourneysResponse {
-            throw RepositoryError.notAvailable("journeys")
+        func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] {
+            assessCalls += 1
+            if assessDelayNs > 0 { try? await Task.sleep(nanoseconds: assessDelayNs) }
+            return interchanges.map {
+                Transfer(atStation: $0.atStation, relationId: 42,
+                         arrivalPlatform: $0.arrPlatform, departurePlatform: $0.depPlatform,
+                         layoverS: 600, walkTimeS: 66, walkDistanceM: 92, verdict: "feasible")
+            }
         }
         func stations(query: String) async throws -> [StationSuggestion] { [] }
         func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
             throw RepositoryError.notAvailable("platforms")
         }
+        func walk(for key: WalkKey) async throws -> WalkResult {
+            WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
+                       toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)
+        }
     }
 
-    private static let twoTransferJourney = """
-    {"id":"j1","date":null,"duration_s":3600,"num_changes":2,"verdict":"feasible","legs":[],
-     "transfers":[
-       {"at_station":"Frankfurt","relation_id":1,"arrival_platform":"6","departure_platform":"12",
-        "layover_s":600,"walk_time_s":66,"walk_distance_m":92,"verdict":"feasible","reason":null},
-       {"at_station":"Mannheim","relation_id":2,"arrival_platform":"3","departure_platform":"5",
-        "layover_s":300,"walk_time_s":40,"walk_distance_m":50,"verdict":"feasible","reason":null}
-     ]}
+    // One journey, 3 transit legs -> 2 changes of train, both pending.
+    static let pendingJSON = """
+    {"origin":{"name":"A"},"destination":{"name":"C"},"departure_time":"2026-07-13T09:00:00Z",
+     "journeys":[{"id":"j1","num_changes":2,"verdict":"pending","transfers":[
+        {"at_station":"Frankfurt","relation_id":null,"arrival_platform":"6","departure_platform":"12",
+         "layover_s":600,"walk_time_s":null,"walk_distance_m":null,"verdict":"pending","reason":null},
+        {"at_station":"Mannheim","relation_id":null,"arrival_platform":"3","departure_platform":"5",
+         "layover_s":600,"walk_time_s":null,"walk_distance_m":null,"verdict":"pending","reason":null}
+     ],"legs":[
+        {"mode":"train","train_name":"ICE","cancelled":false,"origin":{"name":"A","latitude":53.5,"longitude":10.0},
+         "destination":{"name":"Frankfurt","latitude":50.1,"longitude":8.66},
+         "departure":"2026-07-13T09:00:00Z","arrival":"2026-07-13T09:20:00Z","arrival_platform":"6"},
+        {"mode":"train","train_name":"ICE","cancelled":false,"origin":{"name":"Frankfurt","latitude":50.1,"longitude":8.66},
+         "destination":{"name":"Mannheim","latitude":49.48,"longitude":8.47},
+         "departure":"2026-07-13T09:30:00Z","arrival":"2026-07-13T09:50:00Z",
+         "departure_platform":"12","arrival_platform":"3"},
+        {"mode":"train","train_name":"ICE","cancelled":false,"origin":{"name":"Mannheim","latitude":49.48,"longitude":8.47},
+         "destination":{"name":"C","latitude":48.78,"longitude":9.18},
+         "departure":"2026-07-13T10:00:00Z","arrival":"2026-07-13T11:00:00Z","departure_platform":"5"}
+     ]}]}
     """
-
-    private func makeJourney(_ json: String) throws -> Journey {
-        let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
-        return try dec.decode(Journey.self, from: Data(json.utf8))
-    }
 
     @MainActor
     private func waitUntil(_ timeout: TimeInterval = 3, _ cond: () -> Bool) async {
@@ -57,103 +72,81 @@ final class TripModelPrefetchTests: XCTestCase {
     }
 
     @MainActor
-    func testPrefetchStreamsInThenServesFromCache() async throws {
-        let repo = StubRepo(delayNs: 40_000_000)   // 40 ms per walk
+    func testPlanShowsPendingImmediatelyThenStreamsVerdicts() async throws {
+        let repo = StubRepo(assessDelayNs: 30_000_000)
         let model = TripModel(repository: repo)
-        let j = try makeJourney(Self.twoTransferJourney)
+        await model.plan()
 
-        model.select(j)
-        XCTAssertEqual(model.path, [.journey])
-        XCTAssertTrue(model.walkPrefetch.statuses.isEmpty, "select resets prefetch state")
+        // Landed on results at once, with pending transfers (no waiting on walks).
+        XCTAssertEqual(model.path, [.results])
+        XCTAssertEqual(model.load, .loaded)
+        let j = try XCTUnwrap(model.journeys.first)
+        XCTAssertEqual(j.transfers.count, 2)
+        XCTAssertTrue(j.transfers.allSatisfy { $0.verdictKind.isPending })
+        XCTAssertEqual(j.verdictKind, .pending)
 
-        model.prefetchWalks(stepFree: false)
-        XCTAssertEqual(model.walkPrefetch.total, 2)
-        XCTAssertTrue(model.walkPrefetch.inFlight, "both walks should be streaming")
-        XCTAssertFalse(model.walkPrefetch.isComplete)
+        // Verdicts stream in and replace the pending transfers in place.
+        await waitUntil { model.journeys.first?.transfers.allSatisfy { !$0.verdictKind.isPending } ?? false }
+        let done = try XCTUnwrap(model.journeys.first)
+        XCTAssertTrue(done.transfers.allSatisfy { $0.verdictKind == .feasible })
+        XCTAssertTrue(done.transfers.allSatisfy { $0.walkTimeS == 66 })
+        XCTAssertEqual(done.recomputedVerdict, .feasible)
 
-        await waitUntil { model.walkPrefetch.isComplete }
-        XCTAssertEqual(model.walkPrefetch.statuses, [.ready, .ready])
-        XCTAssertEqual(model.walkPrefetch.readyCount, 2)
-
-        let calls = await repo.walkCalls
-        XCTAssertEqual(calls, 2, "each transfer's walk is fetched exactly once")
-
-        // A subsequent walk(for:) is served from the prefetch cache — no new fetch.
-        let key = WalkKey(relationId: 1, fromPlatform: "6", toPlatform: "12", stepFree: false)
-        let cached = await model.walk(for: key)
-        XCTAssertNotNil(cached)
-        XCTAssertTrue(cached?.ok == true)
-        let callsAfter = await repo.walkCalls
-        XCTAssertEqual(callsAfter, 2, "cache hit must not trigger another fetch")
+        let calls = await repo.assessCalls
+        XCTAssertEqual(calls, 2, "one /assess fires per still-pending transfer")
     }
 
     @MainActor
-    func testPrefetchIsIdempotentPerVariant() async throws {
-        let repo = StubRepo(delayNs: 0)
+    func testSelectedJourneyUpdatesLiveAsVerdictsStream() async throws {
+        let repo = StubRepo(assessDelayNs: 40_000_000)
         let model = TripModel(repository: repo)
-        model.select(try makeJourney(Self.twoTransferJourney))
-
-        model.prefetchWalks(stepFree: false)
-        await waitUntil { model.walkPrefetch.isComplete }
-        model.prefetchWalks(stepFree: false)   // same journey+variant -> no-op
-        model.prefetchWalks(stepFree: false)
-
-        let calls = await repo.walkCalls
-        XCTAssertEqual(calls, 2, "re-seeding the same journey+variant must not refetch")
+        await model.plan()
+        // Select while still pending; `selected` is an index, so streamed updates reach it.
+        model.select(try XCTUnwrap(model.journeys.first))
+        XCTAssertTrue(model.selectedHasPendingWalks)
+        await waitUntil { !model.selectedHasPendingWalks }
+        XCTAssertTrue(model.transfers.allSatisfy { $0.verdictKind == .feasible })
     }
 
     @MainActor
-    func testOpenTransfersRoutesThroughTransitionUntilReady() async throws {
-        let repo = StubRepo(delayNs: 80_000_000)
+    func testSelectRoutesThroughTransitionOnlyWhilePending() async throws {
+        let repo = StubRepo(assessDelayNs: 60_000_000)
         let model = TripModel(repository: repo)
-        model.select(try makeJourney(Self.twoTransferJourney))
-        model.prefetchWalks(stepFree: false)
+        await model.plan()
 
-        // Not ready yet -> the transition screen.
-        model.openTransfers(startIndex: 0)
-        XCTAssertEqual(model.path.last, Route.preparingWalks(startIndex: 0))
+        // Pending -> transition screen.
+        model.select(try XCTUnwrap(model.journeys.first))
+        XCTAssertEqual(model.path.last, Route.preparingWalks)
         model.path.removeLast()
 
-        // Once ready -> straight to the walk carousel.
-        await waitUntil { model.walkPrefetch.isComplete }
-        model.openTransfers(startIndex: 1)
-        XCTAssertEqual(model.path.last, Route.carousel(startIndex: 1))
+        // Assessed -> straight to the timeline.
+        await waitUntil { !model.selectedHasPendingWalks }
+        model.select(try XCTUnwrap(model.journeys.first))
+        XCTAssertEqual(model.path.last, Route.journey)
     }
 
     @MainActor
-    func testProceedToWalksReplacesTheTransitionInTheStack() async throws {
-        let repo = StubRepo(delayNs: 0)
-        let model = TripModel(repository: repo)
-        model.select(try makeJourney(Self.twoTransferJourney))
-        model.path.append(.preparingWalks(startIndex: 1))
-
-        model.proceedToWalks(startIndex: 1)
-        XCTAssertEqual(model.path.last, Route.carousel(startIndex: 1))
-        XCTAssertFalse(model.path.contains(.preparingWalks(startIndex: 1)),
-                       "Back from the walks should return to the timeline, not the transition")
+    func testProceedToTimelineReplacesTransition() async throws {
+        let model = TripModel(repository: StubRepo())
+        await model.plan()
+        model.path.append(.preparingWalks)
+        model.proceedToTimeline()
+        XCTAssertEqual(model.path.last, Route.journey)
+        XCTAssertFalse(model.path.contains(.preparingWalks),
+                       "Back from the timeline returns to results, not the transition")
     }
 
     @MainActor
-    func testUnresolvableTransferIsUnavailableNotStuck() async throws {
-        // A transfer with no relation/platforms yields no WalkKey -> unavailable,
-        // never a perpetual spinner.
-        let json = """
-        {"id":"j2","duration_s":1800,"num_changes":1,"verdict":"unknown","legs":[],
-         "transfers":[{"at_station":"Paris","relation_id":null,"arrival_platform":null,
-           "departure_platform":null,"layover_s":300,"walk_time_s":null,"walk_distance_m":null,
-           "verdict":"unknown","reason":"no_platform_data"}]}
-        """
-        let repo = StubRepo(delayNs: 0)
-        let model = TripModel(repository: repo)
-        model.select(try makeJourney(json))
-        model.prefetchWalks(stepFree: false)
-
-        await waitUntil { model.walkPrefetch.isComplete }
-        XCTAssertEqual(model.walkPrefetch.statuses, [.unavailable])
-        let calls = await repo.walkCalls
-        XCTAssertEqual(calls, 0, "a transfer with no walk key is never fetched")
-        // openTransfers goes straight to the carousel (nothing to wait for).
-        model.openTransfers(startIndex: 0)
-        XCTAssertEqual(model.path.last, Route.carousel(startIndex: 0))
+    func testInterchangesBuiltFromLegsAlignWithTransfers() throws {
+        let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+        let resp = try dec.decode(JourneysResponse.self, from: Data(Self.pendingJSON.utf8))
+        let ics = TripModel.interchanges(of: try XCTUnwrap(resp.journeys.first))
+        XCTAssertEqual(ics.count, 2)
+        XCTAssertEqual(ics[0].atStation, "Frankfurt")
+        XCTAssertEqual(ics[0].arrPlatform, "6")     // arriving leg's arrival platform
+        XCTAssertEqual(ics[0].depPlatform, "12")    // departing leg's departure platform
+        XCTAssertEqual(ics[1].atStation, "Mannheim")
+        XCTAssertEqual(ics[1].arrPlatform, "3")
+        XCTAssertEqual(ics[1].depPlatform, "5")
     }
 }

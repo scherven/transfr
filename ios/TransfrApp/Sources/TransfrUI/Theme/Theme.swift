@@ -82,6 +82,7 @@ public extension Verdict {
         case .tight:      return Theme.tight
         case .infeasible: return Theme.miss
         case .unknown:    return Theme.nodata
+        case .pending:    return Theme.ink3
         }
     }
 
@@ -91,6 +92,7 @@ public extension Verdict {
         case .tight:      return Theme.tightSoft
         case .infeasible: return Theme.missSoft
         case .unknown:    return Theme.nodataSoft
+        case .pending:    return Theme.panel2
         }
     }
 
@@ -101,6 +103,7 @@ public extension Verdict {
         case .tight:      return "Tight"
         case .infeasible: return "Won't make it"
         case .unknown:    return "Unknown"
+        case .pending:    return "Checking…"
         }
     }
 
@@ -110,6 +113,7 @@ public extension Verdict {
         case .tight:      return "exclamationmark.triangle.fill"
         case .infeasible: return "xmark"
         case .unknown:    return "questionmark"
+        case .pending:    return "ellipsis"
         }
     }
 }

@@ -131,6 +131,55 @@ def test_journeys_max_out_of_range_is_422(client):
     assert client.get("/journeys", params={"from": "A", "to": "B", "max": 0}).status_code == 422
 
 
+def test_journeys_assess_param_defaults_true_and_passes_through(client, monkeypatch):
+    seen = {}
+
+    def _fake_plan(conn, origin, destination, when, max_journeys=5, **kw):
+        seen["assess"] = kw.get("assess")
+        return _canned_journeys()
+
+    monkeypatch.setattr(main, "plan_journeys", _fake_plan)
+    client.get("/journeys", params={"from": "A", "to": "B"})
+    assert seen["assess"] is True                      # default: the full product path
+    client.get("/journeys", params={"from": "A", "to": "B", "assess": "false"})
+    assert seen["assess"] is False                     # progressive: pending, streamed later
+
+
+# ---------------------------------------------------------------------------
+# /assess (streamed verdicts behind a fast /journeys?assess=false)
+# ---------------------------------------------------------------------------
+
+def test_assess_endpoint_returns_transfers(client, monkeypatch):
+    def _fake(conn, interchanges, **kw):
+        return schemas.AssessResponse(transfers=[
+            schemas.Transfer(verdict=FEASIBLE, at_station=ic.at_station, walk_time_s=66.0, layover_s=600.0)
+            for ic in interchanges
+        ])
+
+    monkeypatch.setattr(main, "assess_interchanges", _fake)
+    r = client.post("/assess", json={"interchanges": [
+        {"at_station": "Frankfurt", "arr_lat": 50.1, "arr_lon": 8.6, "arr_platform": "6", "arr_time": "2026-07-13T09:20:00Z",
+         "dep_lat": 50.1, "dep_lon": 8.6, "dep_platform": "12", "dep_time": "2026-07-13T09:30:00Z"},
+    ]})
+    assert r.status_code == 200
+    t = r.json()["transfers"]
+    assert len(t) == 1 and t[0]["verdict"] == FEASIBLE and t[0]["at_station"] == "Frankfurt"
+
+
+def test_assess_empty_batch_is_ok(client, monkeypatch):
+    monkeypatch.setattr(main, "assess_interchanges",
+                        lambda *a, **k: schemas.AssessResponse(transfers=[]))
+    r = client.post("/assess", json={"interchanges": []})
+    assert r.status_code == 200 and r.json() == {"transfers": []}
+
+
+def test_assess_batch_too_large_is_413(client, monkeypatch):
+    from api import config
+    n = config.MAX_ASSESS_BATCH + 1
+    r = client.post("/assess", json={"interchanges": [{"at_station": "X"} for _ in range(n)]})
+    assert r.status_code == 413
+
+
 # ---------------------------------------------------------------------------
 # /transfer (debug endpoint)
 # ---------------------------------------------------------------------------
