@@ -19,6 +19,14 @@ WHAT IS AND ISN'T KNOWN.
     reason until a formation source is wired in. The normalized formation model
     (core/boarding/formation_model.py) is the drop-in target for that day; this
     module is the position half that works today.
+  * The RESOLUTION + WIRING half is in place and unit-tested: given a
+    formation, coach_at_offset (core/boarding/seat.py) maps the raw along-edge
+    step-off offset to the coach whose span covers it. `compute_boarding` takes
+    an optional `formation` / `formation_provider` (default: none, so behaviour
+    is unchanged) and fills `coach` + `formation_source` the moment one resolves
+    -- an injected formation in tests, or db_formation_provider() where the DB
+    Wagenreihung host is reachable. Nothing more is gated on the feed than the
+    feed itself.
 
 Kept apart from the pathfinder: it consumes a resolved step-off node id plus the
 arrival platform edge geometry SearchContext already loads, and never re-runs the
@@ -27,12 +35,19 @@ raising, so a coarse-mapped platform simply yields position-less guidance.
 """
 
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from graph import WALKING_SPEED_MS, haversine_meters
 from search_context import SearchContext, _ANCHOR_KEY
+from seat import TrainFormation
 
 Coord = Tuple[float, float]
+
+# A zero-arg source of the arriving train's formation, returning None when the
+# feed can't be reached (see db_formation_provider). `object` because the value
+# is a NormalizedFormation (or an already-built TrainFormation) -- either resolves
+# to a coach without this module importing the operator-feed layer eagerly.
+FormationProvider = Callable[[], Optional[object]]
 
 # How much platform-walking a good boarding position saves (vs the far platform
 # end) before it's worth telling the traveller about. Below SIG_SOME_S any door
@@ -166,9 +181,80 @@ def guidance_from_edge(
     )
 
 
+def _obtain_formation(formation, formation_provider: Optional[FormationProvider]):
+    """The injected formation if one was given, else the provider's best-effort
+    result, else None. Any provider failure (a geo-blocked feed, a network error,
+    a FormationUnavailable) degrades to None so boarding stays position-only
+    rather than failing the whole walk it enriches."""
+    if formation is not None:
+        return formation
+    if formation_provider is None:
+        return None
+    try:
+        return formation_provider()
+    except Exception:  # noqa: BLE001 -- coach is progressive enhancement, never fatal
+        return None
+
+
+def _fill_coach(
+    g: BoardingGuidance, formation, edge_nodes: List[int],
+    coords: Dict[int, Coord], stepoff_node: int, sector_map,
+) -> None:
+    """Enrich a position guidance `g` in place with the coach at its step-off
+    point. Resolves `formation` (a NormalizedFormation, or an already-built
+    TrainFormation) to a coach span map on this platform, looks up the coach
+    covering the step-off offset, and fills `g.coach` / `g.formation_source`,
+    clearing the coach-gap `reason`. A no-op -- leaving `g` exactly as the
+    position-only build produced it (reason NO_FORMATION_FEED) -- when the offset
+    can't be measured or the coaches can't be placed on this platform.
+
+    The offset used is the RAW along-edge offset from nodes[0], the same frame
+    `coach_span_m` is measured in (both from the platform's reference end). It is
+    deliberately NOT g.stepoff_offset_m, which has been re-oriented toward the
+    departure side for display and would point at the wrong coach."""
+    measured = offset_along_edge(edge_nodes, coords, stepoff_node)
+    if measured is None:
+        return
+    raw_offset_m, length_m = measured
+    try:
+        tf = formation if isinstance(formation, TrainFormation) else \
+            formation.to_train_formation(length_m, sector_map)
+        coach = tf.coach_at_offset(raw_offset_m)
+    except Exception:  # noqa: BLE001 -- an unplaceable coach / empty feed stays position-only
+        return
+    g.coach = str(coach)
+    g.formation_source = getattr(formation, "source", None)
+    g.reason = None  # coach resolved -- nothing is missing now
+
+
+def db_formation_provider(
+    train_number: str, when_yyyymmddhhmm: str, session=None,
+) -> FormationProvider:
+    """A zero-arg provider that fetches the arriving train's real DB coach
+    formation on demand, returning None (never raising) when the feed can't be
+    reached. THE PRODUCTION SEAM: once the arriving train's number + scheduled
+    departure are threaded to the walk layer, wire this as compute_boarding's
+    `formation_provider` and the coach lights up wherever the DB Wagenreihung host
+    resolves (a DE egress / CI). From a generic host that host is geo-blocked, so
+    this returns None and boarding stays position-only -- exactly today's
+    behaviour, with zero code change on the day the feed becomes reachable."""
+    def _provide():
+        # Lazy import: keeps `requests` (and the whole operator-feed layer) off
+        # the position-only path that runs on every walk.
+        from live_sources import fetch_db_formation, FormationUnavailable
+        try:
+            return fetch_db_formation(train_number, when_yyyymmddhhmm, session=session)
+        except FormationUnavailable:
+            return None
+    return _provide
+
+
 def compute_boarding(
     conn, relation_id: int, arr_ref: str, dep_ref: str,
     stepoff_node: Optional[int],
+    formation=None,
+    formation_provider: Optional[FormationProvider] = None,
+    sector_map=None,
 ) -> BoardingGuidance:
     """Resolve the arrival platform edge and locate the step-off node on it.
 
@@ -177,7 +263,18 @@ def compute_boarding(
     -- it only rebuilds SearchContext for the platform-edge geometry, which is
     the cheap setup half. Degrades to a position-less guidance with a reason
     when the platform isn't a measurable edge (a stop-position snap anchor, a
-    single-node edge, or an unresolvable station)."""
+    single-node edge, or an unresolvable station).
+
+    COACH ENRICHMENT (optional, best-effort). Pass the arriving train's
+    formation as `formation` (a NormalizedFormation from parse_wagenreihung, or a
+    TrainFormation), or a zero-arg `formation_provider` that yields one (see
+    db_formation_provider). When either resolves, the coach stopping at the
+    step-off point is filled into `coach` + `formation_source` and `reason` is
+    cleared. Supplying neither -- the default, and the case on any non-DE host --
+    leaves today's position-only behaviour untouched: `coach` None, `reason`
+    no_formation_feed. `sector_map` places coaches a feed reports by sector letter
+    rather than metres. The provider is only invoked once a measurable step-off
+    edge is found, so a lazy network fetch never fires for a coarse platform."""
     coarse = BoardingGuidance(arrival_platform=arr_ref, departure_platform=dep_ref,
                               reason=PLATFORM_GEOMETRY_UNAVAILABLE)
     if stepoff_node is None:
@@ -196,6 +293,9 @@ def compute_boarding(
             if stepoff_node in nodes:
                 g = guidance_from_edge(arr_ref, dep_ref, nodes, coords, stepoff_node, dep_anchor)
                 if g is not None:
+                    resolved = _obtain_formation(formation, formation_provider)
+                    if resolved is not None:
+                        _fill_coach(g, resolved, nodes, coords, stepoff_node, sector_map)
                     return g
     return coarse
 

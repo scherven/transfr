@@ -34,6 +34,10 @@ public protocol JourneyRepository: Sendable {
     /// platform, sorted nearest-first.
     func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse
 
+    /// A single station's platform-connectivity breakdown (connected / stitchable
+    /// / island), for the Map-health tool's per-station query.
+    func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse
+
     /// One transfer's drawable walk geometry, keyed by the triple a `Transfer`
     /// already carries. May be `ok == false` when no geometry exists yet.
     func walk(for key: WalkKey) async throws -> WalkResult
@@ -79,6 +83,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
         try await client.stationWalk(lat: lat, lon: lon, fromPlatform: fromPlatform, stepFree: stepFree)
+    }
+
+    public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+        try await client.stationHealth(lat: lat, lon: lon)
     }
 
     public func walk(for key: WalkKey) async throws -> WalkResult {

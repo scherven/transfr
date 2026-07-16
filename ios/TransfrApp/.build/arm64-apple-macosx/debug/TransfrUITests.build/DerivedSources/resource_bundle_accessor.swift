@@ -3,7 +3,7 @@ import Foundation
 extension Foundation.Bundle {
     static let module: Bundle = {
         let mainPath = Bundle.main.bundleURL.appendingPathComponent("TransfrApp_TransfrUITests.bundle").path
-        let buildPath = "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrApp_TransfrUITests.bundle"
+        let buildPath = "/private/tmp/claude-501/-Users-simonchervenak-Documents-GitHub-transfr/4c697f26-fb6a-4253-8cfb-c9b810ff4395/scratchpad/merge-work/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrApp_TransfrUITests.bundle"
 
         let preferredBundle = Bundle(path: mainPath)
 

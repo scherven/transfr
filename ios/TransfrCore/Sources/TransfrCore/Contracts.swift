@@ -214,6 +214,63 @@ public struct StationWalkResponse: Codable, Sendable {
     }
 }
 
+// MARK: - Station connectivity health (/station-health) — mirrors api/schemas.py
+
+/// One platform pair that doesn't plainly connect — `kind` is "stitchable" (a
+/// route exists only once synthetic stitch bridges are enabled) or "island" (no
+/// route found either way). Surfaced as a few worked examples of a station's
+/// disconnects (mirrors `api/schemas.py:StationHealthPair`).
+public struct StationHealthPair: Codable, Hashable, Sendable {
+    public var fromPlatform: String
+    public var toPlatform: String
+    public var kind: String
+
+    public init(fromPlatform: String, toPlatform: String, kind: String) {
+        self.fromPlatform = fromPlatform; self.toPlatform = toPlatform; self.kind = kind
+    }
+}
+
+/// A single station's platform-connectivity breakdown (from `/station-health`) —
+/// the Map-health tool's per-station query. Every unordered platform pair is
+/// bucketed connected / stitchable / island by two pathfinder passes; the counts
+/// are pair counts and the `*Pct` are their share of the pairs evaluated.
+/// `sampled` is true when a very large station was down-sampled to bound the work
+/// (`platformCount` still reports the true total). `found == false` (with
+/// `reason`) when no station sits near the coordinate. Mirrors
+/// `api/schemas.py:StationHealthResponse`.
+public struct StationHealthResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var relationId: Int?
+    public var station: String?
+    public var found: Bool
+    public var platformCount: Int
+    public var connected: Int
+    public var stitchable: Int
+    public var island: Int
+    public var connectedPct: Double
+    public var stitchablePct: Double
+    public var islandPct: Double
+    public var sampled: Bool
+    public var examples: [StationHealthPair]
+    public var reason: String?
+
+    public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
+                found: Bool, platformCount: Int = 0, connected: Int = 0, stitchable: Int = 0,
+                island: Int = 0, connectedPct: Double = 0, stitchablePct: Double = 0,
+                islandPct: Double = 0, sampled: Bool = false,
+                examples: [StationHealthPair] = [], reason: String? = nil) {
+        self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
+        self.found = found; self.platformCount = platformCount
+        self.connected = connected; self.stitchable = stitchable; self.island = island
+        self.connectedPct = connectedPct; self.stitchablePct = stitchablePct; self.islandPct = islandPct
+        self.sampled = sampled; self.examples = examples; self.reason = reason
+    }
+
+    /// Total platform pairs actually evaluated (0 when fewer than two platforms).
+    public var pairCount: Int { connected + stitchable + island }
+}
+
 // MARK: - Walk geometry delivery (/walk, /walks) — mirrors api/schemas.py
 
 /// Identifies one platform-to-platform walk. These three fields are exactly what
