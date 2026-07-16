@@ -82,10 +82,19 @@ Compliance** at the bottom.
   Verified headless via `TransfrUITests` (Berlin 1→16 and Dortmund 11→4).
 - 🟢 **Turn-by-turn is derived from real `transitions`** + endpoints (step-off →
   each level change → board). Synthesized copy remains only for the sample tier.
-- 🟠 **3D view is outdated — trim what it renders.** It draws too much; cut it back
-  to what's legible. (See also "3D slowness" under Investigation.)
-- 🟠 **Levels rendering — vertical changes aren't obvious.** Likely a z-value fix so
-  level transitions read clearly on the top-down plan.
+- 🟢 **3D view trimmed to what's legible.** The Levels + 3D canvases no longer draw
+  the station's whole mapped web (Stuttgart 61 / Karlsruhe 142 / Berlin 372 context
+  ways) — the connectors among them, each spanning two floors, exploded across the
+  stacked levels into a forest of near-vertical lines that buried the route. Both
+  now follow `core/viz/viz_render.py`: the 3D shows faint labelled floor planes, the
+  route, and one riser per real `transition` coloured by connector; the scene is
+  reframed on the path so the walk fills the view. (Far less per-frame draw work also
+  addresses the "3D slowness" note.)
+- 🟢 **Levels — vertical changes now obvious.** Each floor-change is a bold,
+  connector-coloured disc with an up/down chevron and a dodged label ("Escalator ↑
+  L+1") read from the current floor's perspective, over a decluttered plan (only the
+  route, the start/end platform slab, and a floor tag). Replaces the tiny ambiguous
+  "•/▲/▼" dots that were lost in the context web.
 
 ## 3. Boarding & step-off — `CarouselView.swift`, `LiveView.swift`, `WalkView.swift` ✅
 
