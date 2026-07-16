@@ -93,6 +93,20 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
+    /// GET /station-health?lat=&lon= — one station's platform-connectivity
+    /// breakdown (connected / stitchable / island over every platform pair), for
+    /// the Map-health tool's per-station query. Resolves the station nearest the
+    /// coordinate the same way `stationPlatforms(...)` does.
+    public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("station-health"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lon", value: String(lon)),
+        ]
+        return try await get(comps?.url)
+    }
+
     /// GET /walk?relation_id=&from_platform=&to_platform=&step_free= — one
     /// transfer's drawable walk geometry (the `viz_export` document). Keyed by the
     /// triple a `Transfer` already carries, so callers forward them verbatim.

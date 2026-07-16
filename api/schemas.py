@@ -141,6 +141,44 @@ class StationPlatformsResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class StationHealthPair(BaseModel):
+    """One platform pair that does not plainly connect. `kind` is 'stitchable'
+    (a route exists only once synthetic stitch bridges are enabled) or 'island'
+    (no route found either way). Surfaced as a few worked examples of a station's
+    disconnects."""
+
+    from_platform: str
+    to_platform: str
+    kind: str
+
+
+class StationHealthResponse(BaseModel):
+    """A single station's platform-connectivity breakdown -- the Map-health tool's
+    per-station query (/station-health). Every unordered platform pair is bucketed
+    connected / stitchable / island by two `find_shortest_path` passes (plain, then
+    with stitch bridges); `connected`/`stitchable`/`island` are pair counts and the
+    matching `*_pct` are their share of the pairs evaluated. `sampled` is true when a
+    pathologically large station was down-sampled to bound the pair count (see
+    api/station_health.py). `examples` lists a few of the non-connected pairs.
+    `found=False` (with `reason`) when no station sits near the coordinate."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    found: bool
+    platform_count: int = 0
+    connected: int = 0
+    stitchable: int = 0
+    island: int = 0
+    connected_pct: float = 0.0
+    stitchable_pct: float = 0.0
+    island_pct: float = 0.0
+    sampled: bool = False
+    examples: List[StationHealthPair] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Walk geometry (viz_export) delivery -- /walk and /walks
 #

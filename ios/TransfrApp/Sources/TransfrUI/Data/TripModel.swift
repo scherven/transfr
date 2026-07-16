@@ -126,6 +126,13 @@ public final class TripModel {
         try? await repo.platforms(lat: lat, lon: lon)
     }
 
+    /// Resolve a coordinate to its station's platform-connectivity health (the
+    /// Map-health per-station query). Fails soft to nil — the diagnostic panel then
+    /// shows nothing rather than surfacing an error.
+    public func stationHealth(lat: Double, lon: Double) async -> StationHealthResponse? {
+        try? await repo.stationHealth(lat: lat, lon: lon)
+    }
+
     /// Pick a journey. Lands on its timeline straight away when its verdicts are
     /// already in; otherwise routes through the transition screen so the still-
     /// streaming verdicts are shown filling in, then advances to the timeline.
