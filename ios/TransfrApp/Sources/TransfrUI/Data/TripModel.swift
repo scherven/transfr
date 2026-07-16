@@ -31,6 +31,47 @@ public final class TripModel {
     public enum Load: Equatable { case idle, loading, loaded, failed(String) }
     public private(set) var load: Load = .idle
 
+    // MARK: Progressive walk load
+    //
+    // `/journeys` returns the verdict spine fast; each transfer's drawable
+    // geometry (`/walk`) is a separate, heavier fetch. So once a journey is
+    // chosen and its timeline shows, we STREAM those walks in the background into
+    // `walkCache` — the journey screen never blocks on them, and by the time the
+    // user opens a transfer the drawing is usually already there. `walkPrefetch`
+    // exposes the per-transfer progress the timeline strip and the transition
+    // screen render live.
+
+    /// One transfer's geometry-load state, in the selected journey's order.
+    public enum WalkLoad: Sendable, Equatable {
+        case pending       // not started
+        case loading       // /walk in flight
+        case ready         // geometry cached and drawable
+        case unavailable   // resolved, but no geometry (sample tier / FR·IT·ES / data gap)
+    }
+
+    public struct WalkPrefetchState: Sendable, Equatable {
+        /// One entry per transfer of the selected journey.
+        public var statuses: [WalkLoad] = []
+
+        public var total: Int { statuses.count }
+        /// Transfers whose fetch has settled (ready OR knowably unavailable).
+        public var settled: Int { statuses.filter { $0 == .ready || $0 == .unavailable }.count }
+        public var readyCount: Int { statuses.filter { $0 == .ready }.count }
+        /// Still actively streaming something.
+        public var inFlight: Bool { statuses.contains(.loading) }
+        /// Seeded and nothing left to wait on.
+        public var isComplete: Bool { !statuses.isEmpty && !statuses.contains(where: { $0 == .loading || $0 == .pending }) }
+    }
+
+    public private(set) var walkPrefetch = WalkPrefetchState()
+
+    /// Deterministic geometry cache, shared by the prefetch and every on-demand
+    /// `walk(for:)`. Keyed by the exact `WalkKey` (so a step-free variant is
+    /// distinct), it makes a prefetched walk open instantly.
+    private var walkCache: [WalkKey: WalkResult] = [:]
+    private var prefetchTask: Task<Void, Never>?
+    private var prefetchIdentity: (journeyId: String, stepFree: Bool)?
+
     // Navigation stack (value routes)
     public var path: [Route] = []
 
@@ -102,6 +143,12 @@ public final class TripModel {
 
     public func select(_ journey: Journey) {
         selected = journey
+        // Reset progressive-load state for the new journey; the timeline's
+        // .task will seed a fresh prefetch (see prefetchWalks).
+        prefetchTask?.cancel()
+        prefetchTask = nil
+        prefetchIdentity = nil
+        walkPrefetch = WalkPrefetchState()
         path.append(.journey)
     }
 
@@ -110,11 +157,89 @@ public final class TripModel {
     /// Transfers of the selected journey (the carousel/walk source).
     public var transfers: [Transfer] { selected?.transfers ?? [] }
 
-    /// Fetch one transfer's drawable geometry (the keystone `viz_export`). Returns
-    /// nil when unavailable (e.g. the sample tier), so the walk screen keeps its
-    /// schematic. Non-throwing on purpose — geometry is progressive enhancement.
+    /// Fetch one transfer's drawable geometry (the keystone `viz_export`). Serves
+    /// the prefetch cache first, so a walk the timeline already streamed opens
+    /// instantly; otherwise fetches and caches it. Returns nil when unavailable
+    /// (e.g. the sample tier), so the walk screen keeps its schematic.
+    /// Non-throwing on purpose — geometry is progressive enhancement.
     public func walk(for key: WalkKey) async -> WalkResult? {
-        try? await repo.walk(for: key)
+        if let cached = walkCache[key] { return cached }
+        let result = try? await repo.walk(for: key)
+        if let result { walkCache[key] = result }
+        return result
+    }
+
+    /// Start (or resume) streaming the selected journey's transfer walks into the
+    /// cache, updating `walkPrefetch` as each settles. Idempotent per
+    /// journey+variant, and detached from any view: the task lives on the model,
+    /// so navigating deeper into the walks doesn't cancel the stream. Call it when
+    /// the timeline appears (and when `stepFree` flips — a different route).
+    public func prefetchWalks(stepFree: Bool) {
+        guard let journey = selected, let jid = journey.id else { return }
+        // Same journey+variant already seeded -> leave the in-flight/finished run.
+        if let id = prefetchIdentity, id.journeyId == jid, id.stepFree == stepFree,
+           !walkPrefetch.statuses.isEmpty { return }
+        prefetchIdentity = (jid, stepFree)
+        prefetchTask?.cancel()
+
+        let transfers = journey.transfers
+        var statuses = [WalkLoad](repeating: .unavailable, count: transfers.count)
+        var todo: [(index: Int, key: WalkKey)] = []
+        for (i, t) in transfers.enumerated() {
+            guard let key = WalkKey(transfer: t, stepFree: stepFree) else { continue } // stays .unavailable
+            if let cached = walkCache[key] {
+                statuses[i] = cached.ok ? .ready : .unavailable
+            } else {
+                statuses[i] = .loading
+                todo.append((i, key))
+            }
+        }
+        walkPrefetch = WalkPrefetchState(statuses: statuses)
+        guard !todo.isEmpty else { return }
+        prefetchTask = Task { [weak self] in await self?.runPrefetch(todo) }
+    }
+
+    private func runPrefetch(_ todo: [(index: Int, key: WalkKey)]) async {
+        let repo = self.repo   // capture the Sendable repo, not self, for the children
+        await withTaskGroup(of: (Int, WalkKey, WalkResult?).self) { group in
+            for (idx, key) in todo {
+                group.addTask { (idx, key, try? await repo.walk(for: key)) }
+            }
+            for await (idx, key, result) in group {
+                if Task.isCancelled { return }
+                if let result { walkCache[key] = result }
+                if idx < walkPrefetch.statuses.count {
+                    walkPrefetch.statuses[idx] = (result?.ok == true) ? .ready : .unavailable
+                }
+            }
+        }
+    }
+
+    /// The geometry-load status of the transfer at `index` (in the selected
+    /// journey), for the timeline strip and the transition screen.
+    public func walkStatus(at index: Int) -> WalkLoad {
+        walkPrefetch.statuses[safe: index] ?? .pending
+    }
+
+    /// Open the transfers, starting at `startIndex`. Goes straight to the walk
+    /// carousel when that transfer's geometry has settled (the common, fast case);
+    /// otherwise routes through the transition screen so the wait is visible and
+    /// the drawing is ready when it lands.
+    public func openTransfers(startIndex: Int) {
+        let waiting: Bool
+        switch walkStatus(at: startIndex) {
+        case .pending, .loading: waiting = startIndex < transfers.count  // real, still-streaming change
+        case .ready, .unavailable: waiting = false
+        }
+        path.append(waiting ? .preparingWalks(startIndex: startIndex)
+                            : .carousel(startIndex: startIndex))
+    }
+
+    /// Advance from the transition screen into the walk carousel, replacing the
+    /// transition in the stack so Back returns to the timeline, not to it.
+    public func proceedToWalks(startIndex: Int) {
+        if case .preparingWalks = path.last { path.removeLast() }
+        path.append(.carousel(startIndex: startIndex))
     }
 
     private func message(for error: Error) -> String {
@@ -145,6 +270,7 @@ public enum Route: Hashable {
     // Journey spine
     case results
     case journey
+    case preparingWalks(startIndex: Int)
     case carousel(startIndex: Int)
     case walk(transferIndex: Int)
     case ar(transferIndex: Int)

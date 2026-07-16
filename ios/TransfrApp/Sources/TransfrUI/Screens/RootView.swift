@@ -23,6 +23,7 @@ public struct RootView: View {
                     switch route {
                     case .results:              ResultsView()
                     case .journey:              JourneyView()
+                    case .preparingWalks(let start): PreparingWalksView(startIndex: start)
                     case .carousel(let start):  CarouselView(startIndex: start)
                     case .walk(let idx):        WalkView(transferIndex: idx)
                     case .ar(let idx):          ARView(transferIndex: idx)

@@ -77,13 +77,6 @@ struct JourneyCard: View {
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-                // A thumbnail of where this option actually goes — the routes differ
-                // at a glance (design/route-maps.html §2). Same renderer, mini mode.
-                RouteMapView(journey: journey, mini: true, showLabels: false)
-                    .frame(width: 92)
-                    .frame(maxHeight: .infinity)
-                    .overlay(alignment: .leading) { Rectangle().fill(Theme.line2).frame(width: 1) }
             }
             .clipShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
         }
