@@ -338,6 +338,20 @@ struct IsoGeometryCanvas: View {
                 }
             }
 
+            // Every platform the export carries, marked with its ref — not just
+            // the two walk endpoints. The server resolves a ref + floor for each
+            // platform and lifts its geometry onto that level, so they read as
+            // distinct, correctly-stacked slabs.
+            for way in ways where way.kind == "platform" {
+                guard let ref = way.ref, !way.points.isEmpty else { continue }
+                let n = CGFloat(way.points.count)
+                let c = Point3(
+                    x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
+                    y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
+                    z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
+                platformTag(ctx, iso.map(c), ref)
+            }
+
             guard scene.found, scene.pathPoints.count >= 2 else {
                 if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
                 return
@@ -472,6 +486,20 @@ private func endpoint(_ ctx: GraphicsContext, _ p: CGPoint, _ c: Color, r: CGFlo
     ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)), with: .color(c))
     ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)),
                with: .color(Theme.paper), lineWidth: 1.5)
+}
+
+/// A small ref chip drawn at a platform's centroid, so every platform on the
+/// exploded model reads as "Platform N", not just the two the walk connects.
+private func platformTag(_ ctx: GraphicsContext, _ p: CGPoint, _ ref: String) {
+    let font = Font.system(size: 10, weight: .bold, design: .monospaced)
+    var text = ctx.resolve(Text(ref).font(font))
+    text.shading = .color(Theme.ink)
+    let ts = text.measure(in: CGSize(width: 200, height: 40))
+    let w = ts.width + 8, h: CGFloat = 15
+    let rect = CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h)
+    ctx.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.panel))
+    ctx.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.line), lineWidth: 1)
+    ctx.draw(text, at: p, anchor: .center)
 }
 
 private func connectorMark(_ ctx: GraphicsContext, _ p: CGPoint, _ c: Color, _ glyph: String) {

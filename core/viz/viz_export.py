@@ -34,6 +34,7 @@ import math
 import os
 import subprocess
 import sys
+from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
 import osmium
@@ -156,6 +157,46 @@ def node_kind(tags: Dict[str, str]) -> str:
     if tags.get("highway") == "steps":
         return "stairs"
     return "vertical"
+
+
+# ---------------------------------------------------------------------------
+# platform labelling: ref (from tags) + the floor it sits on (from the graph)
+# ---------------------------------------------------------------------------
+
+def platform_ref(tags: Dict[str, str]) -> Optional[str]:
+    """The human platform number for a platform way: `ref`, else `local_ref`,
+    else the composite `railway:track_ref`. None for a bare platform area that
+    carries no ref (rare)."""
+    return tags.get("ref") or tags.get("local_ref") or tags.get("railway:track_ref")
+
+
+def platform_level_from_graph(cur, node_ids: List[int]) -> Optional[float]:
+    """The floor a platform sits on, from the leveled WALKABLE ways that share a
+    node with it -- its real graph connection, not 2D proximity (which is
+    meaningless in a multi-level station, where a deep platform and a viaduct
+    overlap in plan). Prefer flat single-level ways (the floor under the
+    platform); fall back to a connector's endpoint levels only when nothing flat
+    touches it. Returns None when no leveled way connects -- an honest 'unknown'
+    beats a confident wrong guess. OSM node ids are globally unique, so sharing a
+    node already localises the match to this platform (no station bound needed)."""
+    if not node_ids:
+        return None
+    cur.execute(
+        "SELECT tags->>'level' AS lvl FROM osm_ways "
+        "WHERE tags ? 'level' AND nodes && %s::bigint[] "
+        "AND tags->>'railway' IS DISTINCT FROM 'platform' "
+        "AND tags->>'railway' IS DISTINCT FROM 'platform_edge'",
+        (list(node_ids),),
+    )
+    flat, multi = [], []
+    for row in cur.fetchall():
+        levels = parse_levels(row["lvl"])
+        (flat if len(levels) == 1 else multi).append(levels)
+    if flat:
+        return Counter(l[0] for l in flat).most_common(1)[0][0]
+    if multi:  # only connectors touch it -- vote over their endpoint floors
+        return Counter(v for l in multi for v in (l[0], l[-1])).most_common(1)[0][0]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +553,41 @@ def export(
         })
     else:
         path_json["reason"] = result.get("reason")
+
+    # Platform labels: every platform way gets its `ref` (from tags) and the
+    # `level` it sits on, then its geometry is lifted onto that floor. OSM
+    # platform_edge ways carry a ref but rarely a `level`, and are flattened to
+    # z=0 without this. Level priority: the way's own single `level` tag (exact),
+    # then the walk's two endpoints (exact -- the search already resolved which
+    # floor they board from), then the shared-walkway vote (correct where the
+    # station is well mapped), else null (honest unknown, left un-lifted).
+    endpoint_levels: Dict[str, float] = {}
+    if path_json.get("found") and path_json.get("points"):
+        fh = floor_height_m or 1.0
+        endpoint_levels[str(ref_1)] = round(path_json["points"][0][2] / fh)
+        endpoint_levels[str(ref_2)] = round(path_json["points"][-1][2] / fh)
+    with conn.cursor() as lvl_cur:
+        for w in ways_json:
+            if w["kind"] != "platform":
+                continue
+            tags = (ways.get(w["id"], {}).get("tags")) or {}
+            ref = platform_ref(tags)
+            w["ref"] = ref
+            own = parse_levels(tags["level"]) if tags.get("level") else None
+            if own and len(own) == 1:
+                level: Optional[float] = own[0]
+            elif ref is not None and ref in endpoint_levels:
+                level = endpoint_levels[ref]
+            else:
+                level = platform_level_from_graph(lvl_cur, ways.get(w["id"], {}).get("nodes", []))
+            if level is None:
+                w["level"] = None
+                continue
+            lvl_i = int(round(level))
+            w["level"] = lvl_i
+            z = round(proj.z(lvl_i), 2)
+            w["points"] = [[p[0], p[1], z] for p in w["points"]]
+            levels_seen.add(float(lvl_i))
 
     # Horizontal extent of everything drawn -- the renderer sizes the level
     # reference planes to it, and an AR client can use it as the anchor footprint.

@@ -64,12 +64,19 @@ public struct VizExport: Codable, Sendable {
 
     /// A context way the search touched. `kind` drives the renderer legend
     /// (platform / walkway / stairs / escalator / elevator / ramp / …).
+    ///
+    /// Platform ways additionally carry `ref` (the human platform number, from
+    /// OSM tags) and `level` (the floor it sits on, resolved from the graph and
+    /// used to lift its geometry — `nil` when the data can't place it reliably).
+    /// Both are `nil` on non-platform ways and on older exports.
     public struct Way: Codable, Sendable {
         public var id: Int
         public var kind: String
         public var isConnector: Bool
         public var levelRaw: String?
         public var points: [Point3]
+        public var ref: String?
+        public var level: Int?
     }
 
     /// The resolved route. When `found` is false only `reason` is populated.

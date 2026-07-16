@@ -190,6 +190,16 @@ Persisted and real, but several preferences are **not yet applied**:
   **Add:** let the user query a single station.
 - 🔴 **Offline & regions** (`OfflineRegionsView`) — static cards; no real region
   download, prefetch, or storage accounting. 🚧 device-side + packaging work.
+- 🟠 **3D station map** (branch `station-map-3d`, in HTML prototype) — Concept A exploded
+  model carrying a real walk; **every platform is now server-labelled + level-lifted**
+  (`viz_export` emits `Way.ref` + `Way.level`, lifts geometry from the graph). Walk view
+  shows **only walk-relevant connectors** (the stairs/escalators/lifts the path uses); a
+  full station-map (browse, no walk) should show all. **Next:** port into `TransfrUI`
+  (extend `IsoGeometryCanvas`), wire to live `/walk`.
+- 🔴 **[deferred] Bring back POIs on the station map** — facility pins (food / ATM /
+  toilets / lift) are intentionally hidden on the walk view for now to cut clutter. The
+  data already exists (`viz_export` `details` layer, same as **Nearest facility** above);
+  re-surface them as a toggleable layer once the station-map screen is built.
 - **Placement:** move **Advanced** to a button next to Settings, or go tab-based.
 
 ## 8. Offline & caching (cross-cutting)

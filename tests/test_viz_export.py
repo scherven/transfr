@@ -72,6 +72,14 @@ def test_keep_poi_filters_street_furniture():
     assert vx._keep_poi("amenity", "vending_machine") is False
 
 
+def test_platform_ref_prefers_ref_then_local_then_track():
+    assert vx.platform_ref({"ref": "12"}) == "12"
+    assert vx.platform_ref({"local_ref": "3a"}) == "3a"
+    assert vx.platform_ref({"railway:track_ref": "7"}) == "7"
+    assert vx.platform_ref({"ref": "1", "local_ref": "9"}) == "1"   # ref wins
+    assert vx.platform_ref({}) is None                               # bare area
+
+
 def test_node_kind_classifies_vertical_nodes():
     # an elevator mapped on a node (the Berlin OTIS case)
     assert vx.node_kind({"highway": "elevator", "level": "-2;-1;0;1;2"}) == "elevator"
