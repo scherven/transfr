@@ -19,7 +19,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core", "pathfinding"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core", "boarding"))
 
-from seat import PlatformGeometry  # noqa: E402
+from seat import PlatformGeometry, TrainFormation  # noqa: E402
+from formation_model import NormalizedFormation  # noqa: E402
+from live_sources import FormationUnavailable, parse_wagenreihung  # noqa: E402
 
 from api import boarding  # noqa: E402
 from api.boarding import (  # noqa: E402
@@ -111,6 +113,157 @@ def test_compute_boarding_none_node_is_coarse():
     assert not g.has_position
     assert g.reason == PLATFORM_GEOMETRY_UNAVAILABLE
     assert g.coach is None
+
+
+# ---------------------------------------------------------------------------
+# Coach naming: formation feed -> coach at the step-off point (offline)
+# ---------------------------------------------------------------------------
+
+def _wagenreihung_fixture():
+    """A small but schema-faithful DB Wagenreihung payload (field names per
+    live_sources.parse_wagenreihung): two sectors A/B with metre spans, one train
+    portion of three passenger coaches with explicit metres, plus a power car that
+    must be dropped."""
+    return {
+        "data": {
+            "istformation": {
+                "fahrtnummer": "573",
+                "halt": {"bahnhofsname": "Musterstadt Hbf", "gleisbezeichnung": "7"},
+                "allSektor": [
+                    {"sektorbezeichnung": "A", "positionamgleis": {"startmeter": "0", "endemeter": "100"}},
+                    {"sektorbezeichnung": "B", "positionamgleis": {"startmeter": "100", "endemeter": "200"}},
+                ],
+                "allFahrzeuggruppe": [{
+                    "fahrzeuggruppebezeichnung": "ICE573",
+                    "allFahrzeug": [
+                        {"wagenordnungsnummer": "1", "kategorie": "REISEZUGWAGENERSTEKLASSE",
+                         "fahrzeugsektor": "A", "positionamhalt": {"startmeter": "0", "endemeter": "26.4"}},
+                        {"wagenordnungsnummer": "2", "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+                         "fahrzeugsektor": "A", "positionamhalt": {"startmeter": "26.4", "endemeter": "52.8"}},
+                        {"wagenordnungsnummer": "3", "kategorie": "REISEZUGWAGENZWEITEKLASSE",
+                         "fahrzeugsektor": "B", "positionamhalt": {"startmeter": "52.8", "endemeter": "79.2"}},
+                        # A power car carries no reservable seats -> dropped by the parser.
+                        {"wagenordnungsnummer": "0", "kategorie": "TRIEBKOPF",
+                         "positionamhalt": {"startmeter": "79.2", "endemeter": "99.0"}},
+                    ],
+                }],
+            }
+        }
+    }
+
+
+def test_wagenreihung_parses_to_coach_at_offset():
+    # The whole coach-naming chain end to end, no DB:
+    #   payload -> parse_wagenreihung -> NormalizedFormation -> to_train_formation
+    #           -> coach_at_offset(step-off metres) -> the coach to board.
+    formation = parse_wagenreihung(_wagenreihung_fixture())
+    assert isinstance(formation, NormalizedFormation)
+    assert formation.source == "db-wagenreihung"
+    assert formation.station == "Musterstadt Hbf" and formation.track == "7"
+    assert formation.coach_ids() == ["1", "2", "3"]      # power car dropped
+    assert formation.has_metres()
+
+    tf = formation.to_train_formation(platform_length_m=200.0)
+    assert tf.coach_span_m["3"] == pytest.approx((52.8, 79.2))
+    # A step-off 60 m along the platform lands in coach 3 (52.8..79.2).
+    assert tf.coach_at_offset(60.0) == "3"
+    assert tf.coach_at_offset(40.0) == "2"
+    assert tf.coach_at_offset(10.0) == "1"
+
+
+# --- compute_boarding with an injected formation (SearchContext monkeypatched) --
+
+class _FakeCtx:
+    """Stands in for a resolved SearchContext: one straight arrival-platform edge,
+    its node coordinates, and (deliberately) no departure targets so the fraction
+    keeps the raw A-end offset -- exactly the frame coach spans live in."""
+
+    def __init__(self, coords, edges, targets):
+        self.error = None
+        self.coord_cache = coords
+        self.edges_1 = edges          # [(way_id, nodes, tags), ...]
+        self.targets = targets
+
+
+class _FakeCursorCM:
+    def __enter__(self):
+        return object()
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeConn:
+    def cursor(self):
+        return _FakeCursorCM()
+
+
+def _patch_edge(monkeypatch):
+    """Wire compute_boarding onto a synthetic 100 m platform edge (nodes at
+    0/25/50/75/100 m) and return (conn, stepoff_node) with the step-off at 50 m."""
+    geom = _straight([0.0, 25.0, 50.0, 75.0, 100.0])
+    ctx = _FakeCtx(dict(geom.coords), [(1, list(geom.nodes), {})], set())
+    monkeypatch.setattr(boarding, "SearchContext", lambda cur, rid, a, d: ctx)
+    return _FakeConn(), geom.nodes[2]                 # nodes[2] is the 50 m node
+
+
+def test_compute_boarding_fills_coach_when_formation_injected(monkeypatch):
+    conn, stepoff = _patch_edge(monkeypatch)
+    formation = parse_wagenreihung(_wagenreihung_fixture())     # coaches 1..3 over 0..79.2 m
+    g = compute_boarding(conn, relation_id=1, arr_ref="7", dep_ref="8",
+                         stepoff_node=stepoff, formation=formation)
+    assert g.has_position and g.platform_length_m == pytest.approx(100.0, abs=0.1)
+    # Step-off 50 m -> coach 2 (26.4..52.8); the coach gap reason is cleared.
+    assert g.coach == "2"
+    assert g.formation_source == "db-wagenreihung"
+    assert g.reason is None
+
+
+def test_compute_boarding_accepts_a_formation_provider(monkeypatch):
+    conn, stepoff = _patch_edge(monkeypatch)
+    formation = parse_wagenreihung(_wagenreihung_fixture())
+    calls = []
+
+    def provider():
+        calls.append(1)
+        return formation
+
+    g = compute_boarding(conn, relation_id=1, arr_ref="7", dep_ref="8",
+                         stepoff_node=stepoff, formation_provider=provider)
+    assert g.coach == "2" and g.formation_source == "db-wagenreihung"
+    assert calls == [1]                              # provider invoked exactly once, lazily
+
+
+def test_compute_boarding_no_formation_stays_position_only(monkeypatch):
+    conn, stepoff = _patch_edge(monkeypatch)
+    g = compute_boarding(conn, relation_id=1, arr_ref="7", dep_ref="8", stepoff_node=stepoff)
+    assert g.has_position                            # the position half still works
+    assert g.coach is None and g.formation_source is None
+    assert g.reason == NO_FORMATION_FEED
+
+
+def test_compute_boarding_swallows_unavailable_formation(monkeypatch):
+    # A geo-blocked feed raises FormationUnavailable; boarding must degrade to
+    # position-only, never propagate the failure.
+    conn, stepoff = _patch_edge(monkeypatch)
+
+    def blocked():
+        raise FormationUnavailable("geo-blocked from this host")
+
+    g = compute_boarding(conn, relation_id=1, arr_ref="7", dep_ref="8",
+                         stepoff_node=stepoff, formation_provider=blocked)
+    assert g.has_position
+    assert g.coach is None and g.reason == NO_FORMATION_FEED
+
+
+def test_compute_boarding_accepts_a_prebuilt_train_formation(monkeypatch):
+    # A TrainFormation can be injected directly (bypassing the normalized model);
+    # coach_at_offset drives the same result.
+    conn, stepoff = _patch_edge(monkeypatch)
+    tf = TrainFormation.uniform("local", num_coaches=4, coach_length_m=26.4)
+    g = compute_boarding(conn, relation_id=1, arr_ref="7", dep_ref="8",
+                         stepoff_node=stepoff, formation=tf)
+    assert g.coach == "2" and g.reason is None       # 50 m -> coach 2 (26.4..52.8)
 
 
 # ---------------------------------------------------------------------------

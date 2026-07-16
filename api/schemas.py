@@ -141,6 +141,95 @@ class StationPlatformsResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class StationHealthPair(BaseModel):
+    """One platform pair that does not plainly connect. `kind` is 'stitchable'
+    (a route exists only once synthetic stitch bridges are enabled) or 'island'
+    (no route found either way). Surfaced as a few worked examples of a station's
+    disconnects."""
+
+    from_platform: str
+    to_platform: str
+    kind: str
+
+
+class StationHealthResponse(BaseModel):
+    """A single station's platform-connectivity breakdown -- the Map-health tool's
+    per-station query (/station-health). Every unordered platform pair is bucketed
+    connected / stitchable / island by two `find_shortest_path` passes (plain, then
+    with stitch bridges); `connected`/`stitchable`/`island` are pair counts and the
+    matching `*_pct` are their share of the pairs evaluated. `sampled` is true when a
+    pathologically large station was down-sampled to bound the pair count (see
+    api/station_health.py). `examples` lists a few of the non-connected pairs.
+    `found=False` (with `reason`) when no station sits near the coordinate."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    found: bool
+    platform_count: int = 0
+    connected: int = 0
+    stitchable: int = 0
+    island: int = 0
+    connected_pct: float = 0.0
+    stitchable_pct: float = 0.0
+    island_pct: float = 0.0
+    sampled: bool = False
+    examples: List[StationHealthPair] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Nearest facility -- /facilities
+#
+# The POI layer (amenity/shop/... near a station) is NOT in the tag-scoped
+# transfr_eu DB; it comes from the optional `viz_export` details layer, which
+# needs a local planet extract (see api/facilities.py). So this endpoint follows
+# the same honest-degradation pattern as boarding guidance: when the layer isn't
+# producible on this host, `found=False` with a typed `reason` (`no_poi_layer`)
+# rather than a guess. The pure ranking (nearest-first, category-filtered) is
+# tested offline against a synthetic POI list.
+# ---------------------------------------------------------------------------
+
+
+class Facility(BaseModel):
+    """One mapped facility (a POI) near the station, ranked by straight-line
+    distance from the station centroid. `category` is the OSM bucket
+    (amenity/shop/tourism/office/leisure) and `subtype` the specific tag
+    (`toilets`, `cafe`, ...), mirroring the `viz_export` details shape. The
+    `nearest_platform`/`walk_*` fields are filled only when a `from_platform`
+    anchor was given and a routed walk to the facility's nearest platform
+    resolved -- otherwise `distance_m` (straight-line) is the only measure."""
+
+    name: Optional[str] = None
+    category: str
+    subtype: Optional[str] = None
+    level: Optional[str] = None
+    distance_m: float
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    nearest_platform: Optional[str] = None
+    walk_time_s: Optional[float] = None
+    walk_distance_m: Optional[float] = None
+
+
+class FacilitiesResponse(BaseModel):
+    """Facilities of one `category` near the station nearest a coordinate, nearest
+    first. `found` is True iff at least one was returned; otherwise `reason` says
+    why (`station_unresolved`, `unsupported_category`, `no_poi_layer` when the POI
+    source isn't available on this host, or `none_mapped` when the layer is present
+    but this station tags none of that category)."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    category: str
+    found: bool
+    reason: Optional[str] = None
+    facilities: List[Facility] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Walk geometry (viz_export) delivery -- /walk and /walks
 #

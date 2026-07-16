@@ -90,6 +90,39 @@ struct ContractDecodeTests {
         #expect(pw.walkDistanceM == 107.0)
     }
 
+    // MARK: - /facilities contract (nearest facility; honest degradation)
+
+    @Test func decodesFacilitiesFound() throws {
+        let data = try Self.fixture("facilities_berlin_toilets")
+        let r = try TransfrJSON.decode(FacilitiesResponse.self, from: data)
+        #expect(r.found)
+        #expect(r.station == "Berlin, S Hauptbahnhof")
+        #expect(r.relationId == 5688520)
+        #expect(r.facilities.count == 2)
+        // snake_case → camelCase across the row's fields, nearest first.
+        let nearest = try #require(r.facilities.first)
+        #expect(nearest.subtype == "toilets")
+        #expect(nearest.distanceM == 7.2)
+        #expect(nearest.nearestPlatform == "1")
+        #expect(nearest.walkTimeS == 33.0)
+        #expect(nearest.walkDistanceM == 38.0)
+        // A facility without a routed anchor keeps distance only.
+        #expect(r.facilities[1].nearestPlatform == nil)
+        #expect(r.facilities[1].walkTimeS == nil)
+        #expect(r.facilities[1].level == "2")
+    }
+
+    @Test func decodesFacilitiesDegraded() throws {
+        // The honest-degradation state: layer absent → found=false + typed reason.
+        let data = try Self.fixture("facilities_no_layer")
+        let r = try TransfrJSON.decode(FacilitiesResponse.self, from: data)
+        #expect(!r.found)
+        #expect(r.reason == "no_poi_layer")
+        #expect(r.facilities.isEmpty)
+        // The station still resolved even though its POIs aren't available.
+        #expect(r.station == "Berlin, S Hauptbahnhof")
+    }
+
     // MARK: - /station-platforms contract (the walk-only door)
 
     @Test func decodesStationPlatforms() throws {
@@ -102,5 +135,26 @@ struct ContractDecodeTests {
         #expect(sp.station == "Berlin, S Hauptbahnhof")
         #expect(sp.platforms.count == 14)
         #expect(sp.platforms.first == "1" && sp.platforms.last == "16")
+    }
+
+    // MARK: - /station-health contract (the Map-health per-station query)
+
+    @Test func decodesStationHealth() throws {
+        let data = try Self.fixture("station_health_berlin")
+        let h = try TransfrJSON.decode(StationHealthResponse.self, from: data)
+        #expect(h.found)
+        #expect(h.station == "Berlin, S Hauptbahnhof")
+        #expect(h.platformCount == 14)
+        // snake_case platform_count / connected_pct → camelCase; the three buckets
+        // sum to the evaluated pairs.
+        #expect(h.connected == 89 && h.stitchable == 1 && h.island == 1)
+        #expect(h.pairCount == 91)
+        #expect(h.connectedPct == 97.8)
+        #expect(!h.sampled)
+        // The example pairs carry their kind, stitchable first.
+        #expect(h.examples.count == 2)
+        #expect(h.examples[0].kind == "stitchable")
+        #expect(h.examples[0].fromPlatform == "9" && h.examples[0].toPlatform == "12")
+        #expect(h.examples[1].kind == "island")
     }
 }

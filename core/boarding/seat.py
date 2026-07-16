@@ -240,6 +240,35 @@ class TrainFormation:
         frac = (seat - 0.5) / self.seats_per_coach
         return start_m + frac * (end_m - start_m)
 
+    def coach_at_offset(self, offset_m: float) -> CoachId:
+        """The coach you step into at `offset_m` metres from the A-end.
+
+        The inverse of the seat->offset direction: given a point along the
+        platform (a resolved step-off position), return which coach stops there.
+        A point squarely inside a coach's span returns that coach. A point that
+        falls in an inter-coach gap, before the first coach, or past the last --
+        which is the norm for a real step-off point (couplings, a platform longer
+        than the train, a clamped offset) -- returns the NEAREST coach by span
+        distance rather than raising, because you still board the closest
+        carriage. A point on the exact boundary between two coaches resolves to
+        the earlier one (the coach that ends there), matching locate_offset's
+        "last segment whose start is <= offset" tie-break.
+
+        `coach_span_m` need not be given in platform order; coaches are scanned
+        by their start offset so the result is deterministic regardless.
+        """
+        ordered = sorted(self.coach_span_m.items(), key=lambda kv: kv[1][0])
+        for coach, (start_m, end_m) in ordered:
+            if start_m <= offset_m <= end_m:
+                return coach
+        # Gap / overhang: no span contains the offset, so pick the coach whose
+        # span edge is nearest to it (distance 0 was handled by the loop above).
+        def _gap(span: Tuple[float, float]) -> float:
+            start_m, end_m = span
+            return start_m - offset_m if offset_m < start_m else offset_m - end_m
+
+        return min(ordered, key=lambda kv: _gap(kv[1]))[0]
+
     @classmethod
     def uniform(
         cls,
