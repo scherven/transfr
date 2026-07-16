@@ -17,3 +17,4 @@ ios/TransfrCore/.build_tmp
 ios/TransfrApp.xcodeproj/
 ios/TransfrApp/.swiftpm/
 ios/TransfrCore/.swiftpm/
+tokenfile
