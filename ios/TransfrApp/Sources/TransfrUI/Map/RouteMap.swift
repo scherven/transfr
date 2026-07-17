@@ -221,10 +221,11 @@ private struct RouteMapRenderer {
     private func drawLabels(_ ctx: inout GraphicsContext, stops: [MapStop], pts: [CGPoint]) {
         let depTime = Fmt.time(journey.legs.first?.departure)
         let arrTime = Fmt.time(journey.legs.last?.arrival)
-        for (stop, p) in zip(stops, pts) {
-            let right = p.x <= proj.vbw * 0.58
-            let x = p.x + (right ? 3.4 : -3.4)
-            let anchor: UnitPoint = right ? .leading : .trailing
+        let layout = RouteLabelLayout.place(pts, vbw: proj.vbw, vbh: proj.vbh)
+        for ((stop, p), place) in zip(zip(stops, pts), layout) {
+            let x = p.x + (place.right ? 3.4 : -3.4)
+            let y = p.y + place.dy
+            let anchor: UnitPoint = place.right ? .leading : .trailing
             let name: String, sub: String, color: Color
             switch stop.kind {
             case .origin:
@@ -239,9 +240,9 @@ private struct RouteMapRenderer {
                 color = v.color
             }
             ctx.draw(Text(name).font(.system(size: 3.1, weight: .semibold)).foregroundColor(color),
-                     at: CGPoint(x: x, y: p.y - 1.3), anchor: anchor)
+                     at: CGPoint(x: x, y: y + RouteLabelLayout.nameDY), anchor: anchor)
             ctx.draw(Text(sub).font(.system(size: 2.5)).foregroundColor(Theme.ink3),
-                     at: CGPoint(x: x, y: p.y + 1.7), anchor: anchor)
+                     at: CGPoint(x: x, y: y + RouteLabelLayout.subDY), anchor: anchor)
         }
     }
 
@@ -277,6 +278,90 @@ private struct RouteMapRenderer {
             acc += len
         }
         return pts.last ?? .zero
+    }
+}
+
+// MARK: - Label de-clutter
+
+/// Where one stop's label goes: which side of its dot, and the vertical shift it
+/// needed to clear its neighbours.
+struct RouteLabelPlacement: Equatable {
+    /// Text runs rightwards from the dot (a `.leading` anchor) when true.
+    let right: Bool
+    /// Shift from the dot in viewBox units — `0` when nothing collided, positive down.
+    let dy: Double
+}
+
+/// Keeps close stops' labels off each other.
+///
+/// Picking a side by x is not enough. The frame is fitted to the route (#18), so
+/// Paris→Basel→Zürich lands Basel at (76.3, 74.1) and Zürich at (88.0, 77.4) —
+/// 12 units apart and *both* past the split, so both labels hang to the left and
+/// Basel's sub-label prints on the same line as Zürich's name (0.08 units apart).
+/// Flipping one to the other side is no fix: Zürich's name would run off the
+/// 100-unit box from x=88. So labels stack instead — sorted top-to-bottom, each is
+/// pushed down just far enough to clear the last one placed on its own side. Stops
+/// that are already clear never move, and opposite sides never interact.
+///
+/// Pushing only ever downwards would walk a crowded stack off the bottom of the
+/// frame — a real shape, not a contrived one: one distant stop (Paris) sets the
+/// zoom and the rest (Basel, Zürich, Winterthur) pile against the far edge. So the
+/// stack is bounded at both ends — down from the top edge, then back up from the
+/// bottom — which spreads such a cluster around itself instead of off the map.
+///
+/// The same greedy shape as `drawCities`' distance thinning, and mirrored by
+/// `labelPlacements()` in agents/design/route-maps.html — the two must stay 1:1.
+enum RouteLabelLayout {
+    /// Fraction of the width past which a label flips to the left of its dot.
+    static let sideSplit: Double = 0.58
+
+    /// How far a label's ink reaches above and below its anchor. The HTML places its
+    /// two lines by baseline and Swift by centre, so these take the larger of the
+    /// two readings — they only bound the frame, so the roomier one is the safe one.
+    static let inkAbove: Double = 2.9
+    static let inkBelow: Double = 3.5
+
+    /// Where the two lines of one label sit relative to its anchor: the name above,
+    /// the sub below. `drawLabels` draws at these, and `blockH` is chosen against
+    /// their separation — keep them together.
+    static let nameDY: Double = -1.3
+    static let subDY: Double = 1.7
+
+    /// Centre-to-centre spacing forced between two stacked labels.
+    ///
+    /// Not merely "tall enough to not overlap". The two lines *within* one label are
+    /// `subDY - nameDY` (3.0) apart, so a spacing that only clears the ink would
+    /// leave neighbouring *blocks* closer together than one block's own lines — and
+    /// by proximity the sub-label would read as belonging to the stop below it. On a
+    /// transfer map that is worse than the overlap it replaces: it puts the wrong
+    /// platform and verdict on the wrong station. 8.4 leaves the gap between blocks
+    /// ~1.5× the gap inside one. `labelSpacingOutranksLineSpacing` pins this.
+    static let blockH: Double = 8.4
+
+    /// Placements for `pts`, returned in the same order.
+    static func place(_ pts: [CGPoint], vbw: Double, vbh: Double) -> [RouteLabelPlacement] {
+        let right = pts.map { Double($0.x) <= vbw * sideSplit }
+        var dy = [Double](repeating: 0, count: pts.count)
+        // Top-to-bottom, ties broken by index so this and the HTML agree exactly.
+        let order = pts.indices.sorted { pts[$0].y == pts[$1].y ? $0 < $1 : pts[$0].y < pts[$1].y }
+        for side in [true, false] {
+            let run = order.filter { right[$0] == side }
+            guard !run.isEmpty else { continue }
+            var y = run.map { Double(pts[$0].y) }
+            // Down from the top edge: each label clears the one above it.
+            y[0] = max(y[0], inkAbove)
+            for k in 1..<y.count { y[k] = max(y[k], y[k - 1] + blockH) }
+            // Then back up from the bottom edge, so a stack that ran off the frame is
+            // pulled onto it rather than left in the sea. A route with more labels
+            // than the frame can hold is out of room either way; this loses the top,
+            // which is the one nearest the edge it was already pushed from.
+            y[y.count - 1] = min(y[y.count - 1], vbh - inkBelow)
+            for k in stride(from: y.count - 2, through: 0, by: -1) {
+                y[k] = min(y[k], y[k + 1] - blockH)
+            }
+            for (k, i) in run.enumerated() { dy[i] = y[k] - Double(pts[i].y) }
+        }
+        return zip(right, dy).map { RouteLabelPlacement(right: $0, dy: $1) }
     }
 }
 

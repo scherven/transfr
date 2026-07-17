@@ -237,6 +237,141 @@ struct RouteMapTests {
         }
     }
 
+    // MARK: - Label de-clutter
+
+    /// Every label that hangs off the same side must be at least `blockH` apart.
+    /// Opposite sides can be level — their text runs away from each other.
+    static func expectLabelsClear(_ pts: [CGPoint], _ place: [RouteLabelPlacement], _ what: String,
+                                  sourceLocation: SourceLocation = #_sourceLocation) {
+        for i in pts.indices {
+            for j in pts.indices.dropFirst(i + 1) where place[i].right == place[j].right {
+                let a = pts[i].y + place[i].dy, b = pts[j].y + place[j].dy
+                #expect(abs(a - b) >= RouteLabelLayout.blockH - 0.001,
+                        "\(what): labels \(i) and \(j) are \(abs(a - b)) apart on the same side",
+                        sourceLocation: sourceLocation)
+            }
+        }
+    }
+
+    /// Every label's ink stays on the canvas. The de-clutter moves labels, so it can
+    /// just as easily move them into the sea — which is no more readable than the
+    /// overlap it set out to fix.
+    static func expectLabelsOnCanvas(_ p: MapProjection, _ pts: [CGPoint],
+                                     _ place: [RouteLabelPlacement], _ what: String,
+                                     sourceLocation: SourceLocation = #_sourceLocation) {
+        for (i, pl) in place.enumerated() {
+            let y = Double(pts[i].y) + pl.dy
+            #expect(y - RouteLabelLayout.inkAbove >= -0.001,
+                    "\(what): label \(i) runs off the top at \(y)", sourceLocation: sourceLocation)
+            #expect(y + RouteLabelLayout.inkBelow <= p.vbh + 0.001,
+                    "\(what): label \(i) runs off the bottom at \(y) (vbh \(p.vbh))",
+                    sourceLocation: sourceLocation)
+        }
+    }
+
+    static func placements(_ stops: [(String, Double, Double)]) -> ([CGPoint], [RouteLabelPlacement]) {
+        let p = proj(stops)
+        let pts = stops.map { p.point($0.1, $0.2) }
+        return (pts, RouteLabelLayout.place(pts, vbw: p.vbw, vbh: p.vbh))
+    }
+
+    /// The bug: fitting the frame to the route (#18) puts Basel at (76.3, 74.1) and
+    /// Zürich at (88.0, 77.4) — 12 units apart, both past the 0.58 split, so both
+    /// labels hang left and "Pl 7→8 · comfortable" printed on the same line as
+    /// "Zürich HB" (baselines 0.08 apart in the prototype).
+    @Test func closeStopsDoNotOverlapTheirLabels() {
+        let (pts, place) = Self.placements(Self.parisZurich)
+
+        // The case only bites because both labels hang the same way; a side flip is
+        // no escape either — Zürich's name would run off the box from x=88.
+        #expect(place[1].right == place[2].right, "fixture no longer puts both labels on one side")
+        #expect(!place[2].right && pts[2].x > 80, "Zürich should be far right, hanging left")
+        // Untreated they'd be ~3.3 apart — well inside one block.
+        let natural = abs(pts[1].y - pts[2].y)
+        #expect(natural < RouteLabelLayout.blockH,
+                "fixture no longer reproduces the overlap: stops are \(natural) apart")
+
+        Self.expectLabelsClear(pts, place, "Paris→Basel→Zürich")
+        Self.expectLabelsOnCanvas(Self.proj(Self.parisZurich), pts, place, "Paris→Basel→Zürich")
+        // Paris is far away, and on the other side — it must not be dragged along.
+        #expect(place[0].dy == 0, "Paris moved \(place[0].dy) for no reason")
+        // Only the lower of the pair gives way, and only by what it owed.
+        #expect(place[1].dy == 0, "Basel should hold its place")
+        #expect(abs(place[2].dy - (RouteLabelLayout.blockH - natural)) < 0.001,
+                "Zürich should move exactly enough to clear, moved \(place[2].dy)")
+    }
+
+    /// The flip side: a well-spread route must be left exactly as it was. These are
+    /// the positions the prototype draws today.
+    @Test func wellSpacedStopsAreLeftAlone() {
+        let (pts, place) = Self.placements(Self.hamburgStuttgart)
+        Self.expectLabelsClear(pts, place, "Hamburg→Stuttgart")
+        for (i, pl) in place.enumerated() {
+            #expect(pl.dy == 0, "stop \(i) (\(Self.hamburgStuttgart[i].0)) moved \(pl.dy)")
+        }
+    }
+
+    /// Three stops in a heap, not just two: each must clear the one above it, so the
+    /// pass has to keep stacking rather than resolve one pair and stop.
+    ///
+    /// This is also the shape that breaks a push-downwards-only stagger: the far stop
+    /// sets the zoom, the cluster lands hard against the bottom of the frame, and the
+    /// last label is shoved off the map. It must spread around the cluster instead.
+    @Test func aChainOfCloseStopsAllSeparates() {
+        let stops = [("Start", 50.20, 9.00), ("A", 47.60, 8.10), ("B", 47.55, 8.20), ("C", 47.50, 8.30)]
+        let p = Self.proj(stops)
+        let (pts, place) = Self.placements(stops)
+        #expect(pts.dropFirst().allSatisfy { $0.y > p.vbh - 20 },
+                "fixture should pile the cluster against the bottom edge")
+        Self.expectLabelsClear(pts, place, "chain")
+        Self.expectLabelsOnCanvas(p, pts, place, "chain")
+    }
+
+    /// Stops level with each other but on opposite sides never interact.
+    @Test func oppositeSidesDoNotPushEachOther() {
+        // Same latitude, far apart in longitude → same y, x either side of the split.
+        let stops = [("West", 48.0, 2.0), ("East", 48.0, 16.0)]
+        let (pts, place) = Self.placements(stops)
+        #expect(abs(pts[0].y - pts[1].y) < 0.001, "fixture should put both at the same height")
+        #expect(place[0].right != place[1].right, "fixture should split them across the sides")
+        for pl in place { #expect(pl.dy == 0, "opposite sides should not push, moved \(pl.dy)") }
+    }
+
+    /// The constant is load-bearing, not cosmetic. Two labels must end up further
+    /// apart than the two lines *inside* one label, or the sub-label reads as
+    /// belonging to the stop below — the wrong platform on the wrong station.
+    @Test func labelSpacingOutranksLineSpacing() {
+        let withinOneLabel = RouteLabelLayout.subDY - RouteLabelLayout.nameDY
+        let betweenLabels = RouteLabelLayout.blockH - withinOneLabel
+        #expect(betweenLabels > withinOneLabel,
+                "blockH \(RouteLabelLayout.blockH) leaves \(betweenLabels) between labels vs \(withinOneLabel) inside one — the sub would group with the wrong stop")
+    }
+
+    /// Ordering must not depend on the stop order, or the two renderers could
+    /// disagree: the HTML sorts the same way (`(y-y) || (i-i)`).
+    @Test func placementIsIndependentOfStopOrder() {
+        let p = Self.proj(Self.parisZurich)
+        let (pts, place) = Self.placements(Self.parisZurich)
+        let reversedPlace = RouteLabelLayout.place(Array(pts.reversed()), vbw: p.vbw, vbh: p.vbh)
+        for (a, b) in zip(place, reversedPlace.reversed()) {
+            #expect(a == b, "reversing the stops changed the layout: \(a) vs \(b)")
+        }
+    }
+
+    /// Ties are broken by index, so a degenerate route still lays out deterministically.
+    @Test func labelsAtIdenticalPointsStillSeparate() {
+        let stops = [("A", 50.0, 9.0), ("A again", 50.0, 9.0)]
+        let (pts, place) = Self.placements(stops)
+        Self.expectLabelsClear(pts, place, "identical stops")
+        #expect(place[0].dy == 0, "the first of the pair should hold its place")
+        #expect(abs(place[1].dy - RouteLabelLayout.blockH) < 0.001,
+                "the second should drop a full block, dropped \(place[1].dy)")
+    }
+
+    @Test func placeHandlesAnEmptyRoute() {
+        #expect(RouteLabelLayout.place([], vbw: 100, vbh: 126.12).isEmpty)
+    }
+
     // MARK: - The vendored asset
 
     @Test func geographyLoadsFromTheBundle() {
