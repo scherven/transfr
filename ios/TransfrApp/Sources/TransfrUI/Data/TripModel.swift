@@ -9,9 +9,11 @@ import TransfrCore
 @MainActor
 @Observable
 public final class TripModel {
-    // Query
-    public var origin: String = "Hamburg Hbf"
-    public var destination: String = "Stuttgart Hbf"
+    // Query. Both ends start genuinely empty — the input fields carry real
+    // placeholders showing what an entry looks like, rather than shipping an
+    // example query that reads as something the user chose.
+    public var origin: String = ""
+    public var destination: String = ""
     public var departure: Date = TripModel.defaultDeparture()
 
     // Current-location origin (agents/design/route-maps.html §3). `usingCurrentLocation`
@@ -78,14 +80,26 @@ public final class TripModel {
     public var walkLookup: WalkLookup?
 
     private let repo: JourneyRepository
+    /// The routing profile the current `response` was searched under, captured at
+    /// `plan()` time. The streamed verdicts must use the SAME profile as the
+    /// search that produced the itineraries — reading the live setting per
+    /// `/assess` call instead would let a mid-stream toggle flip leave one
+    /// itinerary holding a mix of with-lift and lift-free verdicts.
+    private var plannedAvoidElevators = false
     /// Expands a pasted short link (HTTP redirect) before parsing. Injectable so a
     /// test can supply a stub instead of hitting the network.
     private let linkExpander: LinkExpanding
+    /// Past searches, recorded on every successful plan for one-tap reuse (#38).
+    /// Optional so a test (or a headless model) can skip persistence — the recording
+    /// is a no-op when absent.
+    private let recents: RecentSearchStore?
 
     public init(repository: JourneyRepository,
-                linkExpander: LinkExpanding = URLSessionLinkExpander()) {
+                linkExpander: LinkExpanding = URLSessionLinkExpander(),
+                recents: RecentSearchStore? = nil) {
         self.repo = repository
         self.linkExpander = linkExpander
+        self.recents = recents
     }
 
     public var journeys: [Journey] { response?.journeys ?? [] }
@@ -113,7 +127,7 @@ public final class TripModel {
         response = nil
         path = [.results]
         do {
-            let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false)
+            let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false, noElevators: avoidElevators)
             guard generation == planGeneration else { return }
             response = resp
             load = .loaded
@@ -129,7 +143,7 @@ public final class TripModel {
     /// `RouteLinkParser`, and converges on the same `plan()` path as typed input.
     /// Fails soft — a bad or unsupported link surfaces a message on the CTA, never
     /// a crash.
-    public func planFromLink(_ raw: String) async {
+    public func planFromLink(_ raw: String, avoidElevators: Bool = false) async {
         load = .loading
         let parsed: RouteLinkParser.ParsedRouteLink
         do {
@@ -154,7 +168,7 @@ public final class TripModel {
         usingCurrentLocation = false
         originUserEdited = true
         if let dep = parsed.departure { departure = dep }
-        await plan()
+        await plan(avoidElevators: avoidElevators)
     }
 
     /// Expand (only if a short link) then parse. Pure parsing lives in
@@ -292,10 +306,11 @@ public final class TripModel {
 
     private func runVerdictStream(_ work: [(j: Int, t: Int, ic: AssessInterchange)]) async {
         let repo = self.repo
+        let noElevators = plannedAvoidElevators   // the search's profile, not the live setting
         await withTaskGroup(of: (Int, Int, Transfer?).self) { group in
             for item in work {
                 let (j, t, ic) = (item.j, item.t, item.ic)
-                group.addTask { (j, t, (try? await repo.assess([ic]))?.first) }
+                group.addTask { (j, t, (try? await repo.assess([ic], noElevators: noElevators))?.first) }
             }
             for await (j, t, transfer) in group {
                 if Task.isCancelled { return }

@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Levels — transfr prototype</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ── Tokens: ported 1:1 from ios .../Theme/Theme.swift so this reads as the app ── */
+  :root{
+    --paper:#F6F8FC; --panel:#FFFFFF; --panel2:#EFF3F9; --panel3:#E7ECF4; --bg:#E4E9F1;
+    --ink:#0E1626; --ink2:#55607A; --ink3:#8A93A6;
+    --line:rgba(14,22,38,.10); --line2:rgba(14,22,38,.055);
+    --accent:#0A63F0; --accent-soft:rgba(10,99,240,.10);
+    --go:#0FA968; --tight:#C9820A; --miss:#E0402F; --nodata:#6B7688;
+    --go-soft:rgba(15,169,104,.12); --tight-soft:rgba(201,130,10,.14);
+    --nodata-soft:rgba(107,118,136,.14);
+    /* connector kinds — Theme.stair / .esc / .elev */
+    --stair:#8B5CF6; --esc:#0EA5A5; --elev:#E0663A;
+    --shadow:0 1px 2px rgba(14,22,38,.05),0 10px 30px rgba(14,22,38,.08);
+    --shadow-sm:0 1px 2px rgba(14,22,38,.06),0 4px 14px rgba(14,22,38,.06);
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#0A0E17; --panel:#131A28; --panel2:#1A2233; --panel3:#222C40; --bg:#05070D;
+    --ink:#EAF0FA; --ink2:#98A4BC; --ink3:#616C86;
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.06);
+    --accent:#4EA6FF; --accent-soft:rgba(78,166,255,.14);
+    --go:#2FD39A; --tight:#F5B740; --miss:#FF6A5E; --nodata:#8894AB;
+    --go-soft:rgba(47,211,154,.15); --tight-soft:rgba(245,183,64,.16);
+    --nodata-soft:rgba(136,148,171,.16);
+    --stair:#A78BFA; --esc:#2DD4BF; --elev:#FB8A5C;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.5);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.4);
+    color-scheme:dark;
+  }}
+  :root[data-theme="light"]{
+    --paper:#F6F8FC; --panel:#FFFFFF; --panel2:#EFF3F9; --panel3:#E7ECF4; --bg:#E4E9F1;
+    --ink:#0E1626; --ink2:#55607A; --ink3:#8A93A6;
+    --line:rgba(14,22,38,.10); --line2:rgba(14,22,38,.055);
+    --accent:#0A63F0; --accent-soft:rgba(10,99,240,.10);
+    --go:#0FA968; --tight:#C9820A; --miss:#E0402F; --nodata:#6B7688;
+    --go-soft:rgba(15,169,104,.12); --tight-soft:rgba(201,130,10,.14); --nodata-soft:rgba(107,118,136,.14);
+    --stair:#8B5CF6; --esc:#0EA5A5; --elev:#E0663A;
+    --shadow:0 1px 2px rgba(14,22,38,.05),0 10px 30px rgba(14,22,38,.08);
+    --shadow-sm:0 1px 2px rgba(14,22,38,.06),0 4px 14px rgba(14,22,38,.06);
+    color-scheme:light;
+  }
+  :root[data-theme="dark"]{
+    --paper:#0A0E17; --panel:#131A28; --panel2:#1A2233; --panel3:#222C40; --bg:#05070D;
+    --ink:#EAF0FA; --ink2:#98A4BC; --ink3:#616C86;
+    --line:rgba(255,255,255,.10); --line2:rgba(255,255,255,.06);
+    --accent:#4EA6FF; --accent-soft:rgba(78,166,255,.14);
+    --go:#2FD39A; --tight:#F5B740; --miss:#FF6A5E; --nodata:#8894AB;
+    --go-soft:rgba(47,211,154,.15); --tight-soft:rgba(245,183,64,.16); --nodata-soft:rgba(136,148,171,.16);
+    --stair:#A78BFA; --esc:#2DD4BF; --elev:#FB8A5C;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.5);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.4);
+    color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{
+    font-family:system-ui,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    background:var(--paper); color:var(--ink);
+    -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+    line-height:1.5;
+  }
+  .mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+  .col{max-width:1000px;margin:0 auto;padding:0 24px}
+
+  /* ── Page rhythm ── */
+  header.top{padding:64px 24px 40px;position:relative}
+  .eyebrow{font-size:11.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+  h1{font-size:clamp(38px,6vw,58px);line-height:1.02;letter-spacing:-.02em;margin:.32em 0 0;font-weight:700;text-wrap:balance}
+  .lede{font-size:18px;color:var(--ink2);max-width:56ch;margin:18px 0 0;text-wrap:pretty}
+  .lede b{color:var(--ink);font-weight:600}
+
+  section{padding:34px 0}
+  .sec-head{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+  .sec-num{font-size:12px;font-weight:700;color:var(--accent);font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  h2{font-size:26px;letter-spacing:-.015em;margin:0;font-weight:650;text-wrap:balance}
+  .sec-sub{font-size:15.5px;color:var(--ink2);max-width:66ch;margin:8px 0 24px;text-wrap:pretty}
+  .rule{height:1px;background:var(--line);border:0;margin:0}
+
+  /* ── Controls (segmented + toggle) ── */
+  .controls{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin:0 0 22px}
+  .seg{display:inline-flex;background:var(--panel2);border-radius:12px;padding:3px;gap:2px;box-shadow:inset 0 0 0 1px var(--line2)}
+  .seg button{border:0;background:transparent;color:var(--ink2);font:inherit;font-size:13px;font-weight:600;
+              padding:7px 13px;border-radius:9px;cursor:pointer;white-space:nowrap;transition:.15s}
+  .seg button[aria-pressed="true"]{background:var(--panel);color:var(--ink);box-shadow:var(--shadow-sm)}
+  .toggle{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;color:var(--ink2);cursor:pointer;user-select:none}
+  .switch{width:42px;height:25px;border-radius:20px;background:var(--panel3);position:relative;transition:.18s;flex:0 0 auto;box-shadow:inset 0 0 0 1px var(--line2)}
+  .switch::after{content:"";position:absolute;top:2.5px;left:2.5px;width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:.18s}
+  .toggle[aria-pressed="true"] .switch{background:var(--accent)}
+  .toggle[aria-pressed="true"] .switch::after{left:19.5px}
+
+  /* ── The three-panel ladder ── */
+  .ladder{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;align-items:start}
+  .pcard{background:var(--panel);border-radius:18px;padding:14px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);
+         display:flex;flex-direction:column;gap:10px}
+  .pcard.reco{box-shadow:var(--shadow),inset 0 0 0 1.5px var(--accent)}
+  .pcard h3{margin:0;font-size:15px;font-weight:650;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .tag{font-size:9.5px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap;letter-spacing:.02em}
+  .tag-now{background:var(--miss);color:#fff}
+  .tag-min{background:var(--tight-soft);color:var(--tight)}
+  .tag-reco{background:var(--accent);color:#fff}
+  .pcard .sub{font-size:12px;color:var(--ink3);line-height:1.4;margin:-4px 0 0}
+
+  /* level picker — mirrors prototype.html .level-picker (L331) */
+  .picker{display:flex;gap:4px;background:var(--panel2);padding:4px;border-radius:11px;box-shadow:inset 0 0 0 1px var(--line2)}
+  .picker button{flex:1;font:inherit;font-size:11.5px;font-weight:600;color:var(--ink2);background:transparent;border:0;
+                 padding:7px 4px;border-radius:8px;cursor:pointer;font-variant-numeric:tabular-nums;transition:.16s;white-space:nowrap}
+  .picker button.on{background:var(--panel);color:var(--ink);box-shadow:var(--shadow-sm)}
+  .picker button.phantom{color:var(--miss)}
+  .picker button.phantom.on{color:var(--miss)}
+
+  /* the plan canvas — mirrors prototype.html .stage3d (L320) */
+  .plan{background:var(--paper);border-radius:14px;overflow:hidden;box-shadow:inset 0 0 0 1px var(--line);position:relative}
+  .plan svg{display:block;width:100%;height:auto}
+  .plan text{font-family:system-ui,-apple-system,sans-serif}
+
+  .statline{display:flex;flex-wrap:wrap;gap:5px 12px;font-size:11px;color:var(--ink3);font-family:ui-monospace,"SF Mono",Menlo,monospace;
+            font-variant-numeric:tabular-nums}
+  .statline b{color:var(--ink2);font-weight:600}
+  .statline .bad{color:var(--miss);font-weight:700}
+  .statline .good{color:var(--go);font-weight:700}
+
+  .verdict{font-size:12.5px;color:var(--ink2);line-height:1.45;text-wrap:pretty}
+  .verdict b{color:var(--ink);font-weight:640}
+
+  /* ── legend ── */
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2);margin-top:16px}
+  .legend .li{display:flex;align-items:center;gap:7px}
+  .lg-dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+  .lg-line{width:18px;height:3px;border-radius:2px;flex:0 0 auto}
+  .lg-ring{width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:transparent}
+
+  /* ── ribbon ── */
+  .ribbon-stage{background:var(--panel);border-radius:16px;padding:16px 14px 12px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line)}
+  .ribbon-stage + .ribbon-stage{margin-top:14px}
+  .ribbon-stage .rb-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
+  .ribbon-stage .rb-t{font-size:13.5px;font-weight:640}
+  .ribbon-stage .rb-s{font-size:11.5px;color:var(--ink3);font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .ribbon-stage svg{display:block;width:100%;height:auto;max-width:560px;margin:0 auto}
+
+  /* ── phone frame (route-maps.html) ── */
+  .phone{width:300px;background:var(--panel);border-radius:38px;padding:9px;
+         box-shadow:var(--shadow), inset 0 0 0 1px var(--line);position:relative;flex:0 0 auto}
+  .phone-screen{background:var(--paper);border-radius:30px;overflow:hidden;position:relative}
+  .statusbar{height:34px;display:flex;align-items:flex-end;justify-content:space-between;padding:0 20px 5px;font-size:12px;font-weight:600;color:var(--ink)}
+  .sbicons{display:inline-flex;align-items:flex-end;gap:6px}
+  .sig{display:inline-flex;align-items:flex-end;gap:1.5px;height:11px}
+  .sig i{width:2.5px;background:var(--ink);border-radius:1px}
+  .sig i:nth-child(1){height:4px}.sig i:nth-child(2){height:6px}.sig i:nth-child(3){height:8px}.sig i:nth-child(4){height:11px}
+  .batt{width:22px;height:11px;border:1.2px solid var(--ink);border-radius:3px;position:relative;opacity:.9}
+  .batt::before{content:"";position:absolute;left:1.5px;top:1.5px;bottom:1.5px;right:6px;background:var(--ink);border-radius:1px}
+  .batt::after{content:"";position:absolute;right:-2.6px;top:3px;width:1.6px;height:5px;background:var(--ink);border-radius:1px}
+  .notch{position:absolute;top:9px;left:50%;transform:translateX(-50%);width:104px;height:26px;background:var(--panel);border-radius:0 0 16px 16px;z-index:5}
+  .navbar{display:flex;flex-direction:column;align-items:center;gap:1px;padding:4px 0 12px;border-bottom:1px solid var(--line)}
+  .navbar .t{font-size:15px;font-weight:600}
+  .navbar .s{font-size:11px;color:var(--ink3)}
+  .screen-body{padding:14px}
+
+  /* transfer card mock — mirrors prototype.html .tcard / .tc-levels (L284) */
+  .tcard{background:var(--panel);border-radius:18px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);overflow:hidden}
+  .tc-head{padding:13px 14px 11px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line2)}
+  .tc-station{font-size:16px;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+  .tc-when{font-size:11px;color:var(--ink3);font-family:ui-monospace,"SF Mono",Menlo,monospace;margin-top:3px}
+  .badge{font-size:10.5px;font-weight:700;padding:3px 8px;border-radius:20px;white-space:nowrap}
+  .b-go{background:var(--go-soft);color:var(--go)} .b-tight{background:var(--tight-soft);color:var(--tight)}
+  .tc-body{padding:12px 14px 14px;display:flex;flex-direction:column;gap:11px}
+  .tc-stats{display:flex;gap:8px}
+  .tstat{flex:1;background:var(--panel2);border-radius:10px;padding:8px 9px;display:flex;flex-direction:column;gap:2px}
+  .tstat .k{font-size:9px;font-weight:640;letter-spacing:.07em;text-transform:uppercase;color:var(--ink3)}
+  .tstat .v{font-size:13.5px;font-weight:660;font-family:ui-monospace,"SF Mono",Menlo,monospace}
+  .tc-levels{padding:9px 11px;background:var(--panel2);border-radius:10px}
+  .tc-levels .txt{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--ink2);line-height:1.35}
+  .lvl-ic{width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+          color:#fff;font-size:11px;font-weight:800}
+  .tc-levels svg{display:block;width:100%;height:auto}
+  .old-copy{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11px}
+
+  /* ── two-up / notes ── */
+  .twoup{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start}
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .note{font-size:14px;color:var(--ink2);text-wrap:pretty}
+  .note h4{font-size:15px;margin:0 0 4px;color:var(--ink)}
+  .kv{display:flex;flex-direction:column;gap:10px;margin-top:4px}
+  .kv .row{display:flex;gap:10px;font-size:13.5px;color:var(--ink2)}
+  .kv .row .m{flex:0 0 auto;margin-top:2px}
+  .tick{color:var(--go)} .cross{color:var(--miss)} .dash{color:var(--ink3)}
+  .caption{font-size:12px;color:var(--ink3);margin-top:10px;text-wrap:pretty}
+  .uplab{font-size:13px;font-weight:600;color:var(--ink3);letter-spacing:.04em;text-transform:uppercase}
+
+  /* ── honesty table ── */
+  .cant{display:flex;flex-direction:column;gap:0;background:var(--panel);border-radius:16px;
+        box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);overflow:hidden}
+  .cant .r{display:grid;grid-template-columns:200px 1fr 96px;gap:14px;padding:13px 16px;align-items:baseline}
+  .cant .r + .r{border-top:1px solid var(--line2)}
+  .cant .idea{font-size:13.5px;font-weight:640;color:var(--ink)}
+  .cant .why{font-size:12.5px;color:var(--ink2);text-wrap:pretty}
+  .cant .why code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:11.5px;background:var(--panel2);padding:1px 4px;border-radius:4px}
+  .cant .call{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;text-align:right}
+  .call.drop{color:var(--miss)} .call.contract{color:var(--tight)}
+
+  /* ── decisions ── */
+  .decisions{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .dcard{background:var(--panel);border-radius:16px;padding:16px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line)}
+  .dcard .dn{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
+  .dcard h4{margin:8px 0 6px;font-size:16px}
+  .dcard p{margin:0;font-size:13px;color:var(--ink2);text-wrap:pretty}
+
+  footer{padding:40px 0 72px;color:var(--ink3);font-size:12.5px;border-top:1px solid var(--line);margin-top:24px}
+  footer b{color:var(--ink2)}
+
+  .themebtn{position:fixed;top:16px;right:16px;z-index:20;width:38px;height:38px;border-radius:50%;
+    border:0;background:var(--panel);color:var(--ink2);box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);
+    cursor:pointer;font-size:16px;display:grid;place-items:center}
+
+  @media (max-width:900px){
+    .ladder{grid-template-columns:1fr}
+    .twoup{grid-template-columns:1fr}
+    .decisions{grid-template-columns:1fr}
+    .cant .r{grid-template-columns:1fr;gap:4px}
+    .cant .call{text-align:left}
+    .hero-stage{flex-direction:column}
+  }
+  .hero-stage{display:flex;gap:30px;align-items:flex-start;flex-wrap:wrap}
+  .hero-side{flex:1;min-width:280px}
+</style>
+</head>
+<body>
+
+<button class="themebtn" id="themebtn" aria-label="Toggle light / dark">◐</button>
+
+<div class="wrap">
+  <header class="top col">
+    <div class="eyebrow">transfr · design prototype · issue #53</div>
+    <h1>Levels</h1>
+    <p class="lede">The levels tab is <b>weird and unusable</b>, and the export isn't why — the data is fine, the framing throws it away. Two proposals to choose between (they're complementary, not rivals): a <b>ribbon</b> that makes the vertical story glanceable on the card, and a <b>floor plan</b> that frames each level on its own route instead of the whole walk's. Every pixel below is drawn from the two committed <span class="mono" style="font-size:15px">viz_export</span> fixtures — Berlin Hbf 1→16 and Dortmund Hbf 11→4. Nothing is faked, and the things the data can't support are listed rather than drawn.</p>
+    <div class="legend" aria-hidden="true">
+      <span class="li"><span class="lg-line" style="background:var(--accent)"></span> your path</span>
+      <span class="li"><span class="lg-dot" style="background:var(--go)"></span> step off</span>
+      <span class="li"><span class="lg-dot" style="background:var(--accent)"></span> board</span>
+      <span class="li"><span class="lg-line" style="background:var(--esc)"></span> escalator</span>
+      <span class="li"><span class="lg-line" style="background:var(--stair)"></span> stairs</span>
+      <span class="li"><span class="lg-line" style="background:var(--elev)"></span> elevator</span>
+      <span class="li"><span class="lg-line" style="background:var(--nodata)"></span> level change · mode not mapped</span>
+    </div>
+  </header>
+
+  <hr class="rule">
+
+  <!-- 1 · THE DIAGNOSIS -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">01</span><h2>What the tab does today</h2></div>
+    <p class="sec-sub">Faithfully re-drawn from the real export, at the real canvas size (326×210pt), with the real algorithm: <span class="mono" style="font-size:14.5px">PlanFit</span> frames every level on the <b>whole path's</b> bounding box. That optimises tab-to-tab continuity and spends the entire canvas doing it. Switch fixtures and floors — the numbers under each panel are measured live, not asserted.</p>
+
+    <div class="controls">
+      <div class="seg" id="diagfix" role="group" aria-label="Choose a fixture">
+        <button data-fx="berlin" aria-pressed="true">Berlin Hbf 1 → 16</button>
+        <button data-fx="dortmund" aria-pressed="false">Dortmund Hbf 11 → 4</button>
+      </div>
+    </div>
+
+    <div class="hero-stage">
+      <div style="flex:0 0 auto;width:340px;max-width:100%">
+        <div class="pcard" style="gap:10px">
+          <h3>Today <span class="tag tag-now">shipped</span></h3>
+          <div class="picker" id="diag-picker"></div>
+          <div class="plan" id="diag-plan"></div>
+          <div class="statline" id="diag-stat"></div>
+        </div>
+      </div>
+      <div class="hero-side">
+        <div class="note">
+          <h4>Five defects, all visible above</h4>
+          <div class="kv">
+            <div class="row"><span class="m cross">▪</span><div><b>The shared bbox starves every floor.</b> Berlin's L−2 step-off is a <span class="mono">26×14px</span> mark in a 326×210 canvas — 0.5% of it. Dortmund's L−1 is a <span class="mono">5×13px</span> thread. The other 99.5% is void, spent keeping the frame steady between tabs.</div></div>
+            <div class="row"><span class="m cross">▪</span><div><b>The picker offers floors the path never visits.</b> It's built from <span class="mono">levelsPresent</span> — the union of levels over all context ways — while the canvas draws only path geometry. Pick <b>Dortmund L−2</b>: a completely blank panel with a lone chip.</div></div>
+            <div class="row"><span class="m cross">▪</span><div><b>The markers are bigger than the route and say the same thing twice.</b> r=12 discs (24px) on a 5×13px thread; Dortmund's two L−1 discs sit 14.1px apart — overlapping — and both read <span class="mono">“Level change ↑ L0”</span>. A mark knows the other floor is above; it never knows it's where you came <i>in</i> versus where you go <i>out</i>.</div></div>
+            <div class="row"><span class="m cross">▪</span><div><b>And on the last floor it inverts the instruction.</b> Berlin <b>L+2</b> is where you arrive and board — today it draws a down-chevron reading <span class="mono">“Escalator ↓ L+1”</span>, because an arrival rendered from “this floor's point of view” looks exactly like a departure. It's telling you to go back down at the moment you've finished.</div></div>
+            <div class="row"><span class="m cross">▪</span><div><b>Phantom elevators.</b> <span class="mono">WalkConnector.color</span> falls through to <span class="mono">Theme.elev</span> — the exact orange the legend labels “Elevator”. Dortmund's three <span class="mono">"vertical"</span> transitions are unmapped level changes; today they draw as three elevators that don't exist.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 2 · APPROACH A -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Approach A · The level ribbon</h2></div>
+    <p class="sec-sub">One strip, read left to right in walk order. Segment widths track distance; the risers between them are the real transitions, coloured by their real kind. It answers “how far up, how many changes, what do I take, where's the long bit” without a tap — and it fits on the transfer card, where the walk view can't go. This is the card's <span class="mono" style="font-size:14.5px">levels-mini</span> row growing up.</p>
+
+    <div class="controls">
+      <div class="seg" id="ribshape" role="group" aria-label="Ribbon shape">
+        <button data-shape="stepped" aria-pressed="true">Stepped · levels give it height</button>
+        <button data-shape="flat" aria-pressed="false">Flat band · one line</button>
+      </div>
+      <div class="toggle" id="ribdist" role="button" tabindex="0" aria-pressed="true">
+        <span class="switch"></span> Widths ∝ distance
+      </div>
+    </div>
+
+    <div id="ribbons"></div>
+
+    <div class="twoup" style="margin-top:26px">
+      <div class="stack">
+        <div class="uplab">On the transfer card, in situ</div>
+        <div class="phone" style="width:300px" aria-label="Transfer card with the level ribbon">
+          <div class="notch"></div>
+          <div class="phone-screen">
+            <div class="statusbar mono"><span>9:41</span><span class="sbicons"><span class="sig"><i></i><i></i><i></i><i></i></span><span class="batt"></span></span></div>
+            <div class="navbar"><span class="t">Your change</span><span class="s mono" id="card-nav">Berlin Hbf</span></div>
+            <div class="screen-body"><div id="card-mount"></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="stack">
+        <div class="note">
+          <h4>What it replaces</h4>
+          <p style="margin:0 0 10px">Today the card says this, from the same data:</p>
+          <div class="tc-levels" style="margin-bottom:14px">
+            <div class="txt"><span class="lvl-ic" style="background:var(--elev)">⇅</span>
+              <span class="old-copy" id="old-copy">4 level changes — level change + stairs.</span></div>
+          </div>
+          <div class="kv">
+            <div class="row"><span class="m tick">▪</span><div><b>“4 level changes” is a count, not a shape.</b> Berlin's four are a straight climb from L−2 to L+2; Dortmund's four are down, up, up, down — back where you started. Same sentence, opposite journeys. The ribbon can't hide that.</div></div>
+            <div class="row"><span class="m tick">▪</span><div><b>“level change + stairs” is the phantom-elevator bug in prose.</b> It's literally reading out <span class="mono">"vertical"</span>. The ribbon names it once, in the grey we use for “we don't know”.</div></div>
+            <div class="row"><span class="m tick">▪</span><div><b>It shows where the walking is.</b> Dortmund's middle L0 run is 161 m of the 289 m — more than half the walk on one floor. The count says nothing; the ribbon puts it under your thumb.</div></div>
+            <div class="row"><span class="m dash">▪</span><div><b>Stepped vs flat is the real fork, and it's a height budget.</b> Measured off the card mock at 250pt wide: flat is a flat <b>70pt</b> whatever the walk. Stepped <b>grows with the floor count</b> — <b>116pt</b> for Dortmund's 3 floors, <b>172pt</b> for Berlin's 5 — because each floor needs its own band. Flat you have to read; stepped you see. Berlin is the argument for stepped; Dortmund is the argument for stepped twice. If the card can't spend 172pt on a 5-floor change, the honest answer is flat on the card and stepped in the walk view.</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="caption">Honest about the encoding: with <b>widths ∝ distance</b> on, each segment gets a minimum width so a 2.6 m hop stays visible and labelled — the bar lengths are proportional above that floor, not below it. Toggle it off to see pure proportional widths and what they do to Dortmund's last 2.6 m. Risers are fixed-width: a level change is an event, not a distance. <b>Z is level × 4 m nominal, not surveyed elevation</b> — the stepped ribbon's rises are evenly spaced because that's all the data can honestly claim.</p>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 3 · APPROACH B -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Approach B · The floor plan</h2></div>
+    <p class="sec-sub">Same fixture, same canvas, three treatments, left to right. Panel 2 is the minimal fix — <b>frame each level on its own route</b>, drive the picker from the path, pair the markers. Panel 3 adds what the export was already carrying and we were throwing away: the context ways the search touched, a ghost of the floors this one connects to, and a scale bar to hold the mental map together when the zoom changes between tabs. <b>Pick Dortmund, then L−2</b> to watch the blank tab appear in panel 1 and vanish in panels 2–3.</p>
+
+    <div class="controls">
+      <div class="seg" id="planfix" role="group" aria-label="Choose a fixture">
+        <button data-fx="berlin" aria-pressed="true">Berlin Hbf 1 → 16</button>
+        <button data-fx="dortmund" aria-pressed="false">Dortmund Hbf 11 → 4</button>
+      </div>
+      <div class="toggle" id="ghosttog" role="button" tabindex="0" aria-pressed="true">
+        <span class="switch"></span> Ghost the connected floors
+      </div>
+      <div class="toggle" id="ctxtog" role="button" tabindex="0" aria-pressed="true">
+        <span class="switch"></span> Context ways
+      </div>
+    </div>
+
+    <div class="ladder" id="ladder"></div>
+
+    <div class="legend" style="margin-top:18px" aria-hidden="true">
+      <span class="li"><span class="lg-line" style="background:var(--accent)"></span> your path, this floor</span>
+      <span class="li"><span class="lg-line" style="background:var(--ink3);opacity:.45"></span> ghost · the floor it connects to</span>
+      <span class="li"><span class="lg-line" style="background:var(--panel3);height:7px"></span> platform slab</span>
+      <span class="li"><span class="lg-line" style="background:var(--line)"></span> walkway the search touched</span>
+      <span class="li"><span class="lg-dot" style="background:var(--esc)"></span> filled · your next move</span>
+      <span class="li"><span class="lg-ring" style="box-shadow:inset 0 0 0 2.5px var(--esc)"></span> hollow · where you arrived</span>
+    </div>
+    <p class="caption" style="max-width:76ch">Worth knowing before you sign it off: own-framing helps <b>exactly the floors the shared bbox starves</b>, and does nothing for the one that was already setting it. Dortmund <b>L−1 goes 6.1×</b>, <b>L+1 4.1×</b>, Berlin's step-off and boarding floors <b>2.6–2.9×</b> — but Dortmund <b>L0 measures 0.9×</b>, because its own route <i>is</i> most of the path bbox, so there was never anything to reclaim. That floor was never the broken one (it's the only one today draws at a usable size). The fix is worth it for the four starved floors, not for a uniform win — and the numbers under each panel say so rather than hiding it.</p>
+
+    <div class="twoup" style="margin-top:28px">
+      <div class="note">
+        <h4>Why panel 3 beats panel 2</h4>
+        <div class="kv">
+          <div class="row"><span class="m tick">▪</span><div><b>The surplus canvas stops being void.</b> Panel 2 letterboxes: Dortmund's L0 is a 199 m corridor, so aspect-fit leaves ~70% of a landscape canvas empty <i>beside</i> it. Panel 3 expands the frame to the canvas aspect instead and fills it with real geometry — <b>same scale, same route size, more station</b>. Nothing is zoomed out to achieve it.</div></div>
+          <div class="row"><span class="m tick">▪</span><div><b>Context is what makes a plan a plan.</b> A blue thread alone can't tell you which side of the hall you're on. The walkway web, the platform slabs, and the <i>other</i> escalators on the floor are all in the export already.</div></div>
+          <div class="row"><span class="m tick">▪</span><div><b>The ghost is the connective tissue</b> — DESIGN.md §7.6's phrase, and prototype.html already drew it as “Platform 4 (above)”. Here it's the real path on the floors this one connects to, dashed. You can see where you'll be standing one tab later.</div></div>
+          <div class="row"><span class="m tick">▪</span><div><b>The scale bar answers the objection in the code.</b> The shipped comment defends the shared bbox with “so the plan never jumps when you switch”. Per-level framing does make the zoom jump — Berlin L0 draws at 6.6 px/m, Dortmund L0 at 0.62. A scale bar makes that legible instead of disorienting, which is what maps have always done.</div></div>
+        </div>
+      </div>
+      <div class="note">
+        <h4>Paired markers, in the export's own order</h4>
+        <div class="kv">
+          <div class="row"><span class="m tick">▪</span><div><b><span class="mono">path.transitions</span> is emitted in path order</b> and lines up 1:1 with the gaps between level runs — verified on both fixtures. So per floor the marks alternate arrive / leave, and each one knows which it is.</div></div>
+          <div class="row"><span class="m tick">▪</span><div><b>Filled disc = your next move</b> (“Escalator ↑ to L+1”). <b>Hollow ring = where you landed</b> (“in from L0”). One is a decision, one is orientation — today they're the same 24px disc with the same words.</div></div>
+          <div class="row"><span class="m tick">▪</span><div><b>Endpoints are named.</b> “Step off · Pl 11” and “Board · Pl 4” come from <span class="mono">path.endpoints</span>, so the first and last floors read as the start and the end rather than as two more level changes.</div></div>
+          <div class="row"><span class="m tick">▪</span><div>Radius drops 12 → 9 (out) / 7 (in), and the chips dodge each other. On Dortmund L−1 the two marks are 20.6 m apart — at that floor's own scale they're 85px apart and no longer touch.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 4 · HONESTY -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">04</span><h2>What the export can't support</h2></div>
+    <p class="sec-sub">Every one of these would make the levels view better and none of them is in the data. They are listed here instead of drawn — the shipped prototype fakes some of them, which is part of why the real thing disappoints when it arrives. Two are cheap contract changes if you want them.</p>
+    <div class="cant" id="cant"></div>
+    <p class="caption">Measured on the fixtures, not recalled: <b>0</b> nodes carry <span class="mono">ele</span> in Berlin Hbf; <span class="mono">step_count</span> is absent on <b>100%</b> of both fixtures' ways (the whole key is missing from the export schema, not just sparse); Berlin's <span class="mono">levels_present</span> carries <span class="mono">−1.7 / −1.3 / −0.5</span> mezzanine landings that round into <span class="mono">−2 / −1 / −1</span>; and <span class="mono">level_raw</span> holds compound values like <span class="mono">"−2;−1"</span> and one honest OSM typo, <span class="mono">"0,5"</span>.</p>
+  </section>
+
+  <hr class="rule">
+
+  <!-- 5 · THE CALL -->
+  <section class="col">
+    <div class="sec-head"><span class="sec-num">05</span><h2>The call</h2></div>
+    <p class="sec-sub">What I'd sign off, in the order I'd build it.</p>
+    <div class="decisions">
+      <div class="dcard">
+        <div class="dn">First · ~30 lines</div>
+        <h4>Panel 2</h4>
+        <p>Own-bbox framing, picker from <span class="mono">pathLevels</span> (it already exists on <span class="mono">WalkScene</span>, the picker just doesn't read it), paired in/out markers, and <span class="mono">nodata</span> grey for <span class="mono">"vertical"</span>. This is the whole “weird and unusable” complaint, and it's a day. <b>It is not the ceiling — but it clears the floor.</b></p>
+      </div>
+      <div class="dcard">
+        <div class="dn">Then · the payoff</div>
+        <h4>Panel 3</h4>
+        <p>Aspect-expanded frame + context ways + ghost + scale bar. This is what turns “not broken” into a floor plan you'd actually navigate by. All of it reads the export we already ship. The context is only what the search <i>touched</i> — good enough to be worth it, and better still with the one-line contract change in §04.</p>
+      </div>
+      <div class="dcard">
+        <div class="dn">Alongside · the card</div>
+        <h4>The ribbon</h4>
+        <p>Different surface, different job — it lives on the transfer card where the plan can't fit, and it kills the “4 level changes — level change + stairs” line. Ship it with the plan fix; they share one pass over <span class="mono">runs</span> + <span class="mono">transitions</span>. My pick: <b>stepped</b>.</p>
+      </div>
+    </div>
+    <div class="note" style="margin-top:22px;max-width:76ch">
+      <h4>Not proposed</h4>
+      <div class="kv">
+        <div class="row"><span class="m dash">▪</span><div><b>Rotating the plan to the walk's long axis.</b> Tried it, measured it, dropped it. A station-wide principal axis rescues Dortmund L0 (19% → 55% of the canvas) and wrecks L+1 (59% → 28%) — the bridge runs across the concourse. Per-level rotation maximises each floor and destroys the floor-to-floor mental map, which is the one thing the paired markers exist to protect. Aspect-expansion gets the same canvas back without turning anything.</div></div>
+        <div class="row"><span class="m dash">▪</span><div><b>A fix for the 3D tab.</b> Real bug — <span class="mono">IsoFit.levelUnit = 20</span> is a constant while the iso footprint it has to clear is data-dependent (a 100-unit normalised floor projects to 50–71 units of screen-y depending on the orbit angle), so Berlin's floors overlap and the “exploded floors” isn't exploded. The fix is to derive <span class="mono">levelUnit</span> from the projected footprint, not to draw stacked plates in CSS — DESIGN.md §7.6 rejects that, and it isn't a prototype question. Filed, not designed.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="col">
+    <b>Nothing here is wired yet.</b> This is a design prototype for issue #53 — no Swift is touched by this file. Geometry is the two committed fixtures
+    (<span class="mono">viz_berlin_1_16.json</span>, <span class="mono">viz_dortmund_11_4.json</span>), cropped and Douglas-Peucker–simplified to 0.45 m for inlining; every coordinate, distance, transition kind and level is the exporter's own.
+    Panel 1 is a faithful re-implementation of <span class="mono">WalkGeometryViews.swift</span> (<span class="mono">PlanFit</span> + <span class="mono">PlanGeometryCanvas</span> + <span class="mono">drawTransitionMarks</span>) at its real 326×210pt canvas, so the comparison is like-for-like rather than a strawman.
+    Tokens are <span class="mono">Theme.swift</span>, ported 1:1.
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  const DATA = {"berlin":{"station":"Berlin Hauptbahnhof","ref1":"1","ref2":"16","dist":213.2,"secs":177.5,"floorHeight":4.0,"levelsPresent":[-2.0,-1.7,-1.3,-1.0,-0.5,0.0,0.5,1.0,2.0],"nContextWays":372,"start":{"ref":"1","xy":[-59.9,65.8],"L":-2},"end":{"ref":"16","xy":[-46.2,19.9],"L":2},"runs":[{"L":-2,"pts":[[-59.9,65.8],[-53.8,68.3],[-52.0,64.1],[-48.6,62.4]],"dist":15.1},{"L":-1,"pts":[[-41.9,46.3],[-42.7,42.3],[-42.1,41.0],[-30.2,46.0],[-25.5,35.6],[-2.9,36.8],[-4.2,39.6],[-2.9,42.4]],"dist":58.7},{"L":0,"pts":[[-10.9,61.6],[-21.6,57.1]],"dist":11.6},{"L":1,"pts":[[-16.3,44.2],[-13.1,43.0],[-10.1,35.7],[-26.9,34.5],[-20.8,19.4],[-25.7,19.2]],"dist":49.4},{"L":2,"pts":[[-36.9,16.5],[-38.1,15.2],[-44.5,13.5],[-46.2,19.9]],"dist":15.0}],"transitions":[{"kind":"escalator","frm":[-48.6,62.4],"frmL":-2,"to":[-41.9,46.3],"toL":-1,"mapped":true},{"kind":"escalator","frm":[-2.9,42.4],"frmL":-1,"to":[-10.9,61.6],"toL":0,"mapped":true},{"kind":"escalator","frm":[-21.6,57.1],"frmL":0,"to":[-16.3,44.2],"toL":1,"mapped":true},{"kind":"escalator","frm":[-25.7,19.2],"frmL":1,"to":[-36.9,16.5],"toL":2,"mapped":true}],"startSlab":[[65.5,-8.9],[73.8,-28.1],[77.9,-26.3],[70.8,-9.8],[72.2,-9.2],[73.5,-8.7],[80.7,-25.2],[84.4,-23.6],[34.6,91.8],[24.0,87.2],[65.5,-8.9]],"endSlab":null,"levels":{"-2":{"box":[-76.5,52.4,-32.0,78.3],"rbox":[-59.9,62.4,-48.6,68.3],"ways":[{"k":"walkway","c":0,"p":[[-48.8,70.5],[-59.9,65.8]]},{"k":"walkway","c":0,"p":[[-52.0,64.1],[-53.8,68.3]]},{"k":"walkway","c":0,"p":[[-48.6,62.4],[-52.0,64.1]]},{"k":"walkway","c":0,"p":[[-52.8,60.6],[-52.0,64.1],[-50.6,61.5]]},{"k":"stairs","c":1,"p":[[-50.6,61.5],[-44.0,45.4]]},{"k":"escalator","c":1,"p":[[-46.1,44.5],[-52.8,60.6]]},{"k":"escalator","c":1,"p":[[-48.6,62.4],[-41.9,46.3]]},{"k":"walkway","c":0,"p":[[-29.2,63.0],[-34.7,75.9]]},{"k":"walkway","c":0,"p":[[-29.7,78.0],[-40.8,73.6]]}]},"-1":{"box":[-56.6,21.2,11.0,60.7],"rbox":[-42.7,35.6,-2.9,46.3],"ways":[{"k":"stairs","c":1,"p":[[-50.6,61.5],[-44.0,45.4]]},{"k":"escalator","c":1,"p":[[-46.1,44.5],[-52.8,60.6]]},{"k":"escalator","c":1,"p":[[-48.6,62.4],[-41.9,46.3]]},{"k":"walkway","c":0,"p":[[-42.7,42.3],[-41.9,46.3]]},{"k":"walkway","c":0,"p":[[-42.7,42.3],[-46.1,44.5]]},{"k":"walkway","c":0,"p":[[-42.7,42.3],[-44.0,45.4]]},{"k":"walkway","c":0,"p":[[-42.7,42.3],[-42.1,41.0],[-30.2,46.0]]},{"k":"walkway","c":0,"p":[[-42.1,41.0],[-50.0,37.7]]},{"k":"walkway","c":0,"p":[[-50.4,38.9],[-49.5,36.7]]},{"k":"walkway","c":0,"p":[[-25.5,35.6],[-57.5,110.4]]},{"k":"walkway","c":0,"p":[[-17.3,15.8],[-25.5,35.6]]},{"k":"walkway","c":0,"p":[[-25.5,35.6],[12.2,37.5]]},{"k":"walkway","c":0,"p":[[-17.9,36.0],[-20.1,41.3]]},{"k":"walkway","c":0,"p":[[-9.4,34.0],[-10.5,36.5]]},{"k":"walkway","c":0,"p":[[-9.4,34.0],[-5.7,31.5]]},{"k":"walkway","c":0,"p":[[-9.4,34.0],[-8.1,30.6]]},{"k":"walkway","c":0,"p":[[-9.4,34.0],[-10.2,29.7]]},{"k":"escalator","c":1,"p":[[-5.7,31.5],[3.7,9.6]]},{"k":"stairs","c":1,"p":[[-8.1,30.6],[1.5,8.7]]},{"k":"walkway","c":0,"p":[[-20.1,41.3],[-22.7,41.5]]},{"k":"walkway","c":0,"p":[[-20.1,41.3],[-18.4,43.3]]},{"k":"walkway","c":0,"p":[[-20.1,41.3],[-20.5,42.4]]},{"k":"escalator","c":1,"p":[[-0.7,7.7],[-10.2,29.7]]},{"k":"walkway","c":0,"p":[[-2.9,36.8],[-4.2,39.6]]},{"k":"walkway","c":0,"p":[[-21.1,43.6],[-20.5,42.4]]},{"k":"escalator","c":1,"p":[[-22.7,41.5],[-29.7,58.0]]},{"k":"escalator","c":1,"p":[[-25.3,59.9],[-18.4,43.3]]},{"k":"stairs","c":1,"p":[[-22.6,47.4],[-21.1,43.6]]},{"k":"walkway","c":0,"p":[[-4.2,39.6],[-5.0,41.5]]},{"k":"walkway","c":0,"p":[[-7.2,40.6],[-4.2,39.6],[-2.9,42.4]]},{"k":"walkway","c":0,"p":[[4.4,37.0],[2.0,43.0]]},{"k":"stairs","c":1,"p":[[-13.1,60.7],[-5.0,41.5]]},{"k":"escalator","c":1,"p":[[-7.2,40.6],[-15.3,59.8]]},{"k":"escalator","c":1,"p":[[-10.9,61.6],[-2.9,42.4]]},{"k":"walkway","c":0,"p":[[12.2,37.5],[2.6,60.6],[14.5,65.8]]},{"k":"walkway","c":0,"p":[[-23.1,48.6],[-22.6,47.4]]},{"k":"walkway","c":0,"p":[[2.0,43.0],[-0.8,43.3]]},{"k":"walkway","c":0,"p":[[2.0,43.0],[1.4,44.2]]},{"k":"walkway","c":0,"p":[[2.0,43.0],[3.6,45.2]]},{"k":"stairs","c":1,"p":[[-6.7,63.4],[1.4,44.2]]},{"k":"escalator","c":1,"p":[[-0.8,43.3],[-8.9,62.5]]},{"k":"escalator","c":1,"p":[[-4.4,64.3],[3.6,45.2]]},{"k":"walkway","c":0,"p":[[10.9,21.3],[17.9,24.1]]},{"k":"walkway","c":0,"p":[[2.6,60.6],[-24.2,124.7]]}]},"0":{"box":[-37.3,47.1,4.8,71.6],"rbox":[-21.6,57.1,-10.9,61.6],"ways":[{"k":"stairs","c":1,"p":[[-22.6,47.4],[-21.1,43.6]]},{"k":"stairs","c":1,"p":[[-13.1,60.7],[-5.0,41.5]]},{"k":"escalator","c":1,"p":[[-7.2,40.6],[-15.3,59.8]]},{"k":"escalator","c":1,"p":[[-10.9,61.6],[-2.9,42.4]]},{"k":"stairs","c":1,"p":[[-24.9,52.7],[-23.1,48.6]]},{"k":"stairs","c":1,"p":[[-27.0,57.7],[-25.4,53.9]]},{"k":"other","c":0,"p":[[15.1,25.3],[-1.2,63.3],[-9.4,60.0],[-10.2,61.8],[-17.2,59.0],[-22.3,56.9],[-21.6,55.0],[-29.8,51.6],[-25.1,40.5]]},{"k":"walkway","c":0,"p":[[-14.4,63.6],[-10.9,61.6]]},{"k":"walkway","c":0,"p":[[-14.4,63.6],[-13.1,60.7]]},{"k":"walkway","c":0,"p":[[-14.4,63.6],[-15.3,59.8]]},{"k":"escalator","c":1,"p":[[-17.2,59.0],[-11.9,46.0]]},{"k":"walkway","c":0,"p":[[-17.2,59.0],[-20.5,60.8],[-19.0,66.5],[-19.5,73.2]]},{"k":"walkway","c":0,"p":[[-32.5,51.6],[-19.0,66.5],[-14.4,63.6]]},{"k":"walkway","c":0,"p":[[-20.5,60.8],[-19.4,58.1]]},{"k":"walkway","c":0,"p":[[-19.4,58.1],[-18.7,56.2]]},{"k":"stairs","c":1,"p":[[-18.7,56.2],[-16.9,52.0]]},{"k":"walkway","c":0,"p":[[-20.5,60.8],[-21.6,57.1]]},{"k":"escalator","c":1,"p":[[-21.6,57.1],[-16.3,44.2]]},{"k":"walkway","c":0,"p":[[-16.9,52.0],[-16.4,50.8]]},{"k":"walkway","c":0,"p":[[-19.0,66.5],[0.6,66.0]]},{"k":"stairs","c":1,"p":[[-16.4,50.8],[-14.9,47.1]]},{"k":"platform","c":0,"p":[[13.4,29.3],[-38.3,150.7]]},{"k":"walkway","c":0,"p":[[-32.5,51.6],[-17.5,16.1]]},{"k":"platform","c":0,"p":[[-49.2,145.7],[2.5,24.6]]},{"k":"walkway","c":0,"p":[[0.6,66.0],[18.0,25.1]]}]},"1":{"box":[-57.1,9.2,20.1,54.2],"rbox":[-26.9,19.2,-10.1,44.2],"ways":[{"k":"walkway","c":0,"p":[[-9.4,18.9],[-19.9,17.1]]},{"k":"walkway","c":0,"p":[[26.3,25.8],[19.9,24.8],[10.9,21.3]]},{"k":"escalator","c":1,"p":[[5.6,10.4],[-1.5,27.4]]},{"k":"stairs","c":1,"p":[[0.8,28.2],[8.0,11.4]]},{"k":"escalator","c":1,"p":[[2.6,28.9],[9.9,12.2]]},{"k":"escalator","c":1,"p":[[-17.2,59.0],[-11.9,46.0]]},{"k":"walkway","c":0,"p":[[0.1,29.8],[2.6,28.9]]},{"k":"escalator","c":1,"p":[[-21.6,57.1],[-16.3,44.2]]},{"k":"walkway","c":0,"p":[[14.7,37.1],[-2.9,36.1],[0.1,29.8]]},{"k":"walkway","c":0,"p":[[0.1,29.8],[0.8,28.2]]},{"k":"walkway","c":0,"p":[[0.1,29.8],[-1.5,27.4]]},{"k":"stairs","c":1,"p":[[-16.4,50.8],[-14.9,47.1]]},{"k":"walkway","c":0,"p":[[-16.3,44.2],[-13.1,43.0]]},{"k":"walkway","c":0,"p":[[-14.1,45.1],[-13.1,43.0]]},{"k":"walkway","c":0,"p":[[-11.9,46.0],[-13.1,43.0]]},{"k":"walkway","c":0,"p":[[-10.1,35.7],[-13.1,43.0]]},{"k":"walkway","c":0,"p":[[-2.9,36.1],[-26.9,34.5]]},{"k":"walkway","c":0,"p":[[-14.9,47.1],[-14.1,45.1]]},{"k":"walkway","c":0,"p":[[14.7,37.1],[23.6,16.4]]},{"k":"walkway","c":0,"p":[[14.7,37.1],[19.0,43.1],[34.0,45.2]]},{"k":"walkway","c":0,"p":[[-26.9,34.5],[-20.8,19.4]]},{"k":"walkway","c":0,"p":[[-48.2,28.4],[-26.1,32.5]]},{"k":"walkway","c":0,"p":[[-25.4,18.1],[-20.8,19.4]]},{"k":"walkway","c":0,"p":[[-25.7,19.2],[-20.8,19.4]]},{"k":"walkway","c":0,"p":[[-25.2,17.0],[-20.8,19.4]]},{"k":"walkway","c":0,"p":[[-20.8,19.4],[-12.1,-1.7]]},{"k":"escalator","c":1,"p":[[-36.9,16.5],[-25.7,19.2]]},{"k":"stairs","c":1,"p":[[-36.7,15.4],[-25.4,18.1]]},{"k":"escalator","c":1,"p":[[-36.4,14.3],[-25.2,17.0]]}]},"2":{"box":[-64.2,3.5,-18.9,29.9],"rbox":[-46.2,13.5,-36.9,19.9],"ways":[{"k":"escalator","c":1,"p":[[-36.9,16.5],[-25.7,19.2]]},{"k":"stairs","c":1,"p":[[-36.7,15.4],[-25.4,18.1]]},{"k":"escalator","c":1,"p":[[-36.4,14.3],[-25.2,17.0]]},{"k":"walkway","c":0,"p":[[-36.9,16.5],[-38.1,15.2],[-36.7,15.4]]},{"k":"walkway","c":0,"p":[[-36.4,14.3],[-38.1,15.2],[-44.5,13.5]]},{"k":"walkway","c":0,"p":[[-46.2,19.9],[-42.7,7.0]]}]}}},"dortmund":{"station":"Dortmund Hbf","ref1":"11","ref2":"4","dist":289.4,"secs":226.5,"floorHeight":4.0,"levelsPresent":[-2.0,-1.0,0.0,1.0],"nContextWays":192,"start":{"ref":"11","xy":[-3.9,99.0],"L":0},"end":{"ref":"4","xy":[-58.1,-99.2],"L":0},"runs":[{"L":0,"pts":[[-3.9,99.0],[-15.6,100.1],[-16.0,88.0]],"dist":24.0},{"L":-1,"pts":[[-16.0,88.0],[-13.1,72.9],[-8.3,68.9]],"dist":21.7},{"L":0,"pts":[[-8.3,68.9],[-5.9,57.2],[-9.7,56.4],[-12.5,51.7],[-9.2,31.1],[8.3,-52.2],[11.4,-59.4],[16.1,-78.0],[9.2,-79.4]],"dist":161.2},{"L":1,"pts":[[-3.0,-82.0],[-3.6,-78.3],[-56.6,-89.6],[-55.3,-96.1],[-58.6,-96.7]],"dist":67.9},{"L":0,"pts":[[-58.6,-96.7],[-58.1,-99.2]],"dist":2.6}],"transitions":[{"kind":"vertical","frm":[-16.0,88.0],"frmL":0,"to":[-16.0,88.0],"toL":-1,"mapped":false},{"kind":"vertical","frm":[-8.3,68.9],"frmL":-1,"to":[-8.3,68.9],"toL":0,"mapped":false},{"kind":"stairs","frm":[9.2,-79.4],"frmL":0,"to":[-3.0,-82.0],"toL":1,"mapped":true},{"kind":"vertical","frm":[-58.6,-96.7],"frmL":1,"to":[-58.6,-96.7],"toL":0,"mapped":false}],"startSlab":[[-3.9,99.0],[37.3,96.1],[37.3,94.9],[-4.0,97.7],[-3.9,99.0]],"endSlab":[[-58.1,-99.2],[-171.2,-123.2],[-229.6,-131.9],[-254.0,-134.4]],"levels":{"-1":{"box":[-45.7,58.9,21.4,98.0],"rbox":[-16.0,68.9,-8.3,88.0],"ways":[{"k":"walkway","c":0,"p":[[-16.0,88.0],[-12.1,68.1]]},{"k":"walkway","c":0,"p":[[-9.2,87.4],[-6.4,69.3],[-20.0,66.4],[-23.6,88.3],[-9.2,87.4]]},{"k":"walkway","c":0,"p":[[-13.1,72.9],[-8.3,68.9]]},{"k":"walkway","c":0,"p":[[-15.1,63.2],[-16.1,68.3],[-12.3,69.1]]}]},"0":{"box":[-243.7,-129.2,201.2,130.1],"rbox":[-58.6,-99.2,16.1,100.1],"ways":[{"k":"platform","c":0,"p":[[-58.1,-99.2],[-171.2,-123.2],[-229.6,-131.9]]},{"k":"other","c":0,"p":[[-139.2,-96.2],[-139.6,-94.2],[65.8,-50.4],[67.7,-59.1],[-58.7,-85.8],[-84.0,-90.2],[-138.9,-98.2],[-139.2,-96.2]]},{"k":"other","c":0,"p":[[174.8,-17.9],[139.9,-26.6],[-65.0,-69.6],[-246.3,-109.5]]},{"k":"other","c":0,"p":[[-247.5,-103.4],[-136.0,-74.8],[71.3,-30.5],[173.9,-12.9],[174.8,-17.9]]},{"k":"other","c":0,"p":[[197.4,1.9],[148.1,-3.4],[148.9,-8.6],[87.3,-19.2],[-20.1,-41.6],[-134.9,-67.0],[-257.0,-97.8]]},{"k":"other","c":0,"p":[[-257.9,-93.4],[-241.1,-89.2],[-241.8,-86.2],[-209.0,-77.8],[-209.9,-74.2],[-193.1,-69.8],[-135.4,-56.1],[32.5,-19.9],[93.6,-7.3],[115.3,-4.3],[170.9,2.8],[197.2,5.2],[197.4,1.9]]},{"k":"other","c":0,"p":[[-183.9,-54.1],[-184.9,-51.0],[-170.1,-46.0],[-135.3,-35.9],[-75.1,-22.3],[59.1,5.8],[83.1,9.6],[147.3,15.6],[212.7,18.9]]},{"k":"other","c":0,"p":[[212.9,14.6],[148.2,9.3],[114.3,5.6],[83.8,1.2],[29.8,-9.0],[-134.7,-44.2],[-195.2,-60.6],[-196.0,-57.7],[-183.9,-54.1]]},{"k":"other","c":0,"p":[[-129.7,-26.5],[33.1,8.6],[70.5,15.7],[96.6,18.8],[95.9,25.8],[45.7,19.8],[25.2,16.0],[-57.7,-1.7],[-99.4,-12.0],[-130.9,-22.1],[-129.7,-26.5]]},{"k":"other","c":0,"p":[[27.5,41.8],[-58.5,23.8],[-82.9,17.7],[-119.7,6.1],[-118.3,2.4],[-165.6,-13.5],[-165.3,-14.8],[-164.7,-16.5],[-112.7,1.5],[-81.2,10.0],[27.8,33.5],[48.4,37.4],[67.9,39.7],[67.4,44.0],[86.8,44.7],[106.2,44.0],[106.5,46.7],[76.7,47.4],[46.9,45.0],[27.5,41.8]]},{"k":"other","c":0,"p":[[-18.7,-37.3],[-18.5,-38.4],[-8.9,-36.4],[-9.8,-32.1],[-19.3,-34.1],[-18.7,-37.3]]},{"k":"other","c":0,"p":[[-14.7,-55.9],[-5.2,-53.9],[-6.1,-49.6],[-15.7,-51.6],[-14.7,-55.9]]},{"k":"other","c":0,"p":[[26.6,-6.1],[25.9,-2.9],[16.3,-4.9],[17.3,-9.4],[26.9,-7.4],[26.6,-6.1]]},{"k":"other","c":0,"p":[[23.2,10.0],[23.4,8.9],[13.8,6.9],[13.0,11.1],[22.6,13.0],[23.2,10.0]]},{"k":"other","c":0,"p":[[-31.2,24.5],[-31.9,27.5],[-22.3,29.4],[-21.5,25.5],[-31.0,23.5],[-31.2,24.5]]},{"k":"other","c":0,"p":[[-4.5,-69.8],[-4.1,-71.3],[4.2,-69.6],[3.6,-66.6],[-4.8,-68.3],[-4.5,-69.8]]},{"k":"other","c":1,"p":[[42.7,-61.1],[42.2,-58.8],[45.5,-58.1],[46.0,-60.5],[42.7,-61.1]]},{"k":"other","c":1,"p":[[-8.7,31.7],[-8.1,28.8],[-5.0,29.4],[-5.6,32.3],[-8.7,31.7]]},{"k":"other","c":0,"p":[[8.5,33.2],[7.9,35.8],[17.1,37.7],[17.9,33.7],[8.8,31.8],[8.5,33.2]]},{"k":"other","c":0,"p":[[-26.1,-0.2],[-26.7,2.7],[-17.1,4.7],[-16.3,0.7],[-25.9,-1.2],[-26.1,-0.2]]},{"k":"other","c":1,"p":[[-3.4,7.0],[-2.8,4.1],[0.3,4.7],[-0.2,7.6],[-3.4,7.0]]},{"k":"other","c":0,"p":[[-22.9,-16.4],[-23.6,-13.3],[-14.0,-11.3],[-13.1,-15.8],[-22.6,-17.8],[-22.9,-16.4]]},{"k":"other","c":1,"p":[[-0.1,-9.2],[0.5,-12.1],[3.6,-11.5],[3.1,-8.5],[-0.1,-9.2]]},{"k":"other","c":0,"p":[[-59.2,-94.1],[-58.1,-99.2]]},{"k":"platform","c":0,"p":[[-254.4,-131.1],[-135.6,-105.8],[-59.2,-94.1]]},{"k":"other","c":0,"p":[[27.7,-61.1],[18.2,-63.1],[19.0,-66.7],[28.5,-64.7],[27.7,-61.1]]},{"k":"other","c":0,"p":[[30.7,-26.6],[30.9,-27.9],[21.3,-29.8],[20.4,-25.4],[30.1,-23.5],[30.7,-26.6]]},{"k":"other","c":1,"p":[[4.1,-29.8],[4.7,-32.7],[7.8,-32.0],[7.2,-29.1],[4.1,-29.8]]},{"k":"other","c":1,"p":[[7.7,-47.5],[8.3,-50.4],[11.4,-49.8],[10.8,-46.9],[7.7,-47.5]]},{"k":"other","c":0,"p":[[34.1,-43.5],[34.5,-45.6],[24.9,-47.7],[24.0,-43.4],[33.6,-41.3],[34.1,-43.5]]},{"k":"platform","c":0,"p":[[-3.9,99.0],[37.3,96.1],[37.3,94.9],[-4.0,97.7],[-3.9,99.0]]},{"k":"walkway","c":0,"p":[[43.9,144.7],[47.9,100.2],[46.2,97.1],[42.9,95.9],[-6.6,99.0]]},{"k":"walkway","c":0,"p":[[-61.2,104.0],[-22.8,101.0],[-6.6,99.0]]},{"k":"walkway","c":0,"p":[[-6.6,99.0],[0.4,122.8],[10.9,145.2]]},{"k":"walkway","c":0,"p":[[-15.9,90.3],[-15.6,100.1]]},{"k":"walkway","c":0,"p":[[-65.3,96.6],[-55.6,93.5],[-15.9,90.3]]},{"k":"walkway","c":0,"p":[[-15.9,90.3],[-16.0,88.0]]},{"k":"walkway","c":0,"p":[[-15.9,90.3],[-10.3,89.8]]},{"k":"stairs","c":1,"p":[[-12.1,68.1],[-10.1,58.8]]},{"k":"walkway","c":0,"p":[[-15.1,63.2],[-13.2,55.6]]},{"k":"escalator","c":1,"p":[[-8.3,68.9],[-6.4,59.6]]},{"k":"walkway","c":0,"p":[[-10.3,89.8],[59.0,85.0],[64.7,87.0]]},{"k":"walkway","c":0,"p":[[-13.2,55.6],[-5.9,57.2],[-6.4,59.6]]},{"k":"walkway","c":0,"p":[[-10.1,58.8],[-9.7,56.4],[-12.5,51.7],[-8.4,27.3],[8.3,-52.2],[13.4,-66.0],[23.6,-114.8]]},{"k":"walkway","c":0,"p":[[-12.5,51.7],[-19.4,50.1]]},{"k":"walkway","c":0,"p":[[46.2,97.1],[46.9,96.6]]},{"k":"walkway","c":0,"p":[[-9.2,31.1],[-21.3,28.6]]},{"k":"walkway","c":0,"p":[[46.9,96.6],[51.9,93.1]]},{"k":"walkway","c":0,"p":[[-20.9,26.8],[-8.8,29.2]]},{"k":"walkway","c":0,"p":[[-8.4,27.3],[-3.5,28.3],[-4.0,30.7],[8.5,33.2]]},{"k":"walkway","c":0,"p":[[-23.0,52.8],[-22.1,49.4],[-19.4,50.1]]},{"k":"walkway","c":0,"p":[[-16.6,1.9],[-4.0,4.5]]},{"k":"walkway","c":0,"p":[[-3.6,2.6],[3.6,4.2],[3.2,6.7]]},{"k":"walkway","c":0,"p":[[51.9,93.1],[57.0,90.5]]},{"k":"escalator","c":1,"p":[[-31.6,26.4],[-21.3,28.6]]},{"k":"stairs","c":1,"p":[[-20.9,26.8],[-31.2,24.5]]},{"k":"walkway","c":0,"p":[[-17.0,3.9],[-10.9,3.1]]},{"k":"walkway","c":0,"p":[[-13.3,-14.5],[-0.5,-11.0]]},{"k":"stairs","c":1,"p":[[-24.6,59.7],[-23.0,52.8]]},{"k":"stairs","c":1,"p":[[-16.6,1.9],[-26.1,-0.2]]},{"k":"walkway","c":0,"p":[[0.2,-14.1],[5.8,-12.9],[5.2,-9.7],[15.6,-8.3]]},{"k":"walkway","c":0,"p":[[-13.7,-12.6],[-5.8,-12.4]]},{"k":"walkway","c":0,"p":[[57.0,90.5],[64.7,87.0],[68.7,82.3]]},{"k":"escalator","c":1,"p":[[-26.5,1.8],[-17.0,3.9]]},{"k":"walkway","c":0,"p":[[8.1,34.8],[-4.3,32.5],[-4.0,30.7]]},{"k":"stairs","c":1,"p":[[-13.3,-14.5],[-22.9,-16.4]]},{"k":"walkway","c":0,"p":[[-6.8,30.5],[-4.0,31.1]]},{"k":"escalator","c":1,"p":[[-23.3,-14.5],[-13.7,-12.6]]},{"k":"walkway","c":0,"p":[[-9.6,-33.3],[3.7,-31.3]]},{"k":"walkway","c":0,"p":[[-0.1,-32.2],[-9.2,-35.4]]},{"k":"walkway","c":0,"p":[[4.4,-34.5],[10.9,-33.1],[10.2,-30.0],[19.6,-26.9]]},{"k":"stairs","c":1,"p":[[-9.2,-35.4],[-18.7,-37.3]]},{"k":"escalator","c":1,"p":[[-19.1,-35.2],[-9.6,-33.3]]},{"k":"walkway","c":0,"p":[[59.9,150.6],[64.7,87.0]]},{"k":"platform","c":0,"p":[[43.9,144.7],[47.2,108.5],[48.6,108.7],[45.3,144.8]]},{"k":"walkway","c":0,"p":[[-1.6,5.9],[12.0,8.4],[13.3,7.9]]},{"k":"walkway","c":0,"p":[[-5.9,-50.8],[7.5,-48.5]]},{"k":"walkway","c":0,"p":[[3.7,-49.5],[-5.5,-52.6]]},{"k":"walkway","c":0,"p":[[5.2,-9.7],[1.8,-10.4]]},{"k":"ramp","c":1,"p":[[69.4,75.6],[68.7,82.3]]},{"k":"escalator","c":1,"p":[[-15.0,-54.7],[-5.5,-52.6]]},{"k":"escalator","c":1,"p":[[-5.9,-50.8],[-15.4,-52.8]]},{"k":"walkway","c":0,"p":[[8.3,-52.2],[15.3,-50.7],[14.8,-47.4]]},{"k":"walkway","c":0,"p":[[-62.8,145.2],[-59.3,125.6],[-60.7,121.8],[-61.2,104.0]]},{"k":"stairs","c":1,"p":[[63.4,69.6],[62.9,74.3]]},{"k":"escalator","c":1,"p":[[65.0,69.8],[64.5,74.5]]},{"k":"stairs","c":1,"p":[[8.5,33.2],[17.6,35.0]]},{"k":"walkway","c":0,"p":[[9.8,-8.7],[15.2,-6.3]]},{"k":"walkway","c":0,"p":[[11.4,-59.4],[40.0,-53.3],[50.7,-47.8]]},{"k":"walkway","c":0,"p":[[5.9,-30.9],[10.2,-30.0]]},{"k":"walkway","c":0,"p":[[-80.7,141.9],[-76.7,113.3],[-75.0,109.1],[-68.5,99.1],[-65.3,96.6]]},{"k":"escalator","c":1,"p":[[8.1,34.8],[17.3,36.8]]},{"k":"stairs","c":1,"p":[[75.2,70.8],[74.5,75.5]]},{"k":"walkway","c":0,"p":[[12.0,8.4],[12.7,10.0]]},{"k":"walkway","c":0,"p":[[11.6,-29.7],[20.0,-28.8]]},{"k":"escalator","c":1,"p":[[76.7,71.1],[76.0,75.8]]},{"k":"stairs","c":1,"p":[[13.3,7.9],[23.2,10.0]]},{"k":"walkway","c":0,"p":[[13.4,-66.0],[3.9,-68.0]]},{"k":"stairs","c":1,"p":[[3.9,-68.0],[-4.5,-69.8]]},{"k":"escalator","c":1,"p":[[12.7,10.0],[22.8,12.0]]},{"k":"stairs","c":1,"p":[[15.6,-8.3],[26.6,-6.1]]},{"k":"escalator","c":1,"p":[[15.2,-6.3],[26.1,-4.0]]},{"k":"walkway","c":0,"p":[[42.5,-65.0],[42.9,-66.6],[14.9,-72.7]]},{"k":"walkway","c":0,"p":[[-57.4,112.1],[-61.0,112.4]]},{"k":"walkway","c":0,"p":[[9.5,-48.7],[23.2,-45.8]]},{"k":"walkway","c":0,"p":[[22.9,-76.6],[9.2,-79.4]]},{"k":"stairs","c":1,"p":[[9.2,-79.4],[-3.0,-82.0]]},{"k":"stairs","c":1,"p":[[20.0,-28.8],[30.7,-26.6]]},{"k":"walkway","c":0,"p":[[35.5,134.3],[45.7,125.4]]},{"k":"escalator","c":1,"p":[[19.6,-26.9],[30.3,-24.6]]},{"k":"walkway","c":0,"p":[[25.4,-76.1],[22.9,-76.6],[21.8,-71.4]]},{"k":"stairs","c":1,"p":[[23.2,-45.8],[34.1,-43.5]]},{"k":"escalator","c":1,"p":[[75.9,-38.3],[75.3,-32.5]]},{"k":"stairs","c":1,"p":[[69.5,-43.8],[50.7,-47.8]]},{"k":"escalator","c":1,"p":[[51.0,-49.4],[69.8,-45.6]]},{"k":"escalator","c":1,"p":[[69.2,-42.0],[50.4,-45.9]]}]},"1":{"box":[-80.0,-116.2,18.4,-58.8],"rbox":[-58.6,-96.7,-3.0,-78.3],"ways":[{"k":"platform","c":0,"p":[[-56.8,-106.6],[-124.3,-121.4]]},{"k":"platform","c":0,"p":[[-59.5,-117.1],[-54.8,-116.1],[-56.8,-106.6]]},{"k":"walkway","c":0,"p":[[-17.3,-55.2],[-16.4,-59.2]]},{"k":"stairs","c":1,"p":[[3.9,-68.0],[-4.5,-69.8]]},{"k":"stairs","c":1,"p":[[9.2,-79.4],[-3.0,-82.0]]},{"k":"walkway","c":0,"p":[[-5.9,-70.1],[-4.5,-69.8]]},{"k":"walkway","c":0,"p":[[-6.8,-65.9],[-4.9,-74.5]]},{"k":"walkway","c":0,"p":[[-3.6,-78.3],[20.8,-73.3]]},{"k":"walkway","c":0,"p":[[-49.2,-126.0],[-56.6,-89.6],[-3.6,-78.3],[-3.0,-82.0]]},{"k":"walkway","c":0,"p":[[-55.3,-96.1],[-64.3,-97.7],[-64.7,-95.0]]}]}}}};
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  const CANW = 326, CANH = 210, CANPAD = 24;          // the real canvas + PlanFit's pad
+  const DRAW_ASPECT = (CANW - 2*CANPAD) / (CANH - 2*CANPAD);
+  const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  const fmtL = l => l === 0 ? "L0" : (l > 0 ? "L+" + l : "L−" + Math.abs(l));
+  // Swift's .rounded() is half-away-from-zero; JS Math.round is half-up. The
+  // picker bug only reproduces faithfully if we match Swift.
+  const swiftRound = v => Math.sign(v) * Math.round(Math.abs(v));
+  const uid = (()=>{ let n = 0; return () => "u" + (++n); })();
+
+  const CONN = {
+    stairs:    {c:"var(--stair)", label:"Stairs",    verb:"Stairs"},
+    escalator: {c:"var(--esc)",   label:"Escalator", verb:"Escalator"},
+    elevator:  {c:"var(--elev)",  label:"Elevator",  verb:"Lift"},
+    lift:      {c:"var(--elev)",  label:"Elevator",  verb:"Lift"},
+    ramp:      {c:"var(--accent)",label:"Ramp",      verb:"Ramp"}
+  };
+  // today: the `default` arm of WalkConnector.color returns Theme.elev — the
+  // Elevator swatch — for "vertical"/unknown. That is defect (d), drawn.
+  const connToday = k => CONN[k] || {c:"var(--elev)", label:"Level change", verb:"Change level"};
+  // proposed: unknown mode is a gap, and the app already has a colour for gaps.
+  const connFixed = k => CONN[k] || {c:"var(--nodata)", label:"Level change", verb:"Change level", unmapped:true};
+
+  const pathLevels = fx => [...new Set(fx.runs.map(r => r.L))].sort((a,b) => a-b);
+  const todayPicker = fx => [...new Set(fx.levelsPresent.map(swiftRound))].sort((a,b) => a-b);
+
+  // ── framing ──────────────────────────────────────────────────────────────
+  /** The bbox today's PlanFit uses: the WHOLE path + an 8% margin, for every level. */
+  function pathBBox(fx){
+    let lo = [1e9, 1e9], hi = [-1e9, -1e9];
+    for(const r of fx.runs) for(const p of r.pts){
+      lo[0] = Math.min(lo[0], p[0]); lo[1] = Math.min(lo[1], p[1]);
+      hi[0] = Math.max(hi[0], p[0]); hi[1] = Math.max(hi[1], p[1]);
+    }
+    const m = Math.max(hi[0]-lo[0], hi[1]-lo[1], 1) * 0.08 + 3;
+    return [lo[0]-m, lo[1]-m, hi[0]+m, hi[1]+m];
+  }
+  /** Proposed: this level's OWN route + a pad that scales with it. */
+  function frameFor(fx, L, expand){
+    const r = fx.levels[String(L)].rbox;
+    const pad = Math.min(Math.max(0.35 * Math.max(r[2]-r[0], r[3]-r[1]), 10), 30);
+    let b = [r[0]-pad, r[1]-pad, r[2]+pad, r[3]+pad];
+    if(expand){                       // grow the short axis to the canvas aspect —
+      let bw = b[2]-b[0], bh = b[3]-b[1];   // same scale, more real context, no void
+      const cx = (b[0]+b[2])/2, cy = (b[1]+b[3])/2;
+      if(bw/bh < DRAW_ASPECT) bw = bh * DRAW_ASPECT; else bh = bw / DRAW_ASPECT;
+      b = [cx-bw/2, cy-bh/2, cx+bw/2, cy+bh/2];
+    }
+    return b;
+  }
+  function fit(box){
+    const iw = CANW - 2*CANPAD, ih = CANH - 2*CANPAD;
+    const bw = Math.max(box[2]-box[0], .001), bh = Math.max(box[3]-box[1], .001);
+    const sc = Math.min(iw/bw, ih/bh);
+    const ox = CANPAD + (iw - bw*sc)/2, oy = CANPAD + (ih - bh*sc)/2;
+    return { sc, X: x => ox + (x - box[0])*sc, Y: y => oy + (box[3] - y)*sc };
+  }
+  const poly = (pts, f) => pts.map((p,i) => (i ? "L" : "M") + f.X(p[0]).toFixed(1) + " " + f.Y(p[1]).toFixed(1)).join("");
+
+  // ── chips with collision dodging (mirrors drawTransitionMarks' dodge) ─────
+  function chip(text, x, y, fill, ink, placed, anchorLeft){
+    const w = text.length * 4.9 + 11, h = 14;
+    let cx = anchorLeft ? x + w/2 : x - w/2, cy = y;
+    if(cx + w/2 > CANW - 3) cx = x - w/2 - 1;
+    if(cx - w/2 < 3) cx = w/2 + 3;
+    let rect, guard = 0;
+    do {
+      rect = [cx-w/2, cy-h/2, cx+w/2, cy+h/2];
+      if(!placed.some(q => !(rect[2] < q[0]-2 || rect[0] > q[2]+2 || rect[3] < q[1]-2 || rect[1] > q[3]+2))) break;
+      cy += h + 3;
+    } while(++guard < 14);
+    placed.push(rect);
+    return `<g><rect x="${(cx-w/2).toFixed(1)}" y="${(cy-h/2).toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="7" fill="${fill}"/>`
+         + `<text x="${cx.toFixed(1)}" y="${(cy+3.4).toFixed(1)}" font-size="8.5" font-weight="700" fill="${ink}" text-anchor="middle">${esc(text)}</text></g>`;
+  }
+
+  // ── scale bar ────────────────────────────────────────────────────────────
+  function scaleBar(f){
+    const spanM = (CANW - 2*CANPAD) / f.sc;
+    const nice = [5,10,20,25,50,100,200,400];
+    let m = nice[0];
+    for(const n of nice) if(n <= spanM * 0.32) m = n;
+    const px = m * f.sc;
+    const x0 = 10, y0 = CANH - 10;
+    return `<g opacity=".85"><line x1="${x0}" y1="${y0}" x2="${x0+px}" y2="${y0}" stroke="var(--ink3)" stroke-width="1.2"/>`
+      + `<line x1="${x0}" y1="${y0-3}" x2="${x0}" y2="${y0+2}" stroke="var(--ink3)" stroke-width="1.2"/>`
+      + `<line x1="${x0+px}" y1="${y0-3}" x2="${x0+px}" y2="${y0+2}" stroke="var(--ink3)" stroke-width="1.2"/>`
+      + `<text x="${x0+px+5}" y="${y0+3}" font-size="8" font-weight="600" fill="var(--ink3)" font-family="ui-monospace,Menlo,monospace">${m} m</text></g>`;
+  }
+
+  // ── the plan renderer ────────────────────────────────────────────────────
+  // mode: "today" | "own" | "full"
+  function planSVG(fx, L, mode, opt){
+    opt = Object.assign({ ghost:true, context:true }, opt || {});
+    const lv = fx.levels[String(L)];
+    const id = uid();
+    const open = `<svg viewBox="0 0 ${CANW} ${CANH}" xmlns="http://www.w3.org/2000/svg">`
+      + `<defs><clipPath id="${id}"><rect x="0" y="0" width="${CANW}" height="${CANH}"/></clipPath></defs>`;
+    const chipL = `<g><rect x="14" y="10" width="40" height="16" rx="6" fill="var(--panel3)"/>`
+      + `<text x="34" y="21.5" font-size="9.5" font-weight="800" fill="var(--ink2)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${fmtL(L)}</text></g>`;
+
+    // the blank tab: today's picker offers a level the path never visits.
+    if(!lv){
+      if(mode === "today"){
+        return open + chipL + `<text x="${CANW/2}" y="${CANH/2+3}" font-size="10" fill="var(--ink3)" text-anchor="middle" opacity=".55">— nothing drawn —</text></svg>`;
+      }
+      return open + `<text x="${CANW/2}" y="${CANH/2-6}" font-size="10.5" font-weight="700" fill="var(--go)" text-anchor="middle">This tab no longer exists</text>`
+        + `<text x="${CANW/2}" y="${CANH/2+10}" font-size="9" fill="var(--ink3)" text-anchor="middle">the path never visits ${fmtL(L)} — the picker reads pathLevels</text></svg>`;
+    }
+
+    const box = mode === "today" ? pathBBox(fx) : frameFor(fx, L, mode === "full");
+    const f = fit(box);
+    const conn = mode === "today" ? connToday : connFixed;
+    const pl = pathLevels(fx);
+    let g = "";
+
+    // context ways — only what the A* search touched, cropped to this frame
+    if(mode === "full" && opt.context){
+      const order = { walkway:0, other:0, platform:1, ramp:2, stairs:3, escalator:3, elevator:3 };
+      const ways = lv.ways.slice().sort((a,b) => (order[a.k]||0) - (order[b.k]||0));
+      for(const w of ways){
+        const d = poly(w.p, f);
+        if(w.k === "platform"){
+          const pw = Math.min(Math.max(8 * f.sc, 3), 12);
+          g += `<path d="${d}" fill="none" stroke="var(--panel3)" stroke-width="${pw.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`
+             + `<path d="${d}" fill="none" stroke="var(--line)" stroke-width=".6"/>`;
+        } else if(w.c){
+          g += `<path d="${d}" fill="none" stroke="${conn(w.k).c}" stroke-width="2.2" stroke-linecap="round" opacity=".38"/>`;
+        } else if(w.k === "walkway"){
+          g += `<path d="${d}" fill="none" stroke="var(--line)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>`;
+        } else {
+          g += `<path d="${d}" fill="none" stroke="var(--line2)" stroke-width="1" stroke-linecap="round"/>`;
+        }
+      }
+    }
+
+    // ghost — the real path on the floors this one connects to
+    if(mode === "full" && opt.ghost){
+      const near = new Set();
+      for(const t of fx.transitions){
+        if(t.frmL === L) near.add(t.toL);
+        if(t.toL === L) near.add(t.frmL);
+      }
+      for(const r of fx.runs){
+        if(!near.has(r.L)) continue;
+        g += `<path d="${poly(r.pts, f)}" fill="none" stroke="var(--ink3)" stroke-width="2.4" stroke-linecap="round"`
+           + ` stroke-linejoin="round" stroke-dasharray="3 4" opacity=".4"/>`;
+      }
+    }
+
+    // the platform slab(s) the walk starts / ends on — all today keeps
+    if(mode !== "full"){
+      const slabs = [];
+      if(fx.start.L === L && fx.startSlab) slabs.push(fx.startSlab);
+      if(fx.end.L === L && fx.endSlab && fx.endSlab !== fx.startSlab) slabs.push(fx.endSlab);
+      for(const s of slabs){
+        const pw = Math.min(Math.max(8 * f.sc, 3), 12);
+        g += `<path d="${poly(s, f)}" fill="none" stroke="var(--panel3)" stroke-width="${pw.toFixed(1)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+      }
+    }
+
+    // the route, only where both ends of a segment sit on this floor
+    for(const r of fx.runs){
+      if(r.L !== L) continue;
+      g += `<path d="${poly(r.pts, f)}" fill="none" stroke="var(--accent)" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+
+    // ── markers ──
+    const placed = [];
+    let marks = "";
+    if(mode === "today"){
+      // faithful: one 24px disc per transition touching this level, labelled from
+      // this floor's point of view — which is why a pair reads identically.
+      const ms = [];
+      for(const t of fx.transitions){
+        if(t.frmL === t.toL || (t.frmL !== L && t.toL !== L)) continue;
+        const here = t.frmL === L ? t.frm : t.to;
+        const other = t.frmL === L ? t.toL : t.frmL;
+        ms.push({ p:[f.X(here[0]), f.Y(here[1])], kind:t.kind, up:other > L, other });
+      }
+      for(const m of ms){
+        const c = conn(m.kind).c, r = 12;
+        marks += `<circle cx="${m.p[0].toFixed(1)}" cy="${m.p[1].toFixed(1)}" r="${r+2.5}" fill="var(--paper)"/>`
+          + `<circle cx="${m.p[0].toFixed(1)}" cy="${m.p[1].toFixed(1)}" r="${r}" fill="${c}" stroke="var(--paper)" stroke-width="1.5"/>`
+          + `<text x="${m.p[0].toFixed(1)}" y="${(m.p[1]+4).toFixed(1)}" font-size="11" font-weight="900" fill="#fff" text-anchor="middle">${m.up ? "▲" : "▼"}</text>`;
+      }
+      for(const m of ms){
+        const c = conn(m.kind).c;
+        marks += chip(`${conn(m.kind).label} ${m.up ? "↑" : "↓"} ${fmtL(m.other)}`, m.p[0] + 12 + 8, m.p[1], c, "#fff", placed, true);
+      }
+    } else {
+      // proposed: paired. transitions are emitted in path order, so per floor the
+      // marks alternate arrive / leave and each knows which it is.
+      const ms = [];
+      for(const t of fx.transitions){
+        if(t.frmL === t.toL) continue;
+        if(t.frmL === L) ms.push({ role:"out", p:[f.X(t.frm[0]), f.Y(t.frm[1])], kind:t.kind, up:t.toL > L, other:t.toL });
+        if(t.toL === L)   ms.push({ role:"in",  p:[f.X(t.to[0]),  f.Y(t.to[1])],  kind:t.kind, up:t.frmL > L, other:t.frmL });
+      }
+      // endpoints first, so their chips win the good spots
+      const eps = [];
+      if(fx.start.L === L) eps.push({ p:[f.X(fx.start.xy[0]), f.Y(fx.start.xy[1])], c:"var(--go)", t:`Step off · Pl ${fx.start.ref}` });
+      if(fx.end.L === L)   eps.push({ p:[f.X(fx.end.xy[0]),   f.Y(fx.end.xy[1])],   c:"var(--accent)", t:`Board · Pl ${fx.end.ref}` });
+      for(const e of eps){
+        marks += `<circle cx="${e.p[0].toFixed(1)}" cy="${e.p[1].toFixed(1)}" r="6.5" fill="${e.c}" stroke="var(--paper)" stroke-width="2.5"/>`;
+      }
+      for(const m of ms){
+        const c = conn(m.kind).c;
+        if(m.role === "out"){
+          marks += `<circle cx="${m.p[0].toFixed(1)}" cy="${m.p[1].toFixed(1)}" r="11" fill="var(--paper)"/>`
+            + `<circle cx="${m.p[0].toFixed(1)}" cy="${m.p[1].toFixed(1)}" r="9" fill="${c}" stroke="var(--paper)" stroke-width="1.5"/>`
+            + `<text x="${m.p[0].toFixed(1)}" y="${(m.p[1]+3.4).toFixed(1)}" font-size="9" font-weight="900" fill="#fff" text-anchor="middle">${m.up ? "▲" : "▼"}</text>`;
+        } else {
+          marks += `<circle cx="${m.p[0].toFixed(1)}" cy="${m.p[1].toFixed(1)}" r="9" fill="var(--paper)"/>`
+            + `<circle cx="${m.p[0].toFixed(1)}" cy="${m.p[1].toFixed(1)}" r="6.2" fill="none" stroke="${c}" stroke-width="2.6"/>`;
+        }
+      }
+      for(const e of eps) marks += chip(e.t, e.p[0] + 9, e.p[1], e.c, "#fff", placed, true);
+      for(const m of ms){
+        const c = conn(m.kind).c;
+        const txt = m.role === "out"
+          ? `${conn(m.kind).verb} ${m.up ? "↑" : "↓"} to ${fmtL(m.other)}`
+          : `in from ${fmtL(m.other)}`;
+        marks += m.role === "out"
+          ? chip(txt, m.p[0] + 9 + 6, m.p[1], c, "#fff", placed, true)
+          : chip(txt, m.p[0] + 7 + 5, m.p[1], "var(--panel3)", "var(--ink2)", placed, true);
+      }
+    }
+
+    let out = open + `<g clip-path="url(#${id})">` + g + marks + `</g>` + chipL;
+    if(mode !== "today") out += scaleBar(f);
+    return out + `</svg>`;
+  }
+
+  /** Measured, live: how much of the canvas this level's route actually occupies. */
+  function planStat(fx, L, mode){
+    const lv = fx.levels[String(L)];
+    if(!lv) return mode === "today"
+      ? `<span class="bad">blank</span> <b>·</b> the path never visits ${fmtL(L)}`
+      : `<span class="good">tab gone</span> <b>·</b> picker reads pathLevels`;
+    const box = mode === "today" ? pathBBox(fx) : frameFor(fx, L, mode === "full");
+    const f = fit(box);
+    const r = lv.rbox;
+    const w = (r[2]-r[0]) * f.sc, h = (r[3]-r[1]) * f.sc;
+    const size = `route <b>${Math.max(w,1).toFixed(0)}×${Math.max(h,1).toFixed(0)}px</b>`;
+    if(mode === "today"){
+      const pct = (w*h) / (CANW*CANH) * 100;
+      return `${size} <span class="bad">${pct < 0.05 ? "&lt;0.1" : pct.toFixed(1)}% of canvas</span> `
+        + `<b>·</b> ${f.sc.toFixed(2)} px/m <b>·</b> no context`;
+    }
+    const gain = f.sc / fit(pathBBox(fx)).sc;
+    return `${size} <b>·</b> ${f.sc.toFixed(2)} px/m <b>·</b> `
+      + `<span class="good">${gain.toFixed(1)}× today</span> <b>·</b> `
+      + (mode === "full" ? lv.ways.length + " context ways" : "no context");
+  }
+
+  // ── the ribbon ───────────────────────────────────────────────────────────
+  function ribbonSVG(fx, o){
+    const W = o.W, stepped = o.shape === "stepped";
+    const runs = fx.runs, trs = fx.transitions;
+    const pl = pathLevels(fx);
+    const gutter = stepped ? 30 : 0, padX = 8, padY = 14, barH = stepped ? 20 : 26;
+    const step = 28, riserW = stepped ? 26 : 22;
+    const H = stepped ? padY*2 + (pl.length-1)*step + barH + 12
+                      : padY*2 + barH + 16;
+    const total = runs.reduce((s,r) => s + r.dist, 0) || 1;
+    const avail = W - gutter - padX*2 - riserW*trs.length;
+    const minW = 30;
+    const widths = runs.map(r => o.prop
+      ? minW + (r.dist/total) * Math.max(avail - minW*runs.length, 0)
+      : avail / runs.length);
+    const yFor = L => stepped
+      ? padY + (pl[pl.length-1] - L) * step
+      : H - padY - barH - 8;
+
+    let g = "";
+    // level bands + gutter labels — the section view's bands, kept
+    if(stepped){
+      for(const L of pl){
+        const y = yFor(L) + barH/2;
+        g += `<line x1="${gutter}" y1="${y}" x2="${W-padX}" y2="${y}" stroke="var(--line)" stroke-width="1" stroke-dasharray="3 4"/>`
+          + `<text x="${gutter-6}" y="${y+3.2}" font-size="8.5" font-weight="800" fill="var(--ink3)" text-anchor="end" font-family="ui-monospace,Menlo,monospace">${fmtL(L)}</text>`;
+      }
+    }
+
+    let x = gutter + padX;
+    const bars = [];
+    runs.forEach((r,i) => { bars.push({ x, w: widths[i], y: yFor(r.L), r }); x += widths[i] + (i < trs.length ? riserW : 0); });
+
+    // risers: the real transitions, in path order, coloured by their real kind
+    trs.forEach((t,i) => {
+      const a = bars[i], b = bars[i+1];
+      if(!b) return;
+      const c = connFixed(t.kind);
+      const x1 = a.x + a.w, x2 = b.x;
+      const y1 = a.y + barH/2, y2 = b.y + barH/2;
+      const up = t.toL > t.frmL;
+      g += `<path d="M${x1} ${y1} L${x2} ${y2}" fill="none" stroke="${c.c}" stroke-width="2.6" stroke-linecap="round" opacity=".75"/>`;
+      const mx = (x1+x2)/2, my = (y1+y2)/2;
+      g += `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="7.5" fill="var(--panel)"/>`
+        + `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="6.4" fill="${c.c}"/>`
+        + `<text x="${mx.toFixed(1)}" y="${(my+2.6).toFixed(1)}" font-size="7.5" font-weight="900" fill="#fff" text-anchor="middle">${up ? "▲" : "▼"}</text>`;
+    });
+
+    // run bars
+    bars.forEach((b,i) => {
+      const r = b.r, last = i === bars.length-1;
+      const dist = r.dist < 10 ? r.dist.toFixed(1) : Math.round(r.dist);
+      const lab = `${dist} m`;
+      const textW = lab.length * 4.6;
+      // the first / last bars also carry an endpoint dot — don't let a label sit under it
+      const inside = b.w >= textW + 8 + ((i === 0 || last) ? 9 : 0);
+      const cx = b.x + b.w/2, ly = b.y + barH/2;
+      g += `<rect x="${b.x.toFixed(1)}" y="${b.y}" width="${Math.max(b.w,2).toFixed(1)}" height="${barH}" rx="${barH/2}" fill="var(--accent-soft)"/>`;
+      // the segment line, split around an inside label — otherwise it reads through
+      // the space between the glyphs (the text halo only covers the glyphs themselves)
+      const lx = b.x + 2, rx = b.x + b.w - 2;
+      const seg = (a, z) => (z - a > .5)
+        ? `<rect x="${a.toFixed(1)}" y="${(ly-1.75).toFixed(2)}" width="${(z-a).toFixed(1)}" height="3.5" rx="1.75" fill="var(--accent)"/>` : "";
+      if(inside){
+        g += seg(lx, Math.max(lx, cx - textW/2 - 3)) + seg(Math.min(rx, cx + textW/2 + 3), rx);
+      } else {
+        g += seg(lx, rx);
+      }
+      // Stepped reads its level off the gutter axis, so the bar carries the distance.
+      // Flat has no y-axis — the level is the one thing it must never drop, so it goes
+      // above every bar and the distance takes the inside slot when it fits.
+      if(inside){
+        g += `<text x="${cx.toFixed(1)}" y="${ly + 3.2}" font-size="8.5" font-weight="700" fill="var(--ink2)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${lab}</text>`;
+      }
+      if(!stepped){
+        g += `<text x="${cx.toFixed(1)}" y="${b.y - 4}" font-size="8" font-weight="800" fill="var(--ink3)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${fmtL(r.L)}${inside ? "" : " · " + lab}</text>`;
+      } else if(!inside){
+        g += `<text x="${cx.toFixed(1)}" y="${b.y - 3.5}" font-size="7.5" font-weight="700" fill="var(--ink3)" text-anchor="middle" font-family="ui-monospace,Menlo,monospace">${lab}</text>`;
+      }
+      // endpoints
+      if(i === 0){
+        g += `<circle cx="${(b.x+1).toFixed(1)}" cy="${b.y + barH/2}" r="4.2" fill="var(--go)" stroke="var(--panel)" stroke-width="1.6"/>`
+          + `<text x="${b.x.toFixed(1)}" y="${b.y + barH + 9.5}" font-size="8" font-weight="700" fill="var(--go)" font-family="ui-monospace,Menlo,monospace">Pl ${esc(fx.start.ref)}</text>`;
+      }
+      if(last){
+        g += `<circle cx="${(b.x + b.w - 1).toFixed(1)}" cy="${b.y + barH/2}" r="4.2" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.6"/>`
+          + `<text x="${(b.x + b.w).toFixed(1)}" y="${b.y + barH + 9.5}" font-size="8" font-weight="700" fill="var(--accent)" text-anchor="end" font-family="ui-monospace,Menlo,monospace">Pl ${esc(fx.end.ref)}</text>`;
+      }
+    });
+
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Level ribbon">${g}</svg>`;
+  }
+
+  function ribbonLegend(fx){
+    const kinds = [...new Set(fx.transitions.map(t => t.kind))];
+    return kinds.map(k => {
+      const c = connFixed(k);
+      const n = fx.transitions.filter(t => t.kind === k).length;
+      return `<span class="li"><span class="lg-line" style="background:${c.c}"></span> ${n}× ${esc(c.label.toLowerCase())}${c.unmapped ? " · mode not mapped" : ""}</span>`;
+    }).join("");
+  }
+
+  // ── state ────────────────────────────────────────────────────────────────
+  const S = {
+    diagFx: "berlin", diagL: null,
+    planFx: "berlin", planL: null,
+    shape: "stepped", prop: true, ghost: true, context: true
+  };
+
+  // ── 01 · the diagnosis ───────────────────────────────────────────────────
+  function renderDiag(){
+    const fx = DATA[S.diagFx];
+    const levels = todayPicker(fx);
+    if(S.diagL === null || !levels.includes(S.diagL)) S.diagL = fx.start.L;
+    const pl = new Set(pathLevels(fx));
+    document.getElementById("diag-picker").innerHTML = levels.map(L =>
+      `<button data-l="${L}" class="${L === S.diagL ? "on" : ""}${pl.has(L) ? "" : " phantom"}">${fmtL(L)}${pl.has(L) ? "" : " ⚠"}</button>`).join("");
+    document.getElementById("diag-plan").innerHTML = planSVG(fx, S.diagL, "today");
+    document.getElementById("diag-stat").innerHTML = planStat(fx, S.diagL, "today");
+  }
+  document.getElementById("diag-picker").addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    S.diagL = +b.dataset.l; renderDiag();
+  });
+  document.getElementById("diagfix").addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    S.diagFx = b.dataset.fx; S.diagL = null;
+    [...e.currentTarget.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
+    renderDiag();
+  });
+
+  // ── 02 · the ribbon ──────────────────────────────────────────────────────
+  function renderRibbons(){
+    document.getElementById("ribbons").innerHTML = ["berlin","dortmund"].map(k => {
+      const fx = DATA[k];
+      const pl = pathLevels(fx);
+      return `<div class="ribbon-stage">
+        <div class="rb-head">
+          <span class="rb-t">${esc(fx.station)} · Pl ${esc(fx.ref1)} → Pl ${esc(fx.ref2)}</span>
+          <span class="rb-s">${Math.round(fx.dist)} m · ${Math.round(fx.secs)} s · ${pl.length} floors · ${fx.transitions.length} changes</span>
+        </div>
+        ${ribbonSVG(fx, { W:560, shape:S.shape, prop:S.prop })}
+        <div class="legend" style="margin-top:6px;font-size:11.5px">${ribbonLegend(fx)}</div>
+      </div>`;
+    }).join("");
+    // the card mock always shows the fixture picked in §03, so the two sections agree
+    const fx = DATA[S.planFx];
+    const pl = pathLevels(fx);
+    document.getElementById("card-nav").textContent = fx.station;
+    document.getElementById("old-copy").textContent =
+      `${fx.transitions.length} level changes — ${[...new Set(fx.transitions.map(t => connToday(t.kind).label.toLowerCase()))].join(" + ")}.`;
+    document.getElementById("card-mount").innerHTML = `<div class="tcard">
+      <div class="tc-head">
+        <div><div class="tc-station">${esc(fx.station)}</div><div class="tc-when">Pl ${esc(fx.ref1)} → Pl ${esc(fx.ref2)} · 9 min layover</div></div>
+        <span class="badge b-go">✓ Makeable</span>
+      </div>
+      <div class="tc-body">
+        <div class="tc-stats">
+          <div class="tstat"><span class="k">Walk</span><span class="v">${Math.round(fx.secs/60)}:${String(Math.round(fx.secs)%60).padStart(2,"0")}</span></div>
+          <div class="tstat"><span class="k">Distance</span><span class="v">${Math.round(fx.dist)} m</span></div>
+          <div class="tstat"><span class="k">Floors</span><span class="v">${pl.length}</span></div>
+        </div>
+        <div class="tc-levels">${ribbonSVG(fx, { W:250, shape:S.shape, prop:S.prop })}</div>
+      </div>
+    </div>`;
+  }
+  document.getElementById("ribshape").addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    S.shape = b.dataset.shape;
+    [...e.currentTarget.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
+    renderRibbons();
+  });
+  function bindToggle(id, key, fn){
+    const el = document.getElementById(id);
+    const hit = () => { S[key] = !S[key]; el.setAttribute("aria-pressed", String(S[key])); fn(); };
+    el.addEventListener("click", hit);
+    el.addEventListener("keydown", e => { if(e.key === " " || e.key === "Enter"){ e.preventDefault(); hit(); } });
+  }
+  bindToggle("ribdist", "prop", renderRibbons);
+
+  // ── 03 · the ladder ──────────────────────────────────────────────────────
+  const PANELS = [
+    { mode:"today", title:"Today", tag:'<span class="tag tag-now">shipped</span>',
+      sub:"Shared bbox over the whole path · picker from levelsPresent · r=12 discs · elev orange for “vertical”" },
+    { mode:"own", title:"Own frame", tag:'<span class="tag tag-min">~30 lines</span>',
+      sub:"Each level framed on its own route · picker from pathLevels · paired in/out marks · nodata grey for “vertical”" },
+    { mode:"full", title:"Own frame + context", tag:'<span class="tag tag-reco">recommended</span>',
+      sub:"Aspect-expanded frame · the context ways the search touched · ghost of the connected floors · scale bar" }
+  ];
+  function renderLadder(){
+    const fx = DATA[S.planFx];
+    const pl = pathLevels(fx);
+    if(S.planL === null) S.planL = fx.start.L;
+    document.getElementById("ladder").innerHTML = PANELS.map((p,i) => {
+      const levels = p.mode === "today" ? todayPicker(fx) : pl;
+      const plSet = new Set(pl);
+      const picker = levels.map(L =>
+        `<button data-l="${L}" data-p="${i}" class="${L === S.planL ? "on" : ""}${(p.mode === "today" && !plSet.has(L)) ? " phantom" : ""}">${fmtL(L)}${(p.mode === "today" && !plSet.has(L)) ? " ⚠" : ""}</button>`).join("");
+      return `<div class="pcard${p.mode === "full" ? " reco" : ""}">
+        <h3>${p.title} ${p.tag}</h3>
+        <p class="sub">${p.sub}</p>
+        <div class="picker">${picker}</div>
+        <div class="plan">${planSVG(fx, S.planL, p.mode, { ghost:S.ghost, context:S.context })}</div>
+        <div class="statline">${planStat(fx, S.planL, p.mode)}</div>
+      </div>`;
+    }).join("");
+  }
+  document.getElementById("ladder").addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    S.planL = +b.dataset.l; renderLadder();
+  });
+  document.getElementById("planfix").addEventListener("click", e => {
+    const b = e.target.closest("button"); if(!b) return;
+    S.planFx = b.dataset.fx; S.planL = null;
+    [...e.currentTarget.children].forEach(c => c.setAttribute("aria-pressed", String(c === b)));
+    renderLadder(); renderRibbons();
+  });
+  bindToggle("ghosttog", "ghost", renderLadder);
+  bindToggle("ctxtog", "context", renderLadder);
+
+  // ── 04 · what the data can't support ─────────────────────────────────────
+  const CANT = [
+    ["True section / real elevations",
+     "Z is the OSM <code>level</code> tag × a nominal 4 m — <code>z_is_level_not_elevation: true</code>. <b>0</b> nodes carry <code>ele</code> in Berlin Hbf. Evenly-spaced planes are the honest ceiling, and both proposals stop there.", "drop", "Dropped"],
+    ["Step counts (“21 steps”)",
+     "<code>step_count</code> isn't on the export at all — not sparse, absent. VIZ.md notes it's missing on ~85% of connector stairs upstream too, so it can't be backfilled honestly.", "drop", "Dropped"],
+    ["Sector letters A–E on the plan",
+     "Painted signage, not geometry. Nothing in <code>viz_export</code> knows where sector C is. prototype.html draws them; that's a mock, and it would arrive as a lie. Boarding position stays where its data lives (§7.3).", "drop", "Dropped"],
+    ["“Follow signs to Tracks 11–16”",
+     "Wayfinding signage text isn't in the export. The paired markers name the <i>floor</i> you're heading to, which is what we can actually prove.", "drop", "Dropped"],
+    ["Mezzanine fidelity",
+     "Berlin's <code>levels_present</code> really does carry <code>−1.7</code>, <code>−1.3</code> and <code>−0.5</code> landings — but the path's own Z rounds them into <code>−2 / −1</code>. A UI promising mezzanines would promise a floor the route can't address. Neither proposal offers one.", "drop", "Dropped"],
+    ["A real floor plan (walls, rooms, edges)",
+     "Context is <code>context_mode: \"touched\"</code> — the ways the A* search walked on, not the floor. It's why Berlin's L+2 has <b>no platform way at all</b> (9 walkways, 4 escalators, 2 stairs touched; zero platforms) and today's L+2 tab draws no slab. Exporting the ways <i>on</i> each level, not just the touched ones, is a small exporter change and would make panel 3 substantially better.", "contract", "Contract change"],
+    ["Naming the “vertical” connectors",
+     "3 of Dortmund's 4 transitions are <code>\"vertical\"</code>: a level change at a single node with no connector way — mode genuinely unknown. We can stop calling them elevators today (grey, not orange). Actually knowing what they are needs the ETL to resolve the node's parent ways.", "contract", "Contract change"]
+  ];
+  document.getElementById("cant").innerHTML = CANT.map(([idea, why, cls, call]) =>
+    `<div class="r"><div class="idea">${idea}</div><div class="why">${why}</div><div class="call ${cls}">${call}</div></div>`).join("");
+
+  // ── go ───────────────────────────────────────────────────────────────────
+  renderDiag(); renderLadder(); renderRibbons();
+
+  // ── theme toggle ─────────────────────────────────────────────────────────
+  document.getElementById("themebtn").addEventListener("click", () => {
+    const cur = document.documentElement.getAttribute("data-theme")
+      || (matchMedia("(prefers-color-scheme:dark)").matches ? "dark" : "light");
+    document.documentElement.setAttribute("data-theme", cur === "dark" ? "light" : "dark");
+  });
+})();
+</script>
+</body>
+</html>

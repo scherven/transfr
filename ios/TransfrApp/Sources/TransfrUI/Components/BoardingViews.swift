@@ -115,7 +115,7 @@ struct BoardingStrip: View {
 /// changes as a step-free / stairs note (also from the export, not invented).
 struct BoardingCard: View {
     let guidance: BoardingGuidance?
-    var levelNote: String?          // derived from the walk's real transitions
+    var levelNote: LevelNote?       // derived from the walk's real transitions
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -169,14 +169,17 @@ struct BoardingCard: View {
         }
     }
 
-    private func levelRow(_ note: String) -> some View {
+    /// The icon and tint ride along on the note rather than being sniffed out of its
+    /// text — reading `contains("Step-free")` meant every other walk got the stairs
+    /// symbol in stair purple, including ones whose changes the map never classified
+    /// as stairs at all (#53).
+    private func levelRow(_ note: LevelNote) -> some View {
         HStack(spacing: 10) {
-            Image(systemName: note.contains("Step-free") ? "checkmark" : "figure.stairs")
+            Image(systemName: note.icon)
                 .foregroundStyle(.white)
                 .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7)
-                    .fill(note.contains("Step-free") ? Theme.go : Theme.stair))
-            Text(note).font(.system(size: 12)).foregroundStyle(Theme.ink2)
+                .background(RoundedRectangle(cornerRadius: 7).fill(note.tint))
+            Text(note.text).font(.system(size: 12)).foregroundStyle(Theme.ink2)
         }
     }
 

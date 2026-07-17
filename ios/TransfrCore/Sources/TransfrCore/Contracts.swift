@@ -112,7 +112,15 @@ public struct AssessInterchange: Codable, Hashable, Sendable {
 
 public struct AssessRequest: Codable, Sendable {
     public var interchanges: [AssessInterchange]
-    public init(interchanges: [AssessInterchange]) { self.interchanges = interchanges }
+    /// Route every walk without lifts (the server's `avoid_elevators`). Carries the
+    /// same preference the journey was searched under, so the streamed verdicts
+    /// match what an `assess: true` search would have returned. Encodes to
+    /// `no_elevators` via `TransfrJSON`'s `.convertToSnakeCase`.
+    public var noElevators: Bool
+    public init(interchanges: [AssessInterchange], noElevators: Bool = false) {
+        self.interchanges = interchanges
+        self.noElevators = noElevators
+    }
 }
 
 public struct AssessResponse: Codable, Sendable {

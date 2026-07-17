@@ -6,8 +6,12 @@ transfr HTTP API (FastAPI).
 Endpoints:
   GET  /health                                   liveness
   GET  /stations?q=                              station autocomplete (CSV-backed)
-  GET  /journeys?from=&to=&time=&max=            journeys, each change of train
-                                                 assessed for walkability (the product)
+  GET  /journeys?from=&to=&time=&max=&no_elevators=
+                                                 journeys, each change of train
+                                                 assessed for walkability (the product);
+                                                 no_elevators routes every transfer's
+                                                 VERDICT without lifts (core/'s
+                                                 avoid_elevators), not just /walk geometry
   GET  /transfer?lat=&lon=&from_platform=&to_platform=
                                                  debug: platform-to-platform walk at
                                                  the station nearest a coordinate
@@ -18,7 +22,7 @@ Endpoints:
                                                  the 'full station walk' tool: from one
                                                  source platform, the walk to every other
                                                  platform at the nearest station,
-                                                 nearest-first (one pathfind each)
+                                                 in platform-ref order (one pathfind each)
   GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
                                                  station, nearest first; degrades to a
                                                  typed reason when the POI layer is absent
@@ -67,8 +71,23 @@ _WALK_CACHE_CONTROL = "public, max-age=86400"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_pool()  # best-effort; deferred to first request if the DB is down
+    if config.OSM_STATION_INDEX:
+        _load_osm_station_index()
     yield
     close_pool()
+
+
+def _load_osm_station_index() -> None:
+    """Best-effort: fold the deployed OSM station names into the autocomplete
+    index at startup. A DB that's down here just leaves the CSV index in place
+    (same posture as init_pool) -- it must never stop the app from booting."""
+    try:
+        with connection() as conn:
+            added = stations.load_osm_stations(conn)
+        print(f"[api] OSM station index: +{added} stations", flush=True)
+    except Exception as e:  # noqa: BLE001 -- degrade to CSV-only, never crash startup
+        print(f"[api] OSM station index unavailable, using CSV only: "
+              f"{type(e).__name__}: {e}", flush=True)
 
 
 app = FastAPI(title="transfr", version="0.1.0", lifespan=lifespan)
@@ -127,12 +146,18 @@ def get_journeys(
     max: int = Query(default=config.DEFAULT_MAX_JOURNEYS, ge=1, le=config.MAX_JOURNEYS_LIMIT),
     assess: bool = Query(default=True, description="assess each transfer's walkability; "
                          "false returns pending transfers instantly to be streamed via /assess"),
+    no_elevators: bool = Query(default=False, description="never route through a lift "
+                               "(core/'s avoid_elevators, i.e. the --no-elevators profile): "
+                               "affects each transfer's walkability VERDICT, not just the "
+                               "drawn geometry. Selects the same core/ profile `/walk`'s "
+                               "`step_free` does, but on the verdict path"),
     conn=Depends(get_conn),
 ):
     when = _parse_when(time)
     try:
         return plan_journeys(conn, from_, to, when, max_journeys=max,
-                             buffer_s=config.BUFFER_S, assess=assess)
+                             buffer_s=config.BUFFER_S, assess=assess,
+                             avoid_elevators=no_elevators)
     except ValueError as e:
         # unresolvable origin/destination name
         raise HTTPException(status_code=404, detail=str(e))
@@ -152,7 +177,8 @@ def post_assess(req: schemas.AssessRequest, conn=Depends(get_conn)):
             status_code=413,
             detail=f"too many interchanges: {len(req.interchanges)} > {config.MAX_ASSESS_BATCH}",
         )
-    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S)
+    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S,
+                               avoid_elevators=req.no_elevators)
 
 
 @app.get("/transfer", response_model=schemas.PlatformWalkResponse, dependencies=_PROTECTED)
@@ -213,7 +239,7 @@ def get_station_walk(
 ):
     """The 'full station walk' advanced tool: from one source platform, the real
     walk to every OTHER platform at the station nearest (lat, lon), one pathfind
-    each, sorted nearest-first. Honest degradation: an unreachable platform is a
+    each, in platform-ref order. Honest degradation: an unreachable platform is a
     `found=False` row with core/'s reason; a coordinate with no station near it
     returns a top-level `found=False`. `step_free` routes elevator-free."""
     return build_station_walk(conn, lat, lon, from_platform, step_free)

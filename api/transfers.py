@@ -149,13 +149,20 @@ def resolve_walk(
     dep_lat: Optional[float], dep_lon: Optional[float], dep_platform: Optional[str],
     algorithm: str = DEFAULT_ALGORITHM,
     max_search_seconds: Optional[float] = None,
+    avoid_elevators: bool = False,
 ) -> WalkResolution:
     """Resolve both platforms to a station + ref and walk-route between them --
     the expensive, clock-independent core of a transfer assessment (station
     lookup + core/ pathfind). Never raises: every gap degrades to a typed
     `reason` with `walk_time_s` left None. Split out from assess_transfer so its
     result -- the same for a given change of train regardless of when the trains
-    run -- can be cached across a search's journeys."""
+    run -- can be cached across a search's journeys.
+
+    `avoid_elevators` selects core/'s --no-elevators profile (elevator ways and
+    node-mapped lifts are not traversable, so the search routes over
+    stairs/escalators/ramps instead), making the resolved walk the lift-free one
+    -- the journey routing profile behind the "no elevators" preference, not just
+    the drawn `/walk` geometry."""
     arr_ref = map_track_to_ref(arr_platform)
     dep_ref = map_track_to_ref(dep_platform)
     res = WalkResolution(arrival_platform=arr_ref, departure_platform=dep_ref)
@@ -194,7 +201,8 @@ def resolve_walk(
     res.relation_id = candidates[0].relation_id
     res.station_name = candidates[0].name
 
-    kwargs = {"algorithm": algorithm, "use_stitch_bridges": config.STITCH_BRIDGES}
+    kwargs = {"algorithm": algorithm, "use_stitch_bridges": config.STITCH_BRIDGES,
+              "avoid_elevators": avoid_elevators}
     if max_search_seconds is not None:
         kwargs["max_search_seconds"] = max_search_seconds
 
@@ -229,13 +237,16 @@ def resolve_walk(
 
 
 def _resolve_walk_key(arr_lat, arr_lon, arr_platform, dep_lat, dep_lon,
-                      dep_platform, algorithm, max_search_seconds):
+                      dep_platform, algorithm, max_search_seconds, avoid_elevators):
     """Cache key for resolve_walk: exactly its inputs. Coords are rounded to ~0.1 m
-    so the same stop (identical MOTIS coords across journeys) always hits."""
+    so the same stop (identical MOTIS coords across journeys) always hits.
+    `avoid_elevators` is part of the key: the lift-free route is a different walk,
+    so it must never collide with the with-lifts one for the same platforms."""
     def r(x):
         return round(x, 6) if x is not None else None
     return (r(arr_lat), r(arr_lon), arr_platform,
-            r(dep_lat), r(dep_lon), dep_platform, algorithm, max_search_seconds)
+            r(dep_lat), r(dep_lon), dep_platform, algorithm, max_search_seconds,
+            avoid_elevators)
 
 
 def assess_transfer(
@@ -248,11 +259,17 @@ def assess_transfer(
     buffer_s: float = DEFAULT_BUFFER_S,
     algorithm: str = DEFAULT_ALGORITHM,
     max_search_seconds: Optional[float] = None,
+    avoid_elevators: bool = False,
     resolve_cache: Optional[dict] = None,
 ) -> TransferAssessment:
     """Resolve both platforms to a station + ref, walk-route between them, and
     classify against the layover. Never raises for missing data -- returns an
     `unknown` assessment carrying the reason instead.
+
+    `avoid_elevators` routes the walk step-free (core/'s elevator-free profile),
+    so the verdict reflects the "no elevators" journey routing preference and not
+    just the drawn geometry -- an elevator-free path may be longer, changing a
+    feasible transfer to tight/infeasible.
 
     The walk resolution (the costly part) is clock-independent; pass a shared
     `resolve_cache` dict to memoize it across every journey in one search, so a
@@ -264,16 +281,18 @@ def assess_transfer(
             conn, arr_lat=arr_lat, arr_lon=arr_lon, arr_platform=arr_platform,
             dep_lat=dep_lat, dep_lon=dep_lon, dep_platform=dep_platform,
             algorithm=algorithm, max_search_seconds=max_search_seconds,
+            avoid_elevators=avoid_elevators,
         )
     else:
         key = _resolve_walk_key(arr_lat, arr_lon, arr_platform, dep_lat, dep_lon,
-                                dep_platform, algorithm, max_search_seconds)
+                                dep_platform, algorithm, max_search_seconds, avoid_elevators)
         r = resolve_cache.get(key)
         if r is None:
             r = resolve_walk(
                 conn, arr_lat=arr_lat, arr_lon=arr_lon, arr_platform=arr_platform,
                 dep_lat=dep_lat, dep_lon=dep_lon, dep_platform=dep_platform,
                 algorithm=algorithm, max_search_seconds=max_search_seconds,
+                avoid_elevators=avoid_elevators,
             )
             resolve_cache[key] = r
 
@@ -324,16 +343,24 @@ class LiveTransfer:
     motis_assumed_s: Optional[float] = None   # MOTIS's own required transfer, if known
     buffer_s: float = DEFAULT_BUFFER_S
     station_name: Optional[str] = None
+    # The routing profile the cached walk was found under. A delay-invariant fact,
+    # so a platform-change replan (the one live re-pathfind) stays on the same
+    # profile -- a step-free journey never silently re-routes through an elevator.
+    avoid_elevators: bool = False
 
     @classmethod
     def from_assessment(cls, a: "TransferAssessment", *,
                         motis_assumed_s: Optional[float] = None,
-                        buffer_s: float = DEFAULT_BUFFER_S) -> "LiveTransfer":
-        """Build from an assess_transfer result (the plan-time -> live handoff)."""
+                        buffer_s: float = DEFAULT_BUFFER_S,
+                        avoid_elevators: bool = False) -> "LiveTransfer":
+        """Build from an assess_transfer result (the plan-time -> live handoff).
+        `avoid_elevators` carries the journey's step-free preference through so a
+        re-tracked platform is re-routed under the same profile."""
         return cls(
             relation_id=a.relation_id, arr_ref=a.arrival_platform, dep_ref=a.departure_platform,
             walk_time_s=a.walk_time_s, scheduled_layover_s=a.layover_s,
             motis_assumed_s=motis_assumed_s, buffer_s=buffer_s, station_name=a.station_name,
+            avoid_elevators=avoid_elevators,
         )
 
 
@@ -377,7 +404,8 @@ def reassess(
     if changed and conn is not None and t.relation_id is not None:
         r = find_shortest_path(conn, t.relation_id,
                                new_arr or t.arr_ref, new_dep or t.dep_ref, algorithm=algorithm,
-                               use_stitch_bridges=config.STITCH_BRIDGES)
+                               use_stitch_bridges=config.STITCH_BRIDGES,
+                               avoid_elevators=t.avoid_elevators)
         if r.get("found"):
             walk = r["walking_time_seconds"]
             t.walk_time_s = walk

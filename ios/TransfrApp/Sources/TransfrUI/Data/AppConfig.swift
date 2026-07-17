@@ -37,11 +37,28 @@ public enum AppConfig {
         return LiveRepository(baseURL: url, apiKey: apiKey)
     }
 
-    /// Dev affordance: when `TRANSFR_AUTOPLAN=1`, the input screen fires the default
-    /// query on launch so you land straight on live results (skips retyping every
-    /// run). Off by default; nothing user-facing.
+    /// Dev affordance: when `TRANSFR_AUTOPLAN=1`, the input screen plans a query on
+    /// launch so you land straight on live results (skips retyping every run). Off
+    /// by default; nothing user-facing.
     public static var autoplanOnLaunch: Bool {
         isTruthy(ProcessInfo.processInfo.environment["TRANSFR_AUTOPLAN"])
+    }
+
+    /// The endpoints autoplan fires, or nil when it's off or either end is unset.
+    /// The app ships no example query — the fields start empty — so a dev supplies
+    /// the route per run, the same way the base URL and key are supplied, and no
+    /// example route is baked into committed source.
+    ///
+    ///   TRANSFR_AUTOPLAN_FROM / TRANSFR_AUTOPLAN_TO   e.g. "Hamburg Hbf" / "Stuttgart Hbf"
+    public static var autoplanQuery: (from: String, to: String)? {
+        guard autoplanOnLaunch else { return nil }
+        let env = ProcessInfo.processInfo.environment
+        guard let from = env["TRANSFR_AUTOPLAN_FROM"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty,
+              let to = env["TRANSFR_AUTOPLAN_TO"]?
+                .trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        else { return nil }
+        return (from, to)
     }
 
     private static func isTruthy(_ value: String?) -> Bool {

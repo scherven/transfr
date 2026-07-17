@@ -108,6 +108,26 @@ def test_enrich_shape_and_verdict_wiring(monkeypatch):
             assert j.verdict == FEASIBLE          # direct -> feasible
 
 
+def test_enrich_threads_avoid_elevators_to_every_assessment(monkeypatch):
+    """#35: the "no elevators" routing profile must reach EVERY transfer's
+    assessment, so a lift-free search's verdicts (not just its drawn geometry)
+    are routed without lifts. Also guards enrich()'s positional hand-off to
+    `_assess`: swapping the flag with the resolve cache there would otherwise
+    fail silently, since both are truthy."""
+    seen = []
+
+    def spy(*a, **k):
+        seen.append(k.get("avoid_elevators"))
+        return TransferAssessment(verdict=FEASIBLE, walk_time_s=90.0, layover_s=300.0)
+
+    monkeypatch.setattr(P, "assess_transfer", spy)
+    enrich(conn=None, search_result=_search_result("de_at_munchen_wien"), avoid_elevators=True)
+    assert seen and set(seen) == {True}
+    seen.clear()
+    enrich(conn=None, search_result=_search_result("de_at_munchen_wien"))
+    assert seen and set(seen) == {False}      # default: lifts allowed, search unchanged
+
+
 def test_enrich_platformless_network_degrades_gracefully_without_db():
     """FR/IT/ES fixtures carry no platforms; the real assessor must short-circuit
     to no_platform_data BEFORE any DB call, so enrich works with conn=None."""

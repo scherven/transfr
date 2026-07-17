@@ -14,8 +14,8 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 0) {
                 SectionHeader(text: "Getting around")
-                SettingRow(icon: "figure.walk", title: "Stairs-free routes") {
-                    TransfrToggle(isOn: $s.stepFree)
+                SettingRow(icon: "figure.stairs", title: "Avoid lifts") {
+                    TransfrToggle(isOn: $s.avoidElevators)
                 }.padding(.bottom, 8)
                 SettingStack(icon: "figure.walk.motion", title: "Walking pace") {
                     SegmentedControl(options: SettingsStore.Pace.allCases, selection: $s.pace) { $0.label }

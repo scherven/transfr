@@ -44,9 +44,9 @@ struct WalkView: View {
         .navigationTitle(transfer?.atStation ?? "Walk")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
-        // Re-keyed on `stepFree` so flipping the preference refetches the
+        // Re-keyed on `avoidElevators` so flipping the preference refetches the
         // elevator-free variant (a different route, hence different geometry).
-        .task(id: settings.stepFree) { await loadGeometry() }
+        .task(id: settings.avoidElevators) { await loadGeometry() }
     }
 
     private var principal: some View {
@@ -127,9 +127,13 @@ struct WalkView: View {
 
     @ViewBuilder
     private var levelPicker: some View {
-        if let scene, scene.levelsAsc.count > 1 {
+        // `pathLevels`, not `levelsAsc`: the canvas draws the path, so the picker
+        // must offer the floors the path visits. `levelsAsc` is the union over every
+        // context way the search touched and tabs floors the walk never reaches —
+        // Dortmund 11→4 offered L−2, which drew a floor with no route on it (#53).
+        if let scene, scene.pathLevels.count > 1 {
             Picker("Level", selection: $level) {
-                ForEach(scene.levelsAsc.reversed(), id: \.self) { lvl in
+                ForEach(scene.pathLevels.reversed(), id: \.self) { lvl in
                     Text(levelPickerLabel(lvl, scene)).tag(lvl)
                 }
             }.pickerStyle(.segmented)
@@ -246,12 +250,12 @@ struct WalkView: View {
     private func loadGeometry() async {
         defer { loading = false }
         guard let t = transfer,
-              let key = WalkKey(transfer: t, stepFree: settings.stepFree) else { return }
+              let key = WalkKey(transfer: t, stepFree: settings.avoidElevators) else { return }
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s
             boarding = result.boarding
-            level = s.levelsAsc.contains(s.startLevel) ? s.startLevel : (s.levelsAsc.first ?? 0)
+            level = s.pathLevels.contains(s.startLevel) ? s.startLevel : (s.pathLevels.first ?? 0)
         }
     }
 }

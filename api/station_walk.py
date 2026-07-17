@@ -3,9 +3,9 @@ Build the 'full station walk': from one source platform, the real walk to every
 OTHER platform at the same station -- one find_shortest_path per platform.
 
 Powers the /station-walk advanced tool (a *station* question, not a journey one):
-pick a station + a source platform, see distance/time to every platform,
-nearest-first. Kept a thin, DB-taking wrapper around the same primitives the
-verdict path uses so it never disagrees with a transfer walk:
+pick a station + a source platform, see distance/time to every platform, in
+platform-ref order. Kept a thin, DB-taking wrapper around the same primitives
+the verdict path uses so it never disagrees with a transfer walk:
   * consistent with the verdict -- each row runs find_shortest_path with the SAME
     settings assess_transfer / build_walk use (astar, stitch bridges per
     config.STITCH_BRIDGES), so a row's walk time equals what a `/walk` between
@@ -22,7 +22,7 @@ from __future__ import annotations
 from typing import List
 
 from ground_truth import find_shortest_path  # resolved via api/__init__ sys.path
-from search_context import list_platform_refs
+from search_context import _natural_key, list_platform_refs
 
 from api import config, schemas
 from api.bridge import resolve_station
@@ -34,29 +34,21 @@ _ALGORITHM = "astar"
 
 
 def _row_sort_key(row: schemas.StationWalkRow):
-    """Nearest-first: reachable rows first, ordered by ascending walk distance;
-    then every unreachable row. Stable, so unreachable rows keep the natural ref
-    order `list_platform_refs` returned them in."""
-    # if row.found and row.walk_distance_m is not None:
-    #     return (0, row.walk_distance_m)
-    # return (1, 0.0)
-    p = row.to_platform
-    try:
-        p = int(p)
-        return (p, 0 if row.found else 1, row.walk_distance_m or 0.0)
-    except ValueError:
-        x = (ord(i) for i in p)
-        return (sum(x), 0 if row.found else 1, row.walk_distance_m or 0.0)
-        # return (...x, 0 if row.found else 1, row.walk_distance_m or 0.0)
-    # return (row.to_platform, 0 if row.found else 1, row.walk_distance_m or 0.0)
+    """Platform-ref order: purely-numeric refs first in numeric order ("2"
+    before "10"), then letter-leading refs ("A", "D06") alphabetically, with a
+    mixed ref like "3a" landing just after "3". Reuses search_context's
+    `_natural_key` -- the very key `list_platform_refs` sorts by -- so a row's
+    position matches the ref list the walk was built from."""
+    return _natural_key(row.to_platform)
 
 
 def build_station_walk(conn, lat: float, lon: float, from_platform: str,
                        step_free: bool = False) -> schemas.StationWalkResponse:
     """Resolve the station nearest (lat, lon), then pathfind from `from_platform`
-    to every other platform ref it lists. Returns rows sorted nearest-first.
-    Degrades honestly: no station near the point -> top-level `found=False`; a
-    platform that doesn't connect -> a `found=False` row with core/'s reason."""
+    to every other platform ref it lists. Returns rows in platform-ref order
+    (numeric before alphabetic). Degrades honestly: no station near the point ->
+    top-level `found=False`; a platform that doesn't connect -> a `found=False`
+    row with core/'s reason."""
     with conn.cursor() as cur:
         match = resolve_station(cur, lat, lon)
         if match is None:

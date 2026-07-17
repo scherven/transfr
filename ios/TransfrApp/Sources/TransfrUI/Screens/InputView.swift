@@ -8,11 +8,13 @@ import TransfrCore
 /// refs → the verdict-free walk, §6.9). Gear → Settings; shield → Advanced (#26).
 struct InputView: View {
     @Environment(TripModel.self) private var model
+    @Environment(SettingsStore.self) private var settings
     @Environment(LocationManager.self) private var location
     /// While the cold-launch mark is still flying, this view's own "transfr" title
     /// stays hidden so the flying mark is the only wordmark on screen; it fades in as
     /// the launch hands off (see `WordmarkAnchorKey` / LaunchView).
     @Environment(\.isLaunching) private var isLaunching
+    @Environment(RecentSearchStore.self) private var recents
 
     enum Mode: String, CaseIterable, Identifiable { case type, paste, walk
         var id: String { rawValue }
@@ -20,10 +22,14 @@ struct InputView: View {
         var icon: String { switch self { case .type: "text.alignleft"; case .paste: "link"; case .walk: "figure.walk" } }
     }
     @State private var mode: Mode = .type
-    @State private var link = "https://maps.app.goo.gl/JWTvpehbneTcqad39"
-    @State private var lookupStation = "Berlin Hbf"
-    @State private var fromPlatform = "1"
-    @State private var toPlatform = "16"
+    /// All genuinely empty. Every field below shows a real placeholder instead of
+    /// shipping an example value: nothing on screen is a value the user didn't put
+    /// there. The walk-only platforms fill in from the station's *real* platform
+    /// list once it resolves (`resolvePlatforms`).
+    @State private var link = ""
+    @State private var lookupStation = ""
+    @State private var fromPlatform = ""
+    @State private var toPlatform = ""
 
     /// Walk-only resolution: the station's platforms + relation id, resolved from a
     /// picked suggestion's coordinate so the platform inputs **adapt to the entered
@@ -43,18 +49,10 @@ struct InputView: View {
 
     /// Station-autocomplete state, shared across the From/To/Station fields — one
     /// focused field owns the suggestion list at a time. `.link` joins in so the
-    /// paste field gets the same focus-to-clear treatment (it owns no suggestions).
+    /// paste field is focusable and dismissible (it owns no suggestions).
     enum Field: Hashable { case from, to, station, link }
     @FocusState private var focused: Field?
 
-    /// Placeholder-style seeding: From / To / the paste link ship with an example
-    /// value, but the first time you focus a field that *still holds its seed*, it
-    /// clears so you type into a blank (placeholder-showing) field. Seeds are
-    /// captured on first appear so a location-resolved origin — which replaces the
-    /// seed before you ever touch it — is never wiped.
-    @State private var originSeed: String?
-    @State private var destinationSeed: String?
-    @State private var linkSeed: String?
     @State private var suggestions: [StationSuggestion] = []
     @State private var searchTask: Task<Void, Never>?
 
@@ -113,8 +111,14 @@ struct InputView: View {
                 didDefaultLocation = true
                 if !location.isDenied { requestLocation(manual: false) }
             }
-            // Opt-in (TRANSFR_AUTOPLAN=1): jump straight to live results on launch.
-            if AppConfig.autoplanOnLaunch, model.load == .idle { await model.plan() }
+            // Opt-in dev affordance: jump straight to live results on launch. The
+            // route comes from TRANSFR_AUTOPLAN_FROM/_TO — the fields themselves
+            // ship empty, so there's no default query to fire.
+            if let q = AppConfig.autoplanQuery, model.load == .idle {
+                model.origin = q.from
+                model.destination = q.to
+                await model.plan(avoidElevators: settings.avoidElevators)
+            }
         }
         .onChange(of: location.coordinate?.latitude) { _, _ in applyLocationIfReady() }
         .onChange(of: model.origin) { _, new in
@@ -124,27 +128,14 @@ struct InputView: View {
                 model.usingCurrentLocation = false
             }
         }
-        .onAppear {
-            // Capture the pristine seeds once, before any location fix replaces them.
-            if originSeed == nil {
-                originSeed = model.origin; destinationSeed = model.destination; linkSeed = link
-            }
-        }
         .onChange(of: focused) { _, now in
-            if let now { clearSeedIfPristine(now) }
-        }
-    }
-
-    /// First focus on a still-seeded field clears its example so you type into a
-    /// blank field (the built-in placeholder then shows) — the "press it and the
-    /// content deletes" ask. A value the user, or a location fix, already changed is
-    /// left untouched, so this only ever clears the shipped example.
-    private func clearSeedIfPristine(_ field: Field) {
-        switch field {
-        case .from:    if model.origin == originSeed { model.origin = "" }
-        case .to:      if model.destination == destinationSeed { model.destination = "" }
-        case .link:    if link == linkSeed { link = "" }
-        case .station: break   // walk-only station keeps its example (not requested)
+            // Focusing "From" is the user taking it over, so a still-pending
+            // first-launch location fix must not land under the cursor. This used
+            // to fall out of clearing the field's shipped example on first focus;
+            // with the field genuinely empty there's nothing to clear, so the
+            // intent is stated directly. The location *button* is unaffected: it
+            // blurs the field and forces the fix through (`manual`).
+            if now == .from { model.originUserEdited = true }
         }
     }
 
@@ -171,7 +162,8 @@ struct InputView: View {
                 VStack(spacing: 0) {
                     fromRow(origin: $model.origin)
                     Divider().overlay(Theme.line).padding(.leading, 44)
-                    fieldRow(dot: Theme.miss, label: "To", field: .to, text: $model.destination) { EmptyView() }
+                    fieldRow(dot: Theme.miss, label: "To", placeholder: "Stuttgart Hbf",
+                             field: .to, text: $model.destination) { EmptyView() }
                 }
             }
             if focused == .from || focused == .to { suggestionList }
@@ -182,6 +174,7 @@ struct InputView: View {
                 chip(key: "Travellers", value: "1 adult")
                 Spacer(minLength: 0)
             }
+            recentSection
         }
     }
 
@@ -213,7 +206,8 @@ struct InputView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 12)
         } else {
-            fieldRow(dot: Theme.accent, label: "From", field: .from, text: origin) {
+            fieldRow(dot: Theme.accent, label: "From", placeholder: "Hamburg Hbf",
+                     field: .from, text: origin) {
                 fromTrailing(active: false)
             }
         }
@@ -273,15 +267,18 @@ struct InputView: View {
         Task { await model.useCurrentLocation(lat: coord.latitude, lon: coord.longitude) }
     }
 
+    /// `label` is the caption above the field; `placeholder` is the hint shown while
+    /// it's empty — an example of a valid entry, which is what the old shipped-in
+    /// example values were reaching for, done honestly.
     private func fieldRow<Trailing: View>(
-        dot: Color, label: String, field: Field, text: Binding<String>,
+        dot: Color, label: String, placeholder: String, field: Field, text: Binding<String>,
         @ViewBuilder trailing: () -> Trailing
     ) -> some View {
         HStack(spacing: 12) {
             Circle().fill(dot).frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 1) {
                 Text(label).font(.system(size: 11)).foregroundStyle(Theme.ink3)
-                TextField(label, text: text)
+                TextField(placeholder, text: text)
                     .font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.ink)
                     .textInputAutocapitalization(.words).autocorrectionDisabled()
                     .focused($focused, equals: field)
@@ -301,6 +298,12 @@ struct InputView: View {
 
     // MARK: - Paste mode
 
+    /// The paste door. The button is the primary way in: `PasteButton` is
+    /// system-mediated, so the link arrives without the app reading the clipboard
+    /// itself (no "pasted from" banner, and nothing is read until you tap). The
+    /// field stays so the pasted link is visible and correctable — a link that
+    /// doesn't parse only produces a message on the CTA, which is unusable if you
+    /// can't see what landed — and it starts empty behind a real placeholder.
     private var pasteMode: some View {
         VStack(alignment: .leading, spacing: 14) {
             SetCard {
@@ -311,28 +314,54 @@ struct InputView: View {
                             .font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.ink)
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
                             .focused($focused, equals: .link)
+                        PasteButton(payloadType: String.self) { strings in
+                            guard let s = strings.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                  !s.isEmpty else { return }
+                            link = s
+                            focused = nil
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonBorderShape(.capsule)
+                        .tint(Theme.accent)
                     }
                 }
             }
         }
     }
 
-    /// A recent route. Tapping it plans that "A → B" example through the same live
-    /// path as typed input — so the paste screen is fully interactive, not just the
-    /// link field. (These are illustrative examples, not persisted history yet.)
-    private func recentRow(title: String, when: String) -> some View {
+    /// Past searches offered back for one-tap reuse (#38): the persisted history
+    /// from `RecentSearchStore`, newest first. Every row is a search the user
+    /// actually ran — until there is one, the section says so plainly rather than
+    /// showing seeded examples. (Where "Recent" belongs is its own polish, #43.)
+    @ViewBuilder private var recentSection: some View {
+        SectionHeader(text: "Recent")
+        if recents.items.isEmpty {
+            Text("No recent searches yet.")
+                .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                .padding(.vertical, 20)
+        } else {
+            ForEach(recents.items) { search in
+                recentRow(origin: search.origin, destination: search.destination,
+                          when: Fmt.relativeDay(search.date))
+            }
+        }
+    }
+
+    /// One past search. Tapping it re-runs that route through the same live path as
+    /// typed input.
+    private func recentRow(origin: String, destination: String, when: String) -> some View {
         Button {
-            let parts = title.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
-            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return }
-            model.origin = parts[0]
-            model.destination = parts[1]
+            guard !origin.isEmpty, !destination.isEmpty else { return }
+            model.origin = origin
+            model.destination = destination
             model.usingCurrentLocation = false
             model.originUserEdited = true
-            Task { await model.plan() }
+            Task { await model.plan(avoidElevators: settings.avoidElevators) }
         } label: {
             HStack(spacing: 10) {
                 SetIcon("clock")
-                Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                Text("\(origin) → \(destination)")
+                    .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
                 Spacer()
                 Text(when).font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
@@ -349,16 +378,17 @@ struct InputView: View {
     private var walkMode: some View {
         VStack(alignment: .leading, spacing: 14) {
             Panel(padding: 6) {
-                fieldRow(dot: Theme.accent, label: "Station", field: .station, text: $lookupStation) { EmptyView() }
+                fieldRow(dot: Theme.accent, label: "Station", placeholder: "Berlin Hbf",
+                         field: .station, text: $lookupStation) { EmptyView() }
             }
             if focused == .station { suggestionList }
 
             // The platform inputs adapt to the entered station: real dropdowns of
             // its actual platforms once resolved, free-form text until then.
             HStack(spacing: 8) {
-                platformInput("From platform", $fromPlatform)
+                platformInput("From platform", placeholder: "1", $fromPlatform)
                 Image(systemName: "arrow.right").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink3)
-                platformInput("To platform", $toPlatform)
+                platformInput("To platform", placeholder: "16", $toPlatform)
             }
 
             walkHint
@@ -377,18 +407,18 @@ struct InputView: View {
     /// A menu of the station's real platforms when we have them; the free-form
     /// field otherwise — so an unmapped station or a hand-typed ref still works.
     @ViewBuilder
-    private func platformInput(_ label: String, _ text: Binding<String>) -> some View {
+    private func platformInput(_ label: String, placeholder: String, _ text: Binding<String>) -> some View {
         if adaptedPlatforms.isEmpty {
-            platformField(label, text)
+            platformField(label, placeholder, text)
         } else {
             platformMenu(label, text, adaptedPlatforms)
         }
     }
 
-    private func platformField(_ label: String, _ text: Binding<String>) -> some View {
+    private func platformField(_ label: String, _ placeholder: String, _ text: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(label).font(.system(size: 11)).foregroundStyle(Theme.ink3)
-            TextField(label, text: text)
+            TextField(placeholder, text: text)
                 .font(.system(size: 17, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.ink)
                 .autocorrectionDisabled().textInputAutocapitalization(.never)
         }
@@ -625,6 +655,19 @@ struct InputView: View {
         }
     }
 
+    /// Whether the current mode has a query to submit. The fields ship empty now,
+    /// so each mode gates on its own inputs — previously the shipped example values
+    /// meant type mode could never be empty, and it went unguarded. A location
+    /// origin fills `model.origin` with the resolved station, so it counts here too.
+    private var canSubmit: Bool {
+        func filled(_ s: String) -> Bool { !s.trimmingCharacters(in: .whitespaces).isEmpty }
+        switch mode {
+        case .type:  return filled(model.origin) && filled(model.destination)
+        case .paste: return filled(link)
+        case .walk:  return filled(lookupStation) && filled(fromPlatform) && filled(toPlatform)
+        }
+    }
+
     private var cta: some View {
         VStack(spacing: 8) {
             if case .failed(let msg) = model.load {
@@ -638,9 +681,9 @@ struct InputView: View {
                 case .paste: Task {
                     resolvingLink = true
                     defer { resolvingLink = false }
-                    await model.planFromLink(link)
+                    await model.planFromLink(link, avoidElevators: settings.avoidElevators)
                 }
-                case .type:  Task { await model.plan() }
+                case .type:  Task { await model.plan(, avoidElevators: settings.avoidElevators) }
                 }
             } label: {
                 HStack {
@@ -653,9 +696,7 @@ struct InputView: View {
                 }
             }
             .buttonStyle(PrimaryButtonStyle())
-            .disabled(ctaBusy
-                      || (mode == .walk && lookupStation.trimmingCharacters(in: .whitespaces).isEmpty)
-                      || (mode == .paste && link.trimmingCharacters(in: .whitespaces).isEmpty))
+            .disabled(ctaBusy || !canSubmit)
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
         .background(.thinMaterial)

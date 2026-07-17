@@ -273,6 +273,57 @@ def test_cache_result_matches_uncached(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# avoid_elevators: the "no elevators" JOURNEY routing profile (#35)
+#
+# core/ has always supported avoid_elevators (its --no-elevators profile: a lift
+# is not traversable, route over stairs/escalators/ramps instead), and the /walk
+# endpoint threads it for the drawn geometry -- but the verdict path
+# (assess_transfer -> resolve_walk -> core/) did not, so a "no elevators"
+# preference never changed the walkability verdict, only the picture. These lock
+# the flag reaching core/ from the verdict path.
+# ---------------------------------------------------------------------------
+
+def test_avoid_elevators_is_forwarded_to_core_from_the_verdict_path(monkeypatch):
+    """assess_transfer must pass avoid_elevators through to find_shortest_path so
+    the verdict is routed without lifts. Fails before #35: the verdict pathfind
+    ran with lifts regardless of the preference."""
+    seen = {}
+
+    def finder(conn, relation_id, a, b, **k):
+        seen["avoid_elevators"] = k.get("avoid_elevators")
+        return {"found": True, "walking_time_seconds": 90.0, "walking_distance_meters": 120.0}
+
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(1, "S", 50.1, 8.6, 5.0)], finder)
+    assess_transfer(_FakeConn(), avoid_elevators=True, **_base_kwargs())
+    assert seen["avoid_elevators"] is True
+    seen.clear()
+    assess_transfer(_FakeConn(), **_base_kwargs())  # default: elevators allowed
+    assert seen["avoid_elevators"] is False
+
+
+def test_cache_distinguishes_no_elevators_from_default(monkeypatch):
+    """The lift-free route is a different walk, so it must not collide in the
+    resolve cache with the with-lifts walk for the same platforms -- each profile
+    pathfinds once and keeps its own time."""
+    finds = []
+
+    def finder(conn, rel, a, b, **k):
+        avoid = k.get("avoid_elevators")
+        finds.append(avoid)
+        return {"found": True, "walking_time_seconds": 200.0 if avoid else 100.0,
+                "walking_distance_meters": 260.0}
+
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(1, "X", 50.1, 8.6, 5.0)], finder)
+    cache = {}
+    default = assess_transfer(_FakeConn(), resolve_cache=cache, **_kw_layover(600))
+    no_lifts = assess_transfer(_FakeConn(), resolve_cache=cache, avoid_elevators=True,
+                               **_kw_layover(600))
+    assert default.walk_time_s == 100.0 and no_lifts.walk_time_s == 200.0
+    assert finds == [False, True], "each profile pathfinds once; no cross-profile cache hit"
+    assert len(cache) == 2
+
+
+# ---------------------------------------------------------------------------
 # Live re-assessment under delay (pure -- cached walk, no DB/core/)
 # ---------------------------------------------------------------------------
 
@@ -346,6 +397,31 @@ def test_reassess_same_platform_does_not_repathfind(monkeypatch):
     monkeypatch.setattr(T, "find_shortest_path", lambda *a, **k: pytest.fail("should not route"))
     v = reassess(_live(), arr_track_now="8", dep_track_now="5", conn=object())
     assert v.replanned_walk is False and v.walk_time_s == 71.0
+
+
+def test_live_transfer_from_assessment_carries_avoid_elevators():
+    """The plan-time -> live handoff must preserve the journey's routing profile so
+    the live path re-routes under it, rather than silently regaining lifts."""
+    a = T.TransferAssessment(verdict=FEASIBLE, walk_time_s=71.0, layover_s=420.0,
+                             relation_id=1, arrival_platform="8", departure_platform="5")
+    assert LiveTransfer.from_assessment(a, avoid_elevators=True).avoid_elevators is True
+    assert LiveTransfer.from_assessment(a).avoid_elevators is False  # default
+
+
+def test_reassess_platform_change_preserves_no_elevators_profile(monkeypatch):
+    """A "no elevators" journey that gets re-tracked must re-route without lifts:
+    the one live re-pathfind carries the transfer's avoid_elevators profile
+    through."""
+    seen = {}
+
+    def finder(conn, relation_id, a, b, **k):
+        seen["avoid_elevators"] = k.get("avoid_elevators")
+        return {"found": True, "walking_time_seconds": 180.0, "walking_distance_meters": 250.0}
+
+    monkeypatch.setattr(T, "find_shortest_path", finder)
+    v = reassess(_live(scheduled_layover_s=300.0, avoid_elevators=True),
+                 dep_track_now="12", conn=object())
+    assert v.replanned_walk is True and seen["avoid_elevators"] is True
 
 
 # ---------------------------------------------------------------------------

@@ -12,13 +12,17 @@ import TransfrCore
 public protocol JourneyRepository: Sendable {
     /// Plan a trip. `when` is the desired departure; nil means "now". `assess:
     /// false` returns the itineraries instantly with `pending` transfers, to be
-    /// filled in via `assess(_:)` — the progressive load.
-    func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse
+    /// filled in via `assess(_:)` — the progressive load. `noElevators` selects the
+    /// lift-free routing profile, so each transfer's VERDICT is routed over
+    /// stairs/escalators/ramps rather than through a lift.
+    func journeys(from: String, to: String, when: Date?, assess: Bool,
+                  noElevators: Bool) async throws -> JourneysResponse
 
     /// Assess a batch of changes of train, returning the real transfers. The
     /// client fires these per-interchange, concurrently, to stream a journey's
-    /// verdicts in behind a fast `journeys(assess: false)`.
-    func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer]
+    /// verdicts in behind a fast `journeys(assess: false)`. `noElevators` must be
+    /// the value the journey was planned under, so the streamed verdicts match.
+    func assess(_ interchanges: [AssessInterchange], noElevators: Bool) async throws -> [Transfer]
 
     /// Station autocomplete. (The app also bundles `stations.csv` for instant
     /// offline suggestions; this is the online-refresh path — DESIGN.md §13.2.)
@@ -69,13 +73,15 @@ public struct LiveRepository: JourneyRepository {
         self.client = TransfrClient(baseURL: baseURL, transport: transport, apiKey: apiKey)
     }
 
-    public func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
+    public func journeys(from: String, to: String, when: Date?, assess: Bool,
+                         noElevators: Bool) async throws -> JourneysResponse {
         let iso = when.map { ISO8601DateFormatter.transfr.string(from: $0) }
-        return try await client.journeys(from: from, to: to, when: iso, assess: assess)
+        return try await client.journeys(from: from, to: to, when: iso, assess: assess,
+                                         noElevators: noElevators)
     }
 
-    public func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] {
-        try await client.assess(interchanges).transfers
+    public func assess(_ interchanges: [AssessInterchange], noElevators: Bool) async throws -> [Transfer] {
+        try await client.assess(interchanges, noElevators: noElevators).transfers
     }
 
     public func stations(query: String) async throws -> [StationSuggestion] {

@@ -69,25 +69,26 @@ struct TransferDetailCard: View {
                 buttons
             }
         }
-        // Same key as the walk screen: flipping step-free refetches the elevator-
+        // Same key as the walk screen: flipping "avoid lifts" refetches the elevator-
         // free route, whose step-off (and level note) can differ.
-        .task(id: settings.stepFree) { await loadWalk() }
+        .task(id: settings.avoidElevators) { await loadWalk() }
     }
 
     /// A step-free / stairs summary from the walk's real `transitions` — nil until
     /// the geometry loads (or on the sample tier), so the card shows only the
     /// boarding half rather than inventing a level story.
-    private var levelNote: String? {
+    ///
+    /// The sentence itself is `LevelNote`'s job: it used to be assembled by joining
+    /// the connector enum's own labels, which read out core/'s unclassified
+    /// `vertical` verbatim — Dortmund 11→4 shipped as "4 level changes — level
+    /// change + stairs" (#53).
+    private var levelNote: LevelNote? {
         guard let p = walk?.export?.path, p.found else { return nil }
-        let transitions = p.transitions ?? []
-        if transitions.isEmpty { return "Step-free — same level, no stairs or lifts." }
-        let kinds = Set(transitions.map { WalkConnector.label($0.kind).lowercased() }).sorted()
-        let n = transitions.count
-        return "\(n) level change\(n == 1 ? "" : "s") — \(kinds.joined(separator: " + "))."
+        return LevelNote.make(p.transitions ?? [])
     }
 
     private func loadWalk() async {
-        guard let key = WalkKey(transfer: transfer, stepFree: settings.stepFree) else { return }
+        guard let key = WalkKey(transfer: transfer, stepFree: settings.avoidElevators) else { return }
         walk = await model.walk(for: key)
     }
 

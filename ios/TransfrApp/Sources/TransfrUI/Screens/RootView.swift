@@ -9,6 +9,9 @@ public struct RootView: View {
     @State private var model: TripModel
     @State private var settings = SettingsStore()
     @State private var location = LocationManager()
+    /// Past searches, offered back in the "Recent" section (#38). Owned here so the
+    /// same store both records (via `TripModel`) and renders (via the environment).
+    @State private var recents: RecentSearchStore
     /// Cold-launch animation gate. True on first creation of the shell (once per
     /// app launch), flipped to false when the launch mark finishes — a plain
     /// crossfade to InputView underneath. The app content is always present below
@@ -18,7 +21,9 @@ public struct RootView: View {
     /// Inject any `JourneyRepository`. Defaults to the bundled sample tier so the
     /// app is runnable with no server (the API is still in progress).
     public init(repository: JourneyRepository = SampleRepository()) {
-        _model = State(initialValue: TripModel(repository: repository))
+        let recents = RecentSearchStore()
+        _recents = State(initialValue: recents)
+        _model = State(initialValue: TripModel(repository: repository, recents: recents))
     }
 
     public var body: some View {
@@ -48,6 +53,7 @@ public struct RootView: View {
         .environment(model)
         .environment(settings)
         .environment(location)
+        .environment(recents)
         // Tell InputView the launch is playing, so it hides its own title until the
         // flying mark lands on it (the mark is the sole wordmark during the fly).
         .environment(\.isLaunching, showLaunch)

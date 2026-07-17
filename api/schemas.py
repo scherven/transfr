@@ -88,6 +88,13 @@ class AssessInterchange(BaseModel):
 
 class AssessRequest(BaseModel):
     interchanges: List[AssessInterchange] = Field(default_factory=list)
+    # Route every walk without lifts (core/'s avoid_elevators). Batch-level, so
+    # the client's per-interchange /assess calls carry the same "no elevators"
+    # preference the journey was searched under -- the streamed verdicts then
+    # match an assess=True search's. Mirrors the `/journeys` `no_elevators` query.
+    # NB: the same core/ profile WalkKey.step_free below selects, but applied to
+    # the verdict path rather than the drawn /walk geometry.
+    no_elevators: bool = False
 
 
 class AssessResponse(BaseModel):
