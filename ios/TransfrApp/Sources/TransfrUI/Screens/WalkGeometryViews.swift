@@ -411,9 +411,16 @@ struct IsoGeometryCanvas: View {
         )
         .overlay(alignment: .topTrailing) { controls }
         .overlay(alignment: .bottom) { levelChips }
-        .overlay(alignment: .bottomLeading) {
-            Label("drag · pan   pinch · zoom   twist · rotate", systemImage: "hand.draw")
-                .font(.system(size: 9.5)).foregroundStyle(Theme.ink3).padding(6)
+        .overlay(alignment: .top) {
+            // Emoji says the gesture; the word says what it does. Pinned to the top
+            // so it never collides with the level chips along the bottom.
+            Text("👆 Pan    🤏 Zoom    🔄 Rotate")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.ink2)
+                .padding(.horizontal, 11).padding(.vertical, 5)
+                .background(Capsule().fill(Theme.panel.opacity(0.92)))
+                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                .padding(.top, 8)
         }
     }
 
