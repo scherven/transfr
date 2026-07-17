@@ -46,6 +46,12 @@ public enum Theme {
     public static let esc   = dyn(0x0EA5A5, 0x2DD4BF)
     public static let elev  = dyn(0xE0663A, 0xFB8A5C)
 
+    // Facility marker — the "walk to nearest" POI drawn on the station geometry.
+    // A warm rose, deliberately clear of the route (accent blue), the start dot
+    // (go green) and every connector hue above, so a facility never reads as one.
+    public static let poi     = dyn(0xD8437E, 0xFF7EB6)
+    public static let poiSoft = dynA(0xD8437E, 0.12, 0xFF7EB6, 0.16)
+
     // Route-map surfaces (the vector "paper map" — RouteMapView). Sea is the map
     // backdrop, land the country silhouette; both are picked to read as a soft
     // raised shape over the panel, in either appearance.

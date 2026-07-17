@@ -107,7 +107,7 @@ public struct LiveRepository: JourneyRepository {
     public func walk(for key: WalkKey) async throws -> WalkResult {
         try await client.walk(relationId: key.relationId, from: key.fromPlatform,
                               to: key.toPlatform, stepFree: key.stepFree,
-                              allPlatforms: key.allPlatforms)
+                              allPlatforms: key.allPlatforms, poi: key.poi)
     }
 }
 

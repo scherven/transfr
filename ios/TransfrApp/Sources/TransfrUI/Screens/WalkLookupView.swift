@@ -17,6 +17,8 @@ struct WalkLookupView: View {
     @State private var level = 0
     @State private var scene: WalkScene?
     @State private var loading = true
+    /// Guards the one-time initial mode choice (a facility walk opens in 3D).
+    @State private var didPickInitialMode = false
 
     enum Mode: String, CaseIterable, Identifiable { case section, levels, threeD
         var id: String { rawValue }
@@ -45,6 +47,14 @@ struct WalkLookupView: View {
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle(lookup?.station ?? "Walk").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
+        // A "walk to nearest" lookup carries a facility — open straight into the 3D
+        // model so the platform and the POI are both in view (the door's whole point).
+        .onAppear {
+            if !didPickInitialMode {
+                didPickInitialMode = true
+                if lookup?.poi != nil { mode = .threeD }
+            }
+        }
         // Re-keyed on `avoidElevators` so flipping the preference refetches the
         // elevator-free variant (a different route, hence different geometry).
         .task(id: settings.avoidElevators) { await load() }
@@ -174,9 +184,33 @@ struct WalkLookupView: View {
             }
         case .threeD:
             Panel(padding: 12) {
-                stageBox(height: 260) { canvas(for: .threeD) }
+                VStack(spacing: 10) {
+                    stageBox(height: 260) { canvas(for: .threeD) }
+                    threeDLegend
+                }
             }
         }
+    }
+
+    /// The 3D view's legend. When the walk carries a facility (the "walk to nearest"
+    /// door) it names it beside the marker swatch; otherwise it labels the path and
+    /// the vertical circulation.
+    @ViewBuilder private var threeDLegend: some View {
+        if let facilityName {
+            legend([("Your path", Theme.accent), ("Platform", Theme.panel3), (facilityName, Theme.poi)])
+        } else {
+            legend([("Your path", Theme.accent), ("Platform", Theme.panel3),
+                    ("Stairs", Theme.stair), ("Lift", Theme.elev)])
+        }
+    }
+
+    /// A short, human label for the walk's facility (name, else tidied subtype,
+    /// else category), or nil for a plain platform-to-platform lookup.
+    private var facilityName: String? {
+        guard let poi = lookup?.poi else { return nil }
+        return poi.name
+            ?? poi.subtype?.replacingOccurrences(of: "_", with: " ").capitalized
+            ?? poi.category.capitalized
     }
 
     /// Real geometry once loaded; the schematic fallback otherwise.
@@ -271,7 +305,8 @@ struct WalkLookupView: View {
         defer { loading = false }
         guard let lk = lookup, lk.relationId != 0 else { scene = nil; return }
         let key = WalkKey(relationId: lk.relationId, fromPlatform: lk.fromPlatform,
-                          toPlatform: lk.toPlatform, stepFree: settings.avoidElevators)
+                          toPlatform: lk.toPlatform, stepFree: settings.avoidElevators,
+                          poi: lk.poi)
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s

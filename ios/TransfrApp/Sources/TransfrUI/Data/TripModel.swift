@@ -71,10 +71,15 @@ public final class TripModel {
         public var relationId: Int
         public var fromPlatform: String
         public var toPlatform: String
+        /// The facility this walk leads to (the "walk to nearest" door), drawn into
+        /// the geometry beside the destination platform. `nil` for a plain
+        /// platform-to-platform lookup.
+        public var poi: WalkPOI?
 
-        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String) {
+        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String,
+                    poi: WalkPOI? = nil) {
             self.station = station; self.relationId = relationId
-            self.fromPlatform = fromPlatform; self.toPlatform = toPlatform
+            self.fromPlatform = fromPlatform; self.toPlatform = toPlatform; self.poi = poi
         }
     }
     public var walkLookup: WalkLookup?

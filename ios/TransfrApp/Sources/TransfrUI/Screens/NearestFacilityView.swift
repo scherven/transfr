@@ -342,9 +342,17 @@ struct NearestFacilityView: View {
             return
         }
         infoNote = nil
+        // Carry the tapped facility along so the walk geometry draws it beside the
+        // destination platform — the POI's own coordinate/level (from `/facilities`)
+        // is all the server needs to place it in the 3D model.
+        let poi = f.lat.flatMap { lat in f.lon.map { lon in
+            WalkPOI(lat: lat, lon: lon, name: f.name, category: f.category,
+                    subtype: f.subtype, level: f.level)
+        } }
         model.walkLookup = TripModel.WalkLookup(
             station: r.name, relationId: r.relationId,
-            fromPlatform: fromPlatform.isEmpty ? to : fromPlatform, toPlatform: to)
+            fromPlatform: fromPlatform.isEmpty ? to : fromPlatform, toPlatform: to,
+            poi: poi)
         model.path.append(.walkLookup)
     }
 

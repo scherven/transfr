@@ -20,9 +20,15 @@ struct WalkScene {
     let endRef: String
     let startLevel: Int
     let endLevel: Int
-    /// World XY bounds over ways + path — shared by every view so switching level
-    /// (or rotating the 3D) never rescales the scene under you.
+    /// World XY bounds over ways + path (+ the focus facility) — shared by every
+    /// view so switching level (or rotating the 3D) never rescales the scene.
     let minX: CGFloat, maxX: CGFloat, minY: CGFloat, maxY: CGFloat
+    /// The optional details layer (facilities/landmarks) the export carries.
+    let details: [VizExport.Detail]
+    /// The one facility the user chose in "walk to nearest", drawn emphasised
+    /// beside the destination platform. The server flags it `focus`; absent that
+    /// (older exports) fall back to the nearest point POI. `nil` on a plain walk.
+    let focusPOI: VizExport.Detail?
 
     init(_ e: VizExport) {
         export = e
@@ -30,6 +36,10 @@ struct WalkScene {
         pathPoints = e.path.points ?? []
         transitions = e.path.transitions ?? []
         found = e.path.found
+
+        details = e.details
+        let pois = e.details.filter { $0.kind == "poi" && $0.xyz != nil }
+        focusPOI = pois.first { $0.focus == true } ?? pois.min { $0.dist < $1.dist }
 
         let fh = floorHeight
         func lvl(_ z: Float) -> Int { Int((CGFloat(z) / fh).rounded()) }
@@ -55,6 +65,11 @@ struct WalkScene {
         }
         for w in e.ways { for p in w.points { extend(p) } }
         for p in pathPoints { extend(p) }
+        // Frame the chosen facility too, so it can never sit just off the canvas.
+        if let f = focusPOI {
+            if let c = f.xyz { extend(c) }
+            for p in f.outline ?? [] { extend(p) }
+        }
         if lo.x > hi.x { lo = .zero; hi = CGPoint(x: 1, y: 1) }  // empty guard
         minX = lo.x; maxX = hi.x; minY = lo.y; maxY = hi.y
     }
@@ -562,22 +577,39 @@ struct IsoGeometryCanvas: View {
             }
 
             // Route + its level changes (walk mode only; browse shows the station).
-            guard !browse else { return }
-            guard scene.found, scene.pathPoints.count >= 2 else {
-                if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
-                return
+            if !browse {
+                if scene.found, scene.pathPoints.count >= 2 {
+                    let pts = scene.pathPoints
+                    var route = Path()
+                    route.move(to: iso.map(pts[0]))
+                    for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
+                    ctx.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
+                    for t in scene.transitions {   // colour each stair / escalator / lift riser on the path
+                        var r = Path(); r.move(to: iso.map(t.from)); r.addLine(to: iso.map(t.to))
+                        ctx.stroke(r, with: .color(WalkConnector.color(t.kind)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                    }
+                    endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
+                    endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
+                } else if !scene.found {
+                    drawUnavailable(ctx, size, "Platforms not connected")
+                }
             }
-            let pts = scene.pathPoints
-            var route = Path()
-            route.move(to: iso.map(pts[0]))
-            for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
-            ctx.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
-            for t in scene.transitions {   // colour each stair / escalator / lift riser on the path
-                var r = Path(); r.move(to: iso.map(t.from)); r.addLine(to: iso.map(t.to))
-                ctx.stroke(r, with: .color(WalkConnector.color(t.kind)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+
+            // The chosen facility (the "walk to nearest" focus), drawn last so it
+            // reads on top: a dashed leg from where the walk ends to a labelled pin
+            // at the POI. Hidden when a single floor is isolated and it's elsewhere.
+            if let poi = scene.focusPOI, let xyz = poi.xyz {
+                let lvl = scene.level(of: xyz.z)
+                if focus == nil || focus == lvl {
+                    let p = iso.map(xyz)
+                    if !browse, scene.found, let end = scene.pathPoints.last {
+                        var leg = Path(); leg.move(to: iso.map(end)); leg.addLine(to: p)
+                        ctx.stroke(leg, with: .color(Theme.poi.opacity(0.7)),
+                                   style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [2.5, 3.5]))
+                    }
+                    poiPin(ctx, at: p, label: facilityLabel(poi), tint: Theme.poi, size: size)
+                }
             }
-            endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
-            endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
         }
         .contentShape(Rectangle())
         // One-finger drag pans; pinch zooms; two-finger twist rotates. All three
@@ -849,6 +881,40 @@ private func platformTag(_ ctx: GraphicsContext, _ p: CGPoint, _ ref: String) {
     ctx.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.panel))
     ctx.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.line), lineWidth: 1)
     ctx.draw(text, at: p, anchor: .center)
+}
+
+/// The short human label for a facility marker: its name, else a tidied subtype
+/// ("toilets" → "Toilets"), else the OSM category. Clipped so a long shop name
+/// can't run off the model.
+private func facilityLabel(_ d: VizExport.Detail) -> String {
+    let raw = d.name
+        ?? d.subtype?.replacingOccurrences(of: "_", with: " ").capitalized
+        ?? d.category.capitalized
+    return raw.count > 24 ? String(raw.prefix(23)) + "…" : raw
+}
+
+/// The chosen facility on the 3D model: a haloed dot at its floor plus a label
+/// pill. The pill sits above the dot, flipping below when that would clip the top,
+/// and is clamped to stay on the canvas — the POI is often near an edge.
+private func poiPin(_ ctx: GraphicsContext, at p: CGPoint, label: String, tint: Color, size: CGSize) {
+    let r: CGFloat = 6.5
+    // Halo so it stands off the platforms, then the coloured dot, then a white core.
+    ctx.fill(Path(ellipseIn: CGRect(x: p.x - r - 2.5, y: p.y - r - 2.5, width: 2*r + 5, height: 2*r + 5)),
+             with: .color(Theme.paper))
+    ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)), with: .color(tint))
+    ctx.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(Theme.paper))
+
+    var text = ctx.resolve(Text(label).font(.system(size: 10, weight: .bold)))
+    text.shading = .color(.white)
+    let ts = text.measure(in: CGSize(width: 220, height: 40))
+    let w = ts.width + 12, h = ts.height + 6
+    let gap = r + 5
+    var cy = p.y - gap - h / 2                          // default: above the dot
+    if cy - h/2 < 2 { cy = p.y + gap + h / 2 }          // would clip the top: go below
+    let cx = min(max(p.x, w/2 + 3), size.width - w/2 - 3)   // keep on canvas
+    let rect = CGRect(x: cx - w/2, y: cy - h/2, width: w, height: h)
+    ctx.fill(Path(roundedRect: rect, cornerRadius: h/2), with: .color(tint))
+    ctx.draw(text, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
 }
 
 // MARK: - Paired transition marks (#53)

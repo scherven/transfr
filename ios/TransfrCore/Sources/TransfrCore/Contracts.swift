@@ -340,6 +340,27 @@ public struct StationHealthResponse: Codable, Sendable {
 /// a `Transfer` already carries, so a client forwards them verbatim. `stepFree`
 /// requests the elevator-free variant (a different route, hence a different walk
 /// time than the verdict's).
+/// A facility to draw in a walk's geometry — the "walk to nearest" focus. Its
+/// coordinate is already known to the client (it came from `/facilities`), so the
+/// server projects it into the export's local frame and appends it to the
+/// `details` layer flagged `focus`, with no planet extract needed. `level` is the
+/// OSM `level` tag as a string ("0", "−1") when known, so the POI is lifted to the
+/// right floor in the 3D model. Mirrors `api/schemas.py:WalkPOI`.
+public struct WalkPOI: Codable, Hashable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var name: String?
+    public var category: String
+    public var subtype: String?
+    public var level: String?
+
+    public init(lat: Double, lon: Double, name: String? = nil, category: String,
+                subtype: String? = nil, level: String? = nil) {
+        self.lat = lat; self.lon = lon; self.name = name
+        self.category = category; self.subtype = subtype; self.level = level
+    }
+}
+
 public struct WalkKey: Codable, Hashable, Sendable {
     public var relationId: Int
     public var fromPlatform: String
@@ -348,14 +369,19 @@ public struct WalkKey: Codable, Hashable, Sendable {
     /// Station-map (browse) mode: include every platform at the station, not just
     /// the walked corridor's. A distinct cache key from the plain walk.
     public var allPlatforms: Bool
+    /// A facility to draw beside the walk (the "walk to nearest" door). When set,
+    /// the fetched geometry carries this POI in its `details` layer as the focus.
+    /// Part of the key, so a walk-with-facility caches apart from the plain walk.
+    public var poi: WalkPOI?
 
     public init(relationId: Int, fromPlatform: String, toPlatform: String,
-                stepFree: Bool = false, allPlatforms: Bool = false) {
+                stepFree: Bool = false, allPlatforms: Bool = false, poi: WalkPOI? = nil) {
         self.relationId = relationId
         self.fromPlatform = fromPlatform
         self.toPlatform = toPlatform
         self.stepFree = stepFree
         self.allPlatforms = allPlatforms
+        self.poi = poi
     }
 
     /// Build the key straight from a `Transfer` (nil if it never resolved a

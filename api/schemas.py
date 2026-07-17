@@ -284,6 +284,22 @@ class FacilitiesResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class WalkPOI(BaseModel):
+    """A specific facility to highlight in a walk's geometry -- the 'walk to
+    nearest' focus. Its coordinate is already known to the caller (it came from
+    `/facilities`), so the walk builder projects it into the export's local frame
+    and appends it to the `details` layer flagged `focus`, with NO planet extract
+    needed. `level` is the OSM `level` tag as a string ("0", "-1", ...) when known,
+    so the POI is lifted to the right floor in the 3D model."""
+
+    lat: float
+    lon: float
+    name: Optional[str] = None
+    category: str
+    subtype: Optional[str] = None
+    level: Optional[str] = None
+
+
 class WalkKey(BaseModel):
     """Identifies one platform-to-platform walk. These three fields are exactly
     what a Transfer already carries, so the client forwards them verbatim.
@@ -297,6 +313,10 @@ class WalkKey(BaseModel):
     # Station-map (browse) mode: include every platform at the station, not just
     # the ones the walked corridor touched.
     all_platforms: bool = False
+    # A facility to draw in the walk's geometry (the 'walk to nearest' door): the
+    # tapped POI, projected into the details layer as the focus. None for a plain
+    # transfer walk.
+    poi: Optional[WalkPOI] = None
 
 
 class BoardingGuidance(BaseModel):
