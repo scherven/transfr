@@ -167,6 +167,7 @@ struct InputView: View {
                 chip(key: "Travellers", value: "1 adult")
                 Spacer(minLength: 0)
             }
+            recentSection
         }
     }
 
@@ -318,7 +319,6 @@ struct InputView: View {
                     }
                 }
             }
-            recentSection
         }
     }
 
