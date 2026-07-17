@@ -1040,6 +1040,57 @@
     return s;
   }
 
+  // ── Label de-clutter ─────────────────────────────────────────────────────
+  // Picking a side by x is not enough. The frame is fitted to the route, so
+  // Paris→Basel→Zürich lands Basel at (76.3, 74.1) and Zürich at (88.0, 77.4) —
+  // 12 units apart and *both* past the split, so both labels hang to the left and
+  // Basel's sub-label prints on the same line as Zürich's name (0.08 units apart).
+  // Flipping one to the other side is no fix: Zürich's name would run off the
+  // 100-unit box from x=88. So labels stack instead — sorted top-to-bottom, each is
+  // pushed down just far enough to clear the last one placed on its own side. Stops
+  // already clear never move, and opposite sides never interact.
+  //
+  // Pushing only ever downwards would walk a crowded stack off the bottom of the
+  // frame — a real shape, not a contrived one: one distant stop (Paris) sets the
+  // zoom and the rest (Basel, Zürich, Winterthur) pile against the far edge. So the
+  // stack is bounded at both ends — down from the top edge, then back up from the
+  // bottom — which spreads such a cluster around itself instead of off the map.
+  //
+  // Same greedy shape as citiesFor(); mirrors RouteLabelLayout in RouteMap.swift —
+  // the two must stay 1:1.
+  const LABEL_SIDE_SPLIT=0.58;
+  // How far a label's ink reaches above/below its anchor, for the frame bounds.
+  const LABEL_INK_ABOVE=2.9, LABEL_INK_BELOW=3.5;
+  // Centre-to-centre spacing forced between two stacked labels. Not just "tall
+  // enough to not overlap": a name+sub block's two lines sit 3.4 apart (baselines
+  // at -0.4/+3), so a spacing that merely clears the ink would leave neighbouring
+  // *blocks* closer together than the two lines *within* a block, and the sub-label
+  // would read as belonging to the stop below it. On a transfer map that is worse
+  // than the overlap it replaces: wrong platform and verdict on the wrong station.
+  // 8.4 keeps the gap between blocks ~1.5x the gap inside one.
+  const LABEL_BLOCK_H=8.4;
+
+  function labelPlacements(pts){
+    const right = pts.map(p => p.x <= VBW*LABEL_SIDE_SPLIT);
+    const dy = pts.map(()=>0);
+    // top-to-bottom, ties broken by index so this and the Swift agree exactly
+    const order = pts.map((_,i)=>i).sort((a,b)=>(pts[a].y-pts[b].y)||(a-b));
+    for(const side of [true,false]){
+      const run = order.filter(i => right[i]===side);
+      if(!run.length) continue;
+      const y = run.map(i => pts[i].y);
+      // down from the top edge: each label clears the one above it
+      y[0] = Math.max(y[0], LABEL_INK_ABOVE);
+      for(let k=1;k<y.length;k++) y[k] = Math.max(y[k], y[k-1]+LABEL_BLOCK_H);
+      // then back up from the bottom edge, so a stack that ran off the frame is
+      // pulled onto it rather than left in the sea
+      y[y.length-1] = Math.min(y[y.length-1], VBH-LABEL_INK_BELOW);
+      for(let k=y.length-2;k>=0;k--) y[k] = Math.min(y[k], y[k+1]-LABEL_BLOCK_H);
+      run.forEach((i,k)=>{ dy[i] = y[k] - pts[i].y; });
+    }
+    return pts.map((_,i)=>({right:right[i], dy:dy[i]}));
+  }
+
   // ── Route overlay ────────────────────────────────────────────────────────
   // opts: {mini, fromCurrent, youT (0..1 or null), labels}
   function routeSVG(j, opts={}){
@@ -1087,15 +1138,17 @@
     }
     // labels
     if(labels){
+      const place = labelPlacements(pts);
       j.stops.forEach((st,i)=>{
         const p=pts[i], isFirst=i===0, isLast=i===j.stops.length-1;
-        const anchor = p.x>VBW*0.58?"end":"start"; const dx=anchor==="end"?-3.4:3.4;
+        const anchor = place[i].right?"start":"end"; const dx=place[i].right?3.4:-3.4;
+        const ly = p.y + place[i].dy;
         let name, sub, col="var(--ink)";
         if(isFirst){ name = fromCurrent?"You're here":short(st.name); sub = fromCurrent?short(st.name):("dep "+j.dep); }
         else if(isLast){ name = short(st.name); sub = "arr "+st.arrt; }
         else { name = short(st.name); sub = (st.plat==="—"?"platform ?":"Pl "+st.plat)+" · "+VL[st.verdict]; col=VC[st.verdict]; }
-        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(p.y-0.4).toFixed(2)}" font-size="3.1" font-weight="600" fill="${col}" text-anchor="${anchor}">${name}</text>`;
-        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(p.y+3).toFixed(2)}" font-size="2.5" fill="var(--ink3)" text-anchor="${anchor}">${sub}</text>`;
+        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(ly-0.4).toFixed(2)}" font-size="3.1" font-weight="600" fill="${col}" text-anchor="${anchor}">${name}</text>`;
+        s += `<text x="${(p.x+dx).toFixed(2)}" y="${(ly+3).toFixed(2)}" font-size="2.5" fill="var(--ink3)" text-anchor="${anchor}">${sub}</text>`;
       });
     }
     return s;
