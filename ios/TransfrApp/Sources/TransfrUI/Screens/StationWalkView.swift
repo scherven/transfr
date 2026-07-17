@@ -283,9 +283,9 @@ struct StationWalkView: View {
     }
 
     private var note: String {
-        let base = "Tap a reachable platform to see the walk as a full 3D view. One pathfind per platform — the same walk cost the transfer verdict uses."
+        let base = "Tap a reachable platform to see the walk as a full 3D view."
         return settings.stepFree
-            ? base + " Routed step-free (Stairs-free is on in Settings); the green figure marks a step-free reachable platform."
+            ? base + " Routed step-free; the green figure marks a step-free reachable platform."
             : base
     }
 

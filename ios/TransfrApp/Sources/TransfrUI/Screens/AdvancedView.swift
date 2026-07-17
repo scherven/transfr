@@ -10,13 +10,13 @@ struct AdvancedView: View {
             VStack(spacing: 0) {
                 SectionHeader(text: "This station")
                 NavRow(icon: "rotate.3d", title: "Station map (3D)",
-                       subtitle: "Rotate & zoom any station — platforms, stairs, escalators, lifts",
+                       subtitle: "Rotate & zoom any station",
                        route: .stationMap).padding(.bottom, 8)
                 NavRow(icon: "chart.line.uptrend.xyaxis", title: "Full station walk",
                        subtitle: "Distance & time from one platform to every other",
                        route: .stationWalk).padding(.bottom, 8)
                 NavRow(icon: "mappin.and.ellipse", title: "Walk to nearest…",
-                       subtitle: "Toilets, lifts, exits, tickets, coffee — routed",
+                       subtitle: "Toilets, lifts, exits, tickets, coffee",
                        route: .nearestFacility).padding(.bottom, 8)
                 NavRow(icon: "waveform.path.ecg", title: "Map health",
                        subtitle: "Is this station fully mapped? Why a walk may be missing",
@@ -24,12 +24,8 @@ struct AdvancedView: View {
 
                 SectionHeader(text: "Data")
                 NavRow(icon: "cylinder.split.1x2", title: "Offline & regions",
-                       subtitle: "Download Europe / Korea, prefetch stations, manage storage",
+                       subtitle: "Prefetch stations, manage storage",
                        route: .offlineRegions)
-
-                Label("Everything here runs on the same viz_export / pathfinder that powers a transfer walk — just pointed at a different question. No verdicts, no train.",
-                      systemImage: "cube.transparent")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3).padding(.top, 14)
             }
             .padding(20)
         }

@@ -37,9 +37,18 @@ def _row_sort_key(row: schemas.StationWalkRow):
     """Nearest-first: reachable rows first, ordered by ascending walk distance;
     then every unreachable row. Stable, so unreachable rows keep the natural ref
     order `list_platform_refs` returned them in."""
-    if row.found and row.walk_distance_m is not None:
-        return (0, row.walk_distance_m)
-    return (1, 0.0)
+    # if row.found and row.walk_distance_m is not None:
+    #     return (0, row.walk_distance_m)
+    # return (1, 0.0)
+    p = row.to_platform
+    try:
+        p = int(p)
+        return (p, 0 if row.found else 1, row.walk_distance_m or 0.0)
+    except ValueError:
+        x = (ord(i) for i in p)
+        return (sum(x), 0 if row.found else 1, row.walk_distance_m or 0.0)
+        # return (...x, 0 if row.found else 1, row.walk_distance_m or 0.0)
+    # return (row.to_platform, 0 if row.found else 1, row.walk_distance_m or 0.0)
 
 
 def build_station_walk(conn, lat: float, lon: float, from_platform: str,
