@@ -52,11 +52,6 @@ struct SettingsView: View {
                     }
                 }
 
-                SectionHeader(text: "Power tools")
-                NavRow(icon: "shield.lefthalf.filled", title: "Advanced",
-                       subtitle: "Station walks · nearest facilities · offline data · map health",
-                       route: .advanced)
-
                 SectionHeader(text: "About")
                 NavRow(icon: "info.circle", title: "Attributions & data sources",
                        subtitle: "Map data © OpenStreetMap contributors · licences",
