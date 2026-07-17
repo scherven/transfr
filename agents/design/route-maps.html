@@ -13,7 +13,7 @@
     --nodata-soft:rgba(107,118,136,.14);
     /* map surfaces */
     --sea:#EAF0F8; --land:#DFE6F0; --coast:rgba(14,22,38,.16); --grat:rgba(14,22,38,.055);
-    --river:rgba(10,99,240,.16); --city:#AEB7C7;
+    --city:#AEB7C7;
     --shadow:0 1px 2px rgba(14,22,38,.05),0 10px 30px rgba(14,22,38,.08);
     --shadow-sm:0 1px 2px rgba(14,22,38,.06),0 4px 14px rgba(14,22,38,.06);
     color-scheme:light;
@@ -27,7 +27,7 @@
     --go-soft:rgba(47,211,154,.15); --tight-soft:rgba(245,183,64,.16);
     --nodata-soft:rgba(136,148,171,.16);
     --sea:#0B1220; --land:#182134; --coast:rgba(255,255,255,.15); --grat:rgba(255,255,255,.05);
-    --river:rgba(78,166,255,.20); --city:#3A465C;
+    --city:#3A465C;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.5);
     --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.4);
     color-scheme:dark;
@@ -40,7 +40,7 @@
     --go:#0FA968; --tight:#C9820A; --miss:#E0402F; --nodata:#6B7688;
     --go-soft:rgba(15,169,104,.12); --tight-soft:rgba(201,130,10,.14); --nodata-soft:rgba(107,118,136,.14);
     --sea:#EAF0F8; --land:#DFE6F0; --coast:rgba(14,22,38,.16); --grat:rgba(14,22,38,.055);
-    --river:rgba(10,99,240,.16); --city:#AEB7C7;
+    --city:#AEB7C7;
     --shadow:0 1px 2px rgba(14,22,38,.05),0 10px 30px rgba(14,22,38,.08);
     --shadow-sm:0 1px 2px rgba(14,22,38,.06),0 4px 14px rgba(14,22,38,.06);
     color-scheme:light;
@@ -53,7 +53,7 @@
     --go:#2FD39A; --tight:#F5B740; --miss:#FF6A5E; --nodata:#8894AB;
     --go-soft:rgba(47,211,154,.15); --tight-soft:rgba(245,183,64,.16); --nodata-soft:rgba(136,148,171,.16);
     --sea:#0B1220; --land:#182134; --coast:rgba(255,255,255,.15); --grat:rgba(255,255,255,.05);
-    --river:rgba(78,166,255,.20); --city:#3A465C;
+    --city:#3A465C;
     --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 34px rgba(0,0,0,.5);
     --shadow-sm:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.4);
     color-scheme:dark;
@@ -466,8 +466,9 @@
     [50.00,6.13],[50.32,6.02],[50.75,6.02],[51.05,5.87],[51.60,6.05],[51.83,6.10],[52.10,6.68],[52.45,7.06],[52.65,7.06],[53.18,7.19],
     [53.68,7.15],[53.70,8.00],[53.90,8.13],[54.05,8.55],[54.45,8.60],[54.75,8.30]
   ];
-  const RHINE = [[47.59,7.59],[48.0,7.75],[48.6,7.85],[49.0,8.3],[49.5,8.45],[50.0,8.3],[50.4,7.62],[50.9,6.96],[51.4,6.72],[51.83,6.1]];
-  const ELBE  = [[53.55,10.0],[53.2,10.9],[52.9,11.6],[52.5,12.25],[51.85,12.9],[51.3,13.4],[51.05,13.74]];
+  // No rivers layer: a hand-drawn Elbe ran Hamburg → Dresden in --accent at the
+  // *same* 16% alpha as the route's own glow, so it read as a second leg of the
+  // journey (#18 — "why is there a line to dresden").
   const CITIES = [
     ["Berlin",52.52,13.40],["München",48.14,11.58],["Köln",50.94,6.96],["Leipzig",51.34,12.37],
     ["Nürnberg",49.45,11.08],["Hannover",52.37,9.73],["Dresden",51.05,13.74],["Bremen",53.08,8.81],["Dortmund",51.51,7.47]
@@ -514,20 +515,14 @@
 
   // ── Base layers shared by every map ──────────────────────────────────────
   const outlinePath = poly(projPts(OUTLINE),true);
-  const rhinePath   = poly(projPts(RHINE),false);
-  const elbePath    = poly(projPts(ELBE),false);
 
-  function baseSVG({grat=true, rivers=true, cities=false, exclude=[]} = {}){
+  function baseSVG({grat=true, cities=false, exclude=[]} = {}){
     let s = `<rect x="0" y="0" width="${VBW}" height="${VBH}" fill="var(--sea)"/>`;
     if(grat){
       for(const lon of [7,9,11,13,15]){ const x=P(48,lon).x; s+=`<line x1="${x.toFixed(2)}" y1="0" x2="${x.toFixed(2)}" y2="${VBH}" stroke="var(--grat)" stroke-width=".4"/>`; }
       for(const lat of [48,50,52,54]){ const y=P(lat,10).y; s+=`<line x1="0" y1="${y.toFixed(2)}" x2="${VBW}" y2="${y.toFixed(2)}" stroke="var(--grat)" stroke-width=".4"/>`; }
     }
     s += `<path d="${outlinePath}" fill="var(--land)" stroke="var(--coast)" stroke-width=".7" stroke-linejoin="round"/>`;
-    if(rivers){
-      s += `<path d="${rhinePath}" fill="none" stroke="var(--river)" stroke-width=".9" stroke-linecap="round"/>`;
-      s += `<path d="${elbePath}" fill="none" stroke="var(--river)" stroke-width=".9" stroke-linecap="round"/>`;
-    }
     if(cities){
       for(const [nm,la,lo] of CITIES){ if(exclude.includes(nm)) continue;
         const p=P(la,lo); const anchor = p.x>VBW*0.62?"end":"start"; const dx = anchor==="end"?-2.2:2.2;
@@ -605,11 +600,11 @@
   // full map (hero / live)
   function fullMap(j, opts){
     const exclude = j.stops.map(s=>short(s.name)).concat(["Hannover"]); // hide neighbours that clash w/ stops
-    return svgEl(baseSVG({grat:true,rivers:true,cities:true,exclude})+routeSVG(j,opts), "map");
+    return svgEl(baseSVG({grat:true,cities:true,exclude})+routeSVG(j,opts), "map");
   }
   // mini map (card thumbnail)
   function miniMap(j){
-    return svgEl(baseSVG({grat:false,rivers:true,cities:false})+routeSVG(j,{mini:true,fromCurrent:false,labels:false}));
+    return svgEl(baseSVG({grat:false,cities:false})+routeSVG(j,{mini:true,fromCurrent:false,labels:false}));
   }
 
   // ── Bottom sheet (hero) ──────────────────────────────────────────────────
@@ -692,7 +687,7 @@
   document.getElementById("live-map").innerHTML = (()=>{
     const j=JOURNEYS[0];
     const exclude=j.stops.map(s=>short(s.name)).concat(["Hannover"]);
-    return svgEl(baseSVG({grat:true,rivers:true,cities:true,exclude})+routeSVG(j,{fromCurrent:true,youT:0.42,labels:true}),"map");
+    return svgEl(baseSVG({grat:true,cities:true,exclude})+routeSVG(j,{fromCurrent:true,youT:0.42,labels:true}),"map");
   })();
 
   // ── Style comparison: vector + mocked tiles ──────────────────────────────
@@ -700,7 +695,7 @@
     const j=JOURNEYS[0];
     // vector (crop to a wide window; reuse full map)
     document.getElementById("style-vector").innerHTML =
-      svgEl(baseSVG({grat:true,rivers:true,cities:true,exclude:j.stops.map(s=>short(s.name))})+routeSVG(j,{fromCurrent:true,labels:false}),"");
+      svgEl(baseSVG({grat:true,cities:true,exclude:j.stops.map(s=>short(s.name))})+routeSVG(j,{fromCurrent:true,labels:false}),"");
     // mocked Apple-Maps tiles: soft blocks + roads behind the same overlay
     const ts = (()=>{
       const w=VBW,h=VBH; let g=`<rect width="${w}" height="${h}" fill="var(--land)"/>`;
@@ -710,7 +705,6 @@
       // road grid
       for(let i=1;i<7;i++){ g+=`<line x1="${i*14}" y1="0" x2="${i*14-8}" y2="${h}" stroke="var(--line2)" stroke-width=".7"/>`; }
       for(let i=1;i<9;i++){ g+=`<line x1="0" y1="${i*14}" x2="${w}" y2="${i*14-6}" stroke="var(--line2)" stroke-width=".7"/>`; }
-      g+=`<path d="${rhinePath}" fill="none" stroke="rgba(78,166,255,.35)" stroke-width="1.4" stroke-linecap="round"/>`;
       g+=routeSVG(j,{fromCurrent:true,labels:false});
       return g;
     })();

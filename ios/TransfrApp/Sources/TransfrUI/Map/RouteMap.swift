@@ -89,7 +89,6 @@ private struct RouteMapRenderer {
 
         if !mini { drawGraticule(&ctx) }
         drawLand(&ctx)
-        drawRivers(&ctx)
         if !mini { drawCities(&ctx) }
         drawRoute(&ctx)
     }
@@ -114,13 +113,6 @@ private struct RouteMapRenderer {
         ctx.fill(path, with: .color(Theme.mapLand))
         ctx.stroke(path, with: .color(Theme.mapCoast),
                    style: StrokeStyle(lineWidth: 0.7, lineJoin: .round))
-    }
-
-    private func drawRivers(_ ctx: inout GraphicsContext) {
-        for river in [DEGeo.rhine, DEGeo.elbe] {
-            ctx.stroke(proj.path(river, closed: false), with: .color(Theme.mapRiver),
-                       style: StrokeStyle(lineWidth: 0.9, lineCap: .round))
-        }
     }
 
     private func drawCities(_ ctx: inout GraphicsContext) {
@@ -359,9 +351,13 @@ struct MapProjection {
 
 // MARK: - Geography (schematic, [lat, lon])
 
-/// A coarse but recognisable silhouette of Germany plus two rivers and reference
-/// cities, purely to ground the route. Not survey-grade — the route itself is
-/// exact (real leg coordinates); this is only the backdrop.
+/// A coarse but recognisable silhouette of Germany plus reference cities, purely
+/// to ground the route. Not survey-grade — the route itself is exact (real leg
+/// coordinates); this is only the backdrop.
+///
+/// No rivers: a hand-drawn Elbe ran Hamburg → Dresden in `accent` at the *same*
+/// 16% alpha as the route's own glow, so it read as a second leg of the journey
+/// (#18 — "why is there a line to dresden").
 enum DEGeo {
     static let outline: [(lat: Double, lon: Double)] = [
         (54.90,8.30),(54.83,9.45),(54.45,10.00),(54.30,11.10),(54.15,12.10),(54.35,13.10),(53.93,14.20),
@@ -372,12 +368,6 @@ enum DEGeo {
         (48.10,7.55),(48.75,8.00),(49.05,8.00),(49.10,6.85),(49.46,6.36),
         (50.00,6.13),(50.32,6.02),(50.75,6.02),(51.05,5.87),(51.60,6.05),(51.83,6.10),(52.10,6.68),(52.45,7.06),(52.65,7.06),(53.18,7.19),
         (53.68,7.15),(53.70,8.00),(53.90,8.13),(54.05,8.55),(54.45,8.60),(54.75,8.30),
-    ]
-    static let rhine: [(lat: Double, lon: Double)] = [
-        (47.59,7.59),(48.0,7.75),(48.6,7.85),(49.0,8.3),(49.5,8.45),(50.0,8.3),(50.4,7.62),(50.9,6.96),(51.4,6.72),(51.83,6.1),
-    ]
-    static let elbe: [(lat: Double, lon: Double)] = [
-        (53.55,10.0),(53.2,10.9),(52.9,11.6),(52.5,12.25),(51.85,12.9),(51.3,13.4),(51.05,13.74),
     ]
     static let cities: [(name: String, lat: Double, lon: Double)] = [
         ("Berlin",52.52,13.40),("München",48.14,11.58),("Köln",50.94,6.96),("Leipzig",51.34,12.37),
