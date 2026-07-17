@@ -1,7 +1,7 @@
 import SwiftUI
 import TransfrCore
 
-/// The design tokens from `design/prototype.html`, ported 1:1. Each token is a
+/// The design tokens from `agents/design/prototype.html`, ported 1:1. Each token is a
 /// dynamic `Color` that resolves light/dark automatically (via a `UIColor` trait
 /// provider), so views never branch on `colorScheme` — they just use `Theme.go`
 /// etc. and both appearances are first-class (DESIGN.md §13.8).

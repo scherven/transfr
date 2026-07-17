@@ -1,7 +1,7 @@
 # Transfr — Design Document
 
 > **Status:** living design doc · v0.3 · 2026-07-15
-> **Prototype:** [`design/prototype.html`](prototype.html) (open it in any browser; no build step). Live copy: `https://claude.ai/code/artifact/4657fc18-96b4-497a-b05d-3cc238985bd0` (private).
+> **Prototype:** [`agents/design/prototype.html`](prototype.html) (open it in any browser; no build step). Live copy: `https://claude.ai/code/artifact/4657fc18-96b4-497a-b05d-3cc238985bd0` (private).
 > **Backlog / product ideas:** [`../IMPROVEMENTS.md`](../IMPROVEMENTS.md)
 
 This document captures the design decisions behind the Transfr mobile prototype and the reasoning for each, so it can be argued with and iterated on. It is the design source of truth; the prototype is its executable sketch. When the two disagree, this doc wins and the prototype should be updated.
@@ -473,7 +473,7 @@ The contract-first split (§13.2) is precisely what removes the teardown risk. *
 
 ## Appendix: design tokens
 
-CSS custom properties from `design/prototype.html`. Both themes are first-class.
+CSS custom properties from `agents/design/prototype.html`. Both themes are first-class.
 
 ### Light
 ```

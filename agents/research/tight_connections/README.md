@@ -68,13 +68,13 @@ Needs the repo's `.venv`, the `transfr_eu` DB up (`core/`), and network to
 
 ```bash
 # intercity dataset, IRIS-enriched, at 08:00; writes tight_state_v2.json
-DATASET=intercity STATE_SUFFIX=_v2 .venv/bin/python research/tight_connections/run.py
+DATASET=intercity STATE_SUFFIX=_v2 .venv/bin/python agents/research/tight_connections/run.py
 # high-frequency dataset; writes tight_state_hf_v2.json
-DATASET=hf        STATE_SUFFIX=_v2 .venv/bin/python research/tight_connections/run.py
+DATASET=hf        STATE_SUFFIX=_v2 .venv/bin/python agents/research/tight_connections/run.py
 
 # analyses (read the state files above)
-STATE_SUFFIX=_v2 .venv/bin/python research/tight_connections/delay.py
-.venv/bin/python research/tight_connections/analyze_enrich.py tight_state_v2.json tight_state_hf_v2.json
+STATE_SUFFIX=_v2 .venv/bin/python agents/research/tight_connections/delay.py
+.venv/bin/python agents/research/tight_connections/analyze_enrich.py tight_state_v2.json tight_state_hf_v2.json
 ```
 
 State files (`tight_state*.json`) and logs are run outputs and git-ignored.

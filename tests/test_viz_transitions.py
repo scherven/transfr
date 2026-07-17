@@ -21,7 +21,7 @@ elevator -- "looking like you take ~7 elevators":
 
 The fix is entirely in the viz export (way_for_hop preference + flattening
 multi-level areas); routing (walking_time/distance/node_path) is unchanged, so
-this does not touch the ground-truth suite. See md/ISSUE-viz-phantom-transitions.md.
+this does not touch the ground-truth suite. See agents/md/ISSUE-viz-phantom-transitions.md.
 """
 
 import os

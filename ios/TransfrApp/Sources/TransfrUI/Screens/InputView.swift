@@ -55,7 +55,7 @@ struct InputView: View {
     /// Departure-time editor presented as a sheet (the "Depart" chip is the trigger).
     @State private var showDepartPicker = false
 
-    /// Current-location wiring (design/route-maps.html §3). `awaitingLocation` means
+    /// Current-location wiring (agents/design/route-maps.html §3). `awaitingLocation` means
     /// a fix has been asked for and should be applied when it lands; `manualLocation`
     /// distinguishes a button tap (always applies) from the first-launch default
     /// (which yields to an origin the user has already typed). The persisted flag
