@@ -192,6 +192,42 @@ public struct StationPlatformsResponse: Codable, Sendable {
     }
 }
 
+/// One platform's label at its real coordinate, harvested from the transit feed
+/// (mirrors `api/schemas.PlatformMarker`) — the labels OpenStreetMap lacks. `n`
+/// is how many stop observations backed it, a confidence signal (higher = more
+/// sightings). `track` may be a compound like `41/42` (two faces of one island).
+public struct PlatformMarker: Codable, Hashable, Sendable {
+    public var track: String
+    public var lat: Double
+    public var lon: Double
+    public var n: Int
+
+    public init(track: String, lat: Double, lon: Double, n: Int = 1) {
+        self.track = track; self.lat = lat; self.lon = lon; self.n = n
+    }
+}
+
+/// The feed's platform labels for the station nearest a coordinate, as map markers
+/// (from `/station-platform-markers`) — the labels OSM lacks, placed at their real
+/// positions rather than matched to OSM polygons. Powers the station-map overlay.
+/// `found == false` (with `reason`) when no harvested station is near
+/// (`station_unresolved`), or `no_platform_labels` when the overlay isn't present
+/// on this host (nobody has run the harvest) — honest degradation, never an error.
+public struct StationPlatformMarkersResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var station: String?
+    public var found: Bool
+    public var platforms: [PlatformMarker]
+    public var reason: String?
+
+    public init(lat: Double, lon: Double, station: String? = nil,
+                found: Bool, platforms: [PlatformMarker] = [], reason: String? = nil) {
+        self.lat = lat; self.lon = lon; self.station = station
+        self.found = found; self.platforms = platforms; self.reason = reason
+    }
+}
+
 // MARK: - Full station walk (/station-walk) — mirrors api/schemas.py
 
 /// One destination platform's walk FROM the chosen source platform — a row of the

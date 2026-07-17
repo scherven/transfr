@@ -33,6 +33,11 @@ public protocol JourneyRepository: Sendable {
     /// pickers adapt to the entered station.
     func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse
 
+    /// The feed's platform-number labels (the ones OSM lacks) for the station
+    /// nearest a coordinate — the station-map overlay. May be `found == false`
+    /// with a typed `reason` when no harvested overlay covers the coordinate.
+    func platformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse
+
     /// Every platform's walk FROM one source platform at the station nearest a
     /// coordinate — the "full station walk" Advanced tool (§6.10). One pathfind per
     /// platform, sorted nearest-first.
@@ -90,6 +95,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
         try await client.stationPlatforms(lat: lat, lon: lon)
+    }
+
+    public func platformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse {
+        try await client.stationPlatformMarkers(lat: lat, lon: lon)
     }
 
     public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {

@@ -319,6 +319,15 @@ struct PlanGeometryCanvas: View {
 struct IsoGeometryCanvas: View {
     let scene: WalkScene
     var browse: Bool = false
+    /// The feed's platform-number labels (the labels OSM lacks), overlaid as pills
+    /// on the exploded model — the station map passes these; the walk views leave
+    /// them empty. Each is centred on the nearest platform island, not its raw
+    /// stop-end coordinate.
+    var markers: [PlatformMarker] = []
+    /// The platform refs OpenStreetMap already labels (from `/station-platforms`).
+    /// A feed track in this set is corroborated by OSM and drawn neutral; a track
+    /// only the feed knows is drawn accent-filled — the value the overlay adds.
+    var osmPlatforms: Set<String> = []
     @State private var yaw: Double = 0.5
     @GestureState private var twist: Double = 0
     @State private var zoom: CGFloat = 1
@@ -358,20 +367,11 @@ struct IsoGeometryCanvas: View {
                 }
             }
 
-            // Every platform the export carries, marked with its ref and lifted to
-            // its floor — not just the two the walk connects. Hidden on other floors
-            // when a level is isolated.
-            for way in ways where way.kind == "platform" {
-                guard let ref = way.ref, !way.points.isEmpty else { continue }
-                let lvl = way.level ?? wayLevel(way, scene)
-                if focus != nil && focus != lvl { continue }
-                let n = CGFloat(way.points.count)
-                let c = Point3(
-                    x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
-                    y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
-                    z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
-                platformTag(ctx, iso.map(c), ref)
-            }
+            // Every platform the export carries, labelled and lifted to its floor.
+            // Walk views draw its OSM ref; the station map overlays the feed's real
+            // track numbers (the labels OSM lacks) on the nearest island. Hidden on
+            // other floors when a level is isolated.
+            drawPlatformLabels(ctx, iso, ways, focus: focus)
 
             // Route + its level changes (walk mode only; browse shows the station).
             guard !browse else { return }
@@ -480,6 +480,60 @@ struct IsoGeometryCanvas: View {
                 .font(.system(size: 9, weight: .bold, design: .monospaced)))
             t.shading = .color(Theme.ink3)
             ctx.draw(t, at: CGPoint(x: 12, y: ref.y), anchor: .leading)
+        }
+    }
+
+    /// Platform labels on the exploded model. Each platform way is an "island" at
+    /// its centroid; the station map's feed `markers` are snapped to the nearest
+    /// island and drawn as one pill per track number, so the labels the feed
+    /// carries land even where OSM tags none. Without markers (the walk views) this
+    /// is exactly the previous behaviour: the plain OSM ref per platform.
+    private func drawPlatformLabels(_ ctx: GraphicsContext, _ iso: IsoFit,
+                                    _ ways: [VizExport.Way], focus: Int?) {
+        struct Island { let center: Point3; let ref: String?; let level: Int }
+        var islands: [Island] = []
+        for way in ways where way.kind == "platform" {
+            guard !way.points.isEmpty else { continue }
+            let n = CGFloat(way.points.count)
+            let c = Point3(
+                x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
+                y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
+                z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
+            islands.append(Island(center: c, ref: way.ref, level: way.level ?? wayLevel(way, scene)))
+        }
+
+        // Feed markers → nearest island (world XY, via the export's ENU origin). A
+        // compound label like "41/42" splits into one pill per track; duplicate
+        // sightings collapse. Assignment ignores the focus level (a marker belongs
+        // to one island); the draw pass hides islands on dimmed floors.
+        var feedByIsland: [Int: [String]] = [:]
+        if !markers.isEmpty, !islands.isEmpty {
+            let lat0 = scene.export.meta.originLat, lon0 = scene.export.meta.originLon
+            let mPerLat = 111_320.0, mPerLon = 111_320.0 * cos(lat0 * .pi / 180)
+            for m in markers {
+                let mx = (m.lon - lon0) * mPerLon, my = (m.lat - lat0) * mPerLat
+                var best = 0, bestD = Double.greatestFiniteMagnitude
+                for (i, isl) in islands.enumerated() {
+                    let dx = Double(isl.center.x) - mx, dy = Double(isl.center.y) - my
+                    let d = dx * dx + dy * dy
+                    if d < bestD { bestD = d; best = i }
+                }
+                for sub in splitTracks(m.track) where !(feedByIsland[best]?.contains(sub) ?? false) {
+                    feedByIsland[best, default: []].append(sub)
+                }
+            }
+        }
+
+        // Feed islands get a small cluster of per-track pills; every other
+        // OSM-labelled island keeps its plain neutral tag.
+        for (i, isl) in islands.enumerated() {
+            if let f = focus, f != isl.level { continue }
+            let at = iso.map(isl.center)
+            if let tracks = feedByIsland[i] {
+                drawFeedCluster(ctx, at: at, tracks: tracks.sorted(by: trackLess), osm: osmPlatforms)
+            } else if let ref = isl.ref {
+                platformTag(ctx, at, ref)
+            }
         }
     }
 }
@@ -609,6 +663,63 @@ private func platformTag(_ ctx: GraphicsContext, _ p: CGPoint, _ ref: String) {
     let rect = CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h)
     ctx.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.panel))
     ctx.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.line), lineWidth: 1)
+    ctx.draw(text, at: p, anchor: .center)
+}
+
+/// Split a feed track label into its individual platform numbers: a compound
+/// "41/42" is the two faces of one island, so it becomes ["41", "42"]; a plain "3"
+/// stays ["3"]. Blanks trimmed, empties dropped; the raw label is the fallback so
+/// nothing silently vanishes.
+private func splitTracks(_ track: String) -> [String] {
+    let parts = track.split(separator: "/")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    return parts.isEmpty ? [track] : parts
+}
+
+/// Numeric platform order when both parse as ints ("2" before "10"), else a
+/// natural string compare.
+private func trackLess(_ a: String, _ b: String) -> Bool {
+    if let ia = Int(a), let ib = Int(b) { return ia < ib }
+    return a.localizedStandardCompare(b) == .orderedAscending
+}
+
+/// A short horizontal row of feed pills centred on a platform island's centroid,
+/// so a compound "41/42" reads as two pills side by side over the one island.
+private func drawFeedCluster(_ ctx: GraphicsContext, at p: CGPoint,
+                             tracks: [String], osm: Set<String>) {
+    let font = Font.system(size: 10, weight: .bold, design: .monospaced)
+    let gap: CGFloat = 3
+    let widths = tracks.map {
+        ctx.resolve(Text($0).font(font)).measure(in: CGSize(width: 200, height: 40)).width + 10
+    }
+    let total = widths.reduce(0, +) + gap * CGFloat(max(tracks.count - 1, 0))
+    var x = p.x - total / 2
+    for (i, t) in tracks.enumerated() {
+        feedPill(ctx, CGPoint(x: x + widths[i] / 2, y: p.y), t, accent: !osm.contains(t), font: font)
+        x += widths[i] + gap
+    }
+}
+
+/// One feed pill, styled after `PlatformChip` / `FeedCodeChip` (a capsule). A
+/// track only the feed knows (`accent`) fills solid accent with white text; an
+/// OSM-corroborated track gets the neutral panel/outline of `platformTag`, so it
+/// matches the refs already on the model.
+private func feedPill(_ ctx: GraphicsContext, _ p: CGPoint, _ track: String,
+                      accent: Bool, font: Font) {
+    var text = ctx.resolve(Text(track).font(font))
+    let ts = text.measure(in: CGSize(width: 200, height: 40))
+    let w = ts.width + 10, h: CGFloat = 15
+    let shape = Path(roundedRect: CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h),
+                     cornerRadius: h / 2)
+    if accent {
+        ctx.fill(shape, with: .color(Theme.accent))
+        text.shading = .color(.white)
+    } else {
+        ctx.fill(shape, with: .color(Theme.panel))
+        ctx.stroke(shape, with: .color(Theme.line), lineWidth: 1)
+        text.shading = .color(Theme.ink)
+    }
     ctx.draw(text, at: p, anchor: .center)
 }
 

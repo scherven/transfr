@@ -225,6 +225,13 @@ public final class TripModel {
         try? await repo.platforms(lat: lat, lon: lon)
     }
 
+    /// The feed's platform-number labels (the ones OSM lacks) for the station-map
+    /// overlay. Fails soft to nil on a transport error; a resolved-but-unavailable
+    /// overlay comes back as a response with `found == false` and a typed `reason`.
+    public func stationPlatformMarkers(lat: Double, lon: Double) async -> StationPlatformMarkersResponse? {
+        try? await repo.platformMarkers(lat: lat, lon: lon)
+    }
+
     /// The "full station walk" from one source platform: the real walk to every
     /// other platform at the resolved station, nearest-first (the §6.10 Advanced
     /// tool). Fails soft to nil — the tool then shows its degraded/empty state

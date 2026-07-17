@@ -60,6 +60,12 @@ public struct SampleRepository: JourneyRepository {
                                         found: true, platforms: refs)
     }
 
+    public func platformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse {
+        // No feed-harvest overlay in the sample tier, so report it honestly absent
+        // (never fabricate labels): the station map then draws OSM refs only.
+        StationPlatformMarkersResponse(lat: lat, lon: lon, found: false, reason: "no_platform_labels")
+    }
+
     public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
         try? await Task.sleep(for: .milliseconds(180))
         // Reuse the same nearest-seed platform set the walk-only door uses, then
