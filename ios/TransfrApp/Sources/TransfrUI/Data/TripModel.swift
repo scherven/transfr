@@ -118,7 +118,7 @@ public final class TripModel {
     /// `response` is cleared up front on purpose: once nav is instant, a previous
     /// search's journeys would otherwise sit on screen — under the new query's
     /// title — reading as results for a search that hasn't happened yet.
-    public func plan() async {
+    public func plan(avoidElevators: Bool = false) async {
         planGeneration += 1
         let generation = planGeneration
         load = .loading

@@ -683,7 +683,7 @@ struct InputView: View {
                     defer { resolvingLink = false }
                     await model.planFromLink(link, avoidElevators: settings.avoidElevators)
                 }
-                case .type:  Task { await model.plan(, avoidElevators: settings.avoidElevators) }
+                case .type:  Task { await model.plan(avoidElevators: settings.avoidElevators) }
                 }
             } label: {
                 HStack {
