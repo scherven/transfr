@@ -415,9 +415,9 @@ struct IsoGeometryCanvas: View {
             // One gray icon-label per gesture, no chip — kept at the top so they
             // stay clear of the level chips along the bottom.
             HStack(spacing: 14) {
-                Label("Pan", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
-                Label("Zoom", systemImage: "magnifyingglass")
-                Label("Rotate", systemImage: "rotate.3d")
+                Label("Pan", systemImage: "hand.draw")          // drag gesture
+                Label("Zoom", systemImage: "hand.pinch")        // pinch gesture
+                Label("Rotate", systemImage: "rotate.3d")       // spin the model
             }
             .font(.system(size: 9.5)).foregroundStyle(Theme.ink3).padding(.top, 6)
         }
