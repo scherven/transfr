@@ -30,6 +30,12 @@ class Leg(BaseModel):
     planned_arrival: Optional[str] = None
     departure_platform: Optional[str] = None
     arrival_platform: Optional[str] = None
+    # Real platform sign when this leg boards/alights at a platform whose feed
+    # label is an internal code OSM doesn't carry (Köln Hbf "89" -> "7"). Recovered
+    # from the adjacent transfer's coordinate resolution; null when the feed's
+    # label already is the real one. Same hint contract as Transfer.
+    departure_platform_actual: Optional[str] = None
+    arrival_platform_actual: Optional[str] = None
     departure_delay_s: Optional[int] = None
     arrival_delay_s: Optional[int] = None
     cancelled: bool = False
@@ -50,6 +56,13 @@ class Transfer(BaseModel):
     # operator lists it as N" hint.
     arrival_platform_actual: Optional[str] = None
     departure_platform_actual: Optional[str] = None
+    # The two platforms' real coordinates (the journey stops). Carried so the
+    # client's /walk request can forward them (WalkKey), letting the drawn walk
+    # snap to the real platform when the feed's code isn't in OSM (see WalkKey).
+    arr_lat: Optional[float] = None
+    arr_lon: Optional[float] = None
+    dep_lat: Optional[float] = None
+    dep_lon: Optional[float] = None
     layover_s: Optional[float] = None
     walk_time_s: Optional[float] = None
     walk_distance_m: Optional[float] = None
@@ -304,6 +317,22 @@ class WalkKey(BaseModel):
     # Station-map (browse) mode: include every platform at the station, not just
     # the ones the walked corridor touched.
     all_platforms: bool = False
+    # The platforms' real coordinates (from the journey stop), forwarded from the
+    # Transfer. Only used when from_platform/to_platform match no OSM platform at
+    # the station -- then viz_export snaps them to the real platform (Tier 3), so
+    # the drawn walk matches the verdict. Null for browse mode / normal stations.
+    from_lat: Optional[float] = None
+    from_lon: Optional[float] = None
+    to_lat: Optional[float] = None
+    to_lon: Optional[float] = None
+
+    @property
+    def from_coord(self) -> Optional[tuple]:
+        return (self.from_lat, self.from_lon) if self.from_lat is not None and self.from_lon is not None else None
+
+    @property
+    def to_coord(self) -> Optional[tuple]:
+        return (self.to_lat, self.to_lon) if self.to_lat is not None and self.to_lon is not None else None
 
 
 class BoardingGuidance(BaseModel):

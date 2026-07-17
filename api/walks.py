@@ -83,6 +83,11 @@ def build_walk(
             stitch=config.STITCH_BRIDGES,
             avoid_elevators=key.step_free,
             all_platforms=key.all_platforms,
+            # Draw the same walk the verdict resolved: when the feed's platform
+            # code isn't in OSM (e.g. Köln Hbf "89"/"88"), these coordinates let
+            # viz_export snap to the real platform instead of failing to geometry.
+            from_coord=key.from_coord,
+            to_coord=key.to_coord,
         )
     except SystemExit:
         # export() raises SystemExit("no coordinates resolved ...") when the

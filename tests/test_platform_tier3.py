@@ -26,6 +26,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "core"))
 import ground_truth as gt  # noqa: E402
 from api.bridge import nearest_platform_label  # noqa: E402
 from api.transfers import FEASIBLE, assess_transfer  # noqa: E402
+from viz_export import export  # noqa: E402
+from api import pipeline  # noqa: E402
 
 DB = pytest.mark.skipif(
     os.environ.get("TRANSFR_DB") != "1",
@@ -148,3 +150,53 @@ def test_normal_station_has_no_display_hint():
     assert a.verdict == FEASIBLE, f"got {a.verdict}/{a.reason}"
     assert a.arrival_platform_actual is None
     assert a.departure_platform_actual is None
+
+
+# ---------------------------------------------------------------------------
+# DB-gated: the drawable /walk geometry (viz_export) and leg propagation
+# ---------------------------------------------------------------------------
+
+@DB
+def test_koln_walk_geometry_draws_only_with_coords():
+    """viz_export.export must draw the same walk the verdict resolved: the feed's
+    "89"/"88" alone yield no geometry (platform_not_found), but with the stops'
+    coordinates the Tier-3 snap gives a real path -- keeping geometry == verdict."""
+    import db
+    conn = db.connect(connect_timeout=5)
+    without = export(conn, KOLN_REL, "89", "88", algorithm="astar")
+    assert not without["path"]["found"]
+    withc = export(conn, KOLN_REL, "89", "88", algorithm="astar", from_coord=K89, to_coord=K88)
+    assert withc["path"]["found"]
+    assert len(withc["path"]["points"]) >= 2
+
+
+@DB
+def test_enrich_propagates_recovered_platform_to_transfer_and_legs():
+    """End to end through the pipeline: a Hannover->Köln->Stuttgart itinerary whose
+    Köln stops carry the feed's "89"/"88". The change and BOTH adjacent legs must
+    carry the recovered real platform (7/6), and the transfer must carry the stop
+    coordinates the client forwards to /walk."""
+    import db
+
+    def _leg(name, o, olat, olon, d, dlat, dlon, dep_t, arr_t, dep_p, arr_p):
+        return {"mode": "HIGHSPEED_RAIL", "train_name": name,
+                "origin": {"name": o, "latitude": olat, "longitude": olon},
+                "destination": {"name": d, "latitude": dlat, "longitude": dlon},
+                "departure": dep_t, "arrival": arr_t,
+                "departure_platform": dep_p, "arrival_platform": arr_p}
+
+    journey = {"id": "t", "legs": [
+        _leg("ICE 654", "Hannover Hbf", 52.3766, 9.7411, "Köln Hbf", K89[0], K89[1],
+             "2026-07-17T13:00:00Z", "2026-07-17T14:07:00Z", None, "89"),
+        _leg("ICE 225", "Köln Hbf", K88[0], K88[1], "Stuttgart Hbf", 48.7841, 9.1816,
+             "2026-07-17T14:19:00Z", "2026-07-17T16:30:00Z", "88", None),
+    ]}
+    conn = db.connect(connect_timeout=5)
+    resp = pipeline.enrich(conn, {"journeys": [journey]}, assess=True)
+    j = resp.journeys[0]
+    t = j.transfers[0]
+    assert t.arrival_platform == "89" and t.arrival_platform_actual == "7"
+    assert t.departure_platform == "88" and t.departure_platform_actual == "6"
+    assert t.arr_lat == K89[0] and t.dep_lon == K88[1]           # coords for the client WalkKey
+    assert j.legs[0].arrival_platform_actual == "7"              # arriving leg
+    assert j.legs[1].departure_platform_actual == "6"            # departing leg
