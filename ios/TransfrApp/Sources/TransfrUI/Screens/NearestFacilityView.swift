@@ -57,10 +57,6 @@ struct NearestFacilityView: View {
                 categoryChips.padding(.bottom, 14)
 
                 content
-
-                Label("Tap a routable facility to walk to the platform beside it. Facilities come from OSM amenity/shop tags. If a station has none mapped — or the POI layer isn't available — we say so rather than guess.",
-                      systemImage: "info.circle")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3).padding(.top, 14)
             }
             .padding(20)
         }
