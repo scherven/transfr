@@ -735,14 +735,19 @@ struct IsoFit {
     let cx: CGFloat, cy: CGFloat, norm: CGFloat, floorHeight: CGFloat
     let scale: CGFloat, scx: CGFloat, scy: CGFloat, qcx: CGFloat, qcy: CGFloat
     let pan: CGSize
-    /// The screen-y gap between consecutive floors — *derived*, not a constant.
+    /// The screen-y lift per floor — *derived* from the footprint, not a constant.
     ///
-    /// It was a flat 20 while the thing it has to clear — the iso-projected
-    /// footprint — is data- and angle-dependent: Berlin Hbf's normalised floor
-    /// projects to ~62 units of screen-y at the default orbit, so floors −2/−1/0
-    /// fused into one plate and the flagship "exploded floors" wasn't exploded
-    /// (#53). Lifting each floor by a hair more than the footprint it sits over
-    /// means no two plates can touch, at any rotation.
+    /// It was a flat 20 while the thing it tracks — the iso-projected footprint —
+    /// is data- and angle-dependent: Berlin Hbf's normalised floor projects to ~62
+    /// units of screen-y at the default orbit, so with a constant lift floors
+    /// −2/−1/0 fused into one plate (#53). So it scales with the footprint. But
+    /// lifting by a hair *more* than the full footprint (the old `× 1.06`) made a
+    /// one-floor riser as tall as a whole floor is deep — the lifts/elevators read
+    /// as absurdly stretched sticks. Z is `level × floorHeight` nominal, not
+    /// surveyed elevation, so true-to-scale isn't an option (a ~4 m floor against a
+    /// ~300 m concourse would collapse the stack). Instead lift by ~a third of the
+    /// footprint: floors now overlap but stay clearly stacked, and risers keep sane
+    /// proportions.
     let levelUnit: CGFloat
 
     init(scene: WalkScene, size: CGSize, angle: Double, zoom: CGFloat, pan: CGSize = .zero, pad: CGFloat) {
@@ -761,7 +766,9 @@ struct IsoFit {
         let spanNY = (scene.maxY - scene.minY).magnitude * norm
         let c = CGFloat(cos(angle)), s = CGFloat(sin(angle))
         let footprintY = (abs(c + s) * spanNX + abs(c - s) * spanNY) * 0.5
-        levelUnit = max(footprintY * 1.06, 8)
+        // ~1/3 of the footprint (was `× 1.06`, full clearance): floors overlap but
+        // stay stacked, and a one-floor riser no longer towers over its own plate.
+        levelUnit = max(footprintY * 0.35, 8)
         let lu = levelUnit
 
         // Pre-project the 8 bounding corners (XY box × level range) to find extents.
