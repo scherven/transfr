@@ -71,8 +71,23 @@ _WALK_CACHE_CONTROL = "public, max-age=86400"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_pool()  # best-effort; deferred to first request if the DB is down
+    if config.OSM_STATION_INDEX:
+        _load_osm_station_index()
     yield
     close_pool()
+
+
+def _load_osm_station_index() -> None:
+    """Best-effort: fold the deployed OSM station names into the autocomplete
+    index at startup. A DB that's down here just leaves the CSV index in place
+    (same posture as init_pool) -- it must never stop the app from booting."""
+    try:
+        with connection() as conn:
+            added = stations.load_osm_stations(conn)
+        print(f"[api] OSM station index: +{added} stations", flush=True)
+    except Exception as e:  # noqa: BLE001 -- degrade to CSV-only, never crash startup
+        print(f"[api] OSM station index unavailable, using CSV only: "
+              f"{type(e).__name__}: {e}", flush=True)
 
 
 app = FastAPI(title="transfr", version="0.1.0", lifespan=lifespan)

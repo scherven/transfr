@@ -36,6 +36,14 @@ BUFFER_S = _float("TRANSFR_BUFFER_S", 60.0)
 # On by default; TRANSFR_STITCH_BRIDGES=0 restores classic no-stitch routing.
 STITCH_BRIDGES = os.environ.get("TRANSFR_STITCH_BRIDGES", "1") != "0"
 
+# Layer an OSM-backed station index (api/stations.load_osm_stations) on top of the
+# vendored CSV at startup. The CSV is Europe-only, so a Korea deployment needs this
+# for any station to resolve by name at all. Off by default: a European deployment
+# stays byte-identical and keeps /stations DB-free. Enabling it makes /stations
+# depend on the DB at startup (best-effort: a DB-down startup just falls back to
+# the CSV). Set TRANSFR_OSM_STATION_INDEX=1 for the Korea (transfr_kr) deployment.
+OSM_STATION_INDEX = os.environ.get("TRANSFR_OSM_STATION_INDEX", "0") != "0"
+
 # Default number of itinerary options requested from the journey provider.
 DEFAULT_MAX_JOURNEYS = _int("TRANSFR_MAX_JOURNEYS", 5)
 MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)
