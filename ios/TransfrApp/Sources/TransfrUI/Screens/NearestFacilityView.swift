@@ -1,25 +1,18 @@
 import SwiftUI
 import TransfrCore
 
-/// Nearest facility — the prototype's `#s-nearest` (§6.10), now live. Query any
-/// station, pick a category chip, and see the nearest instance (routed from the
-/// reference platform) plus every instance ranked by distance. Tapping a routable
-/// facility opens the walk to the platform beside it. Facilities come from the OSM
-/// `amenity`/`shop` POI layer via `/facilities`; when a station has none mapped —
-/// or the POI layer isn't available on the host — we say so rather than guess.
+/// Nearest facility — the prototype's `#s-nearest` (§6.10), now a **map**. Query a
+/// station, pick a category chip, and the whole station is drawn in 3D with EVERY
+/// facility of that type pinned on it (all toilets, all coffee, …). Tap a pin to
+/// select it: a card names it (level · distance) and offers "Show walk", which opens
+/// the walk to the platform beside it. Facilities + geometry come from `/facility-map`
+/// in one round trip; when a station has none mapped — or the POI layer isn't
+/// available on the host — we say so rather than guess.
 struct NearestFacilityView: View {
     @Environment(TripModel.self) private var model
     @Environment(SettingsStore.self) private var settings
 
-    /// A resolved station: coordinate + the relation/platforms a routed walk uses.
-    private struct Resolved: Equatable {
-        var name: String
-        var lat: Double
-        var lon: Double
-        var relationId: Int
-        var platforms: [String]
-    }
-
+    private struct Coord: Equatable { var lat: Double; var lon: Double }
     private struct Cat: Identifiable, Equatable { let id: String; let label: String; let icon: String }
     private let cats: [Cat] = [
         .init(id: "toilets", label: "Toilets", icon: "toilet"),
@@ -34,11 +27,11 @@ struct NearestFacilityView: View {
 
     @State private var category = "toilets"
     @State private var stationText = "Berlin Hbf"
-    @State private var resolved: Resolved?
-    @State private var fromPlatform = ""
-    @State private var result: FacilitiesResponse?
+    @State private var coord: Coord?
+    @State private var map: FacilityMapResponse?
+    @State private var scene: WalkScene?
+    @State private var selected: Int?
     @State private var loading = false
-    @State private var infoNote: String?
 
     // Station autocomplete (mirrors InputView).
     @FocusState private var stationFocused: Bool
@@ -46,19 +39,13 @@ struct NearestFacilityView: View {
     @State private var searchTask: Task<Void, Never>?
 
     private var imperial: Bool { settings.units == .imperial }
+    private var categoryLabel: String { cats.first { $0.id == category }?.label ?? category.capitalized }
+    private var categoryIcon: String { cats.first { $0.id == category }?.icon ?? "mappin" }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                stationField
-                if stationFocused && !suggestions.isEmpty { suggestionList.padding(.bottom, 8) }
-                if let resolved, resolved.platforms.count > 1 { fromPlatformPicker(resolved).padding(.bottom, 12) }
-
-                categoryChips.padding(.bottom, 14)
-
-                content
-            }
-            .padding(20)
+        VStack(spacing: 0) {
+            controls
+            mapArea
         }
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Nearest facility").navigationBarTitleDisplayMode(.inline)
@@ -70,16 +57,28 @@ struct NearestFacilityView: View {
                 }
             }
         }
-        .task { if resolved == nil { await resolveStation(stationText) } }
-        .onChange(of: category) { _, _ in Task { await loadFacilities() } }
+        .task { if map == nil { await resolve(stationText) } }
+        .onChange(of: category) { _, _ in Task { await loadMap() } }
     }
 
     private var subtitle: String {
-        guard let r = resolved else { return "Pick a station" }
-        return fromPlatform.isEmpty ? r.name : "\(r.name) · from Platform \(fromPlatform)"
+        guard let m = map, m.found else { return stationName }
+        let n = m.facilities.count
+        return "\(m.station ?? stationName) · \(n) \(categoryLabel.lowercased())"
     }
+    private var stationName: String { map?.station ?? stationText }
 
-    // MARK: - Station field + autocomplete
+    // MARK: - Controls (station + category chips)
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            stationField
+            if stationFocused && !suggestions.isEmpty { suggestionList }
+            categoryChips
+        }
+        .padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 10)
+        .background(Theme.paper)
+    }
 
     private var stationField: some View {
         Panel(padding: 6) {
@@ -93,14 +92,13 @@ struct NearestFacilityView: View {
                         .focused($stationFocused)
                         .submitLabel(.search)
                         .onChange(of: stationText) { _, new in if stationFocused { scheduleSearch(new) } }
-                        .onSubmit { Task { await resolveStation(stationText) } }
+                        .onSubmit { Task { await resolve(stationText) } }
                 }
                 Spacer(minLength: 0)
                 if loading { ProgressView().controlSize(.small) }
             }
             .padding(.horizontal, 12).padding(.vertical, 12)
         }
-        .padding(.bottom, suggestions.isEmpty || !stationFocused ? 12 : 6)
     }
 
     private var suggestionList: some View {
@@ -126,6 +124,184 @@ struct NearestFacilityView: View {
         }
     }
 
+    private var categoryChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(cats) { c in
+                    Button { withAnimation(.snappy) { category = c.id } } label: {
+                        Label(c.label, systemImage: c.icon)
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(category == c.id ? .white : Theme.ink2)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(Capsule().fill(category == c.id ? Theme.accent : Theme.panel))
+                            .overlay(Capsule().strokeBorder(category == c.id ? .clear : Theme.line, lineWidth: 1))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: - Map area (the 3D station + every pin) + the tapped-pin card
+
+    private var mapArea: some View {
+        ZStack(alignment: .bottom) {
+            Group {
+                if let scene {
+                    IsoGeometryCanvas(
+                        scene: scene, browse: true, selectedPOI: selected,
+                        onSelectPOI: { i in withAnimation(.snappy) { selected = (selected == i ? nil : i) } }
+                    )
+                } else if let map, !map.found, !loading {
+                    emptyState(map)
+                } else if !loading {
+                    Text("Pick a station and a category to see them on the map.")
+                        .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if loading && scene == nil {
+                VStack(spacing: 8) {
+                    ProgressView()
+                    Text("Finding \(categoryLabel.lowercased())…").font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            if let sel = selected, let m = map, sel < m.facilities.count {
+                detailCard(m.facilities[sel])
+                    .padding(16)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if scene != nil {
+                hint.padding(.bottom, 12)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+
+    private var hint: some View {
+        HStack(spacing: 6) {
+            Circle().fill(Theme.poi).frame(width: 8, height: 8)
+            Text("Tap a pin for details").font(.system(size: 11)).foregroundStyle(Theme.ink2)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .background(Capsule().fill(Theme.panel.opacity(0.95)))
+        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+    }
+
+    private func detailCard(_ f: Facility) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                SetIcon(categoryIcon, tint: .white, bg: Theme.poi)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(f.name ?? categoryLabel).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Text(cardSub(f)).font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                }
+                Spacer(minLength: 8)
+                Button { withAnimation(.snappy) { selected = nil } } label: {
+                    Image(systemName: "xmark.circle.fill").font(.system(size: 22)).foregroundStyle(Theme.ink3)
+                }.buttonStyle(.plain)
+            }
+            Button { showWalk(f) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "figure.walk")
+                    Text("Show walk").fontWeight(.semibold)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.system(size: 12, weight: .bold))
+                }
+                .font(.system(size: 14)).foregroundStyle(.white)
+                .padding(.vertical, 12).padding(.horizontal, 14)
+                .frame(maxWidth: .infinity)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Theme.accent))
+            }.buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 16).fill(Theme.panel))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Theme.line, lineWidth: 1))
+        .shadow(color: .black.opacity(0.14), radius: 14, y: 4)
+    }
+
+    /// "Level 1 · 40 m · near Pl 8" — the mapped level, straight-line distance from
+    /// the station centre, and the platform the facility sits by.
+    private func cardSub(_ f: Facility) -> String {
+        var parts: [String] = []
+        if let lvl = f.level, !lvl.isEmpty { parts.append("Level \(lvl)") }
+        parts.append(Fmt.distance(f.distanceM, imperial: imperial))
+        if let p = f.nearestPlatform { parts.append("near Pl \(p)") }
+        return parts.joined(separator: " · ")
+    }
+
+    // MARK: - Empty / degraded states (honest, per reason)
+
+    @ViewBuilder private func emptyState(_ r: FacilityMapResponse) -> some View {
+        let (icon, title, body): (String, String, String) = {
+            switch r.reason {
+            case "no_poi_layer":
+                return ("map", "Facility map not available here",
+                        "The OSM amenity/shop layer isn't loaded for \(r.station ?? "this station") on this server, so we can't map facilities rather than guess. Routing and platform data still work.")
+            case "none_mapped":
+                return ("mappin.slash", "None mapped",
+                        "\(r.station ?? "This station") has no \(categoryLabel.lowercased()) tagged in OpenStreetMap. That's an honest gap, not a routing error.")
+            case "station_unresolved":
+                return ("questionmark.circle", "No station found",
+                        "We couldn't resolve a station near that place. Try another name.")
+            case "too_sparse":
+                return ("square.dashed", "Not enough map detail",
+                        "\(r.station ?? "This station") isn't mapped in enough detail to draw a 3D model yet.")
+            case "unsupported_category":
+                return ("tag", "Category unavailable",
+                        "We don't map \(categoryLabel.lowercased()) as a facility yet.")
+            default:
+                return ("exclamationmark.triangle", "No facilities",
+                        r.reason.map { "Couldn't map facilities (\($0))." } ?? "Couldn't map facilities.")
+            }
+        }()
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon).font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.ink)
+            Text(body).font(.system(size: 13)).foregroundStyle(Theme.ink3)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Theme.panel))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.line, lineWidth: 1))
+        .padding(20)
+    }
+
+    // MARK: - Actions
+
+    /// Open the walk to a facility: from the station's first platform to the platform
+    /// it sits by (a drawn route + the facility pinned at the end). When the facility
+    /// has no distinct platform anchor, browse the whole station with it highlighted.
+    private func showWalk(_ f: Facility) {
+        guard let m = map, let rel = m.relationId, rel != 0, let export = m.export else { return }
+        let poi = f.lat.flatMap { lat in f.lon.map { lon in
+            WalkPOI(lat: lat, lon: lon, name: f.name, category: f.category, subtype: f.subtype, level: f.level)
+        } }
+        let refs = platformRefs(export)
+        let station = m.station ?? stationName
+        if let to = f.nearestPlatform, let from = refs.first, to != from {
+            model.walkLookup = TripModel.WalkLookup(
+                station: station, relationId: rel, fromPlatform: from, toPlatform: to, poi: poi)
+        } else if let first = refs.first, let last = refs.last, first != last {
+            model.walkLookup = TripModel.WalkLookup(
+                station: station, relationId: rel, fromPlatform: first, toPlatform: last, poi: poi, browse: true)
+        } else {
+            return
+        }
+        model.path.append(.walkLookup)
+    }
+
+    /// Distinct platform refs the station's geometry carries, numerically sorted —
+    /// the anchors a walk can start from / route to.
+    private func platformRefs(_ export: VizExport) -> [String] {
+        var refs = Set<String>()
+        for w in export.ways where w.kind == "platform" { if let r = w.ref { refs.insert(r) } }
+        return refs.sorted { $0.compare($1, options: .numeric) == .orderedAscending }
+    }
+
+    // MARK: - Autocomplete + loading
+
     private func scheduleSearch(_ query: String) {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -144,248 +320,38 @@ struct NearestFacilityView: View {
         searchTask?.cancel()
         suggestions = []
         stationFocused = false
-        Task { await resolveStation(s.name) }
+        Task { await resolve(s.name) }
     }
 
-    // MARK: - From-platform picker (the reference the nearest is routed from)
-
-    private func fromPlatformPicker(_ r: Resolved) -> some View {
-        HStack(spacing: 8) {
-            Text("From").font(.system(size: 12)).foregroundStyle(Theme.ink3)
-            Menu {
-                Picker("From platform", selection: $fromPlatform) {
-                    ForEach(r.platforms, id: \.self) { Text("Platform \($0)").tag($0) }
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(fromPlatform.isEmpty ? "—" : "Platform \(fromPlatform)")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.ink)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.ink3)
-                }
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(Capsule().fill(Theme.panel))
-                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
-            }
-            Spacer(minLength: 0)
-        }
-    }
-
-    // MARK: - Category chips
-
-    private var categoryChips: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(cats) { c in
-                    Button { withAnimation(.snappy) { category = c.id } } label: {
-                        Label(c.label, systemImage: c.icon)
-                            .font(.system(size: 12.5, weight: .medium))
-                            .foregroundStyle(category == c.id ? .white : Theme.ink2)
-                            .padding(.horizontal, 12).padding(.vertical, 8)
-                            .background(Capsule().fill(category == c.id ? Theme.accent : Theme.panel))
-                            .overlay(Capsule().strokeBorder(category == c.id ? .clear : Theme.line, lineWidth: 1))
-                    }.buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
-    // MARK: - Content
-
-    @ViewBuilder private var content: some View {
-        if loading && result == nil {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Finding \(categoryLabel.lowercased())…").font(.system(size: 13)).foregroundStyle(Theme.ink3)
-            }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 20)
-        } else if let r = result, r.found, !r.facilities.isEmpty {
-            found(r)
-        } else if let r = result {
-            emptyState(r)
-        } else {
-            Text("Pick a station to find facilities near it.")
-                .font(.system(size: 13)).foregroundStyle(Theme.ink3).padding(.vertical, 20)
-        }
-    }
-
-    private var categoryLabel: String { cats.first { $0.id == category }?.label ?? category.capitalized }
-    private var categoryIcon: String { cats.first { $0.id == category }?.icon ?? "mappin" }
-
-    @ViewBuilder private func found(_ r: FacilitiesResponse) -> some View {
-        let nearest = r.facilities[0]
-        // Nearest result card (routable = has a platform anchor we can walk to).
-        Button { open(nearest) } label: { nearestCard(nearest) }
-            .buttonStyle(.plain).padding(.bottom, 8)
-
-        if let note = infoNote {
-            HStack(spacing: 10) {
-                Image(systemName: "info.circle").foregroundStyle(Theme.accent)
-                Text(note).font(.system(size: 12)).foregroundStyle(Theme.ink2)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Theme.accentSoft))
-            .padding(.bottom, 14)
-        }
-
-        Text("All \(categoryLabel.lowercased()) at this station · \(r.facilities.count) found")
-            .font(.system(size: 11, weight: .medium)).foregroundStyle(Theme.ink3)
-            .padding(.horizontal, 4).padding(.bottom, 8)
-
-        ForEach(r.facilities) { f in
-            Button { open(f) } label: { facilityRow(f) }.buttonStyle(.plain)
-        }
-    }
-
-    private func nearestCard(_ f: Facility) -> some View {
-        HStack(spacing: 10) {
-            SetIcon(categoryIcon, tint: .white, bg: Theme.accent)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(f.name ?? categoryLabel).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(subLine(f)).font(.system(size: 11)).foregroundStyle(Theme.ink3)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 1) {
-                Text(Fmt.distance(f.distanceM, imperial: imperial))
-                    .font(.system(size: 14, weight: .bold, design: .monospaced)).foregroundStyle(Theme.ink)
-                if let w = f.walkTimeS {
-                    Text(Fmt.walkTime(w)).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.ink3)
-                }
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.accent.opacity(0.4), lineWidth: 1.5))
-    }
-
-    private func facilityRow(_ f: Facility) -> some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(f.name ?? categoryLabel).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                Text(subLine(f)).font(.system(size: 11)).foregroundStyle(Theme.ink3)
-            }
-            Spacer()
-            if isRoutable(f) {
-                Image(systemName: "figure.walk").font(.system(size: 11)).foregroundStyle(Theme.go)
-            }
-            Text(Fmt.distance(f.distanceM, imperial: imperial))
-                .font(.system(size: 13, weight: .semibold, design: .monospaced)).foregroundStyle(Theme.ink)
-                .frame(minWidth: 52, alignment: .trailing)
-        }
-        .padding(.horizontal, 12).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line, lineWidth: 1))
-        .padding(.bottom, 6)
-    }
-
-    /// "level 0 · via Platform 3" — the mapped level and the routed anchor.
-    private func subLine(_ f: Facility) -> String {
-        var parts: [String] = []
-        if let lvl = f.level, !lvl.isEmpty { parts.append("level \(lvl)") }
-        if let sub = f.subtype, f.name == nil { parts.append(sub) }
-        if let p = f.nearestPlatform { parts.append("via Platform \(p)") }
-        return parts.isEmpty ? (f.subtype ?? f.category) : parts.joined(separator: " · ")
-    }
-
-    // MARK: - Empty / degraded states (honest, per reason)
-
-    @ViewBuilder private func emptyState(_ r: FacilitiesResponse) -> some View {
-        let (icon, title, body): (String, String, String) = {
-            switch r.reason {
-            case "no_poi_layer":
-                return ("map", "Facility map not available here",
-                        "The OSM amenity/shop layer isn't loaded for \(r.station ?? "this station") on this server, so we can't list facilities rather than guess. Routing and platform data still work.")
-            case "none_mapped":
-                return ("mappin.slash", "None mapped",
-                        "\(r.station ?? "This station") has no \(categoryLabel.lowercased()) tagged in OpenStreetMap. That's an honest gap, not a routing error.")
-            case "station_unresolved":
-                return ("questionmark.circle", "No station found",
-                        "We couldn't resolve a station near that place. Try another name.")
-            case "unsupported_category":
-                return ("tag", "Category unavailable",
-                        "We don't map \(categoryLabel.lowercased()) as a facility yet.")
-            default:
-                return ("exclamationmark.triangle", "No facilities",
-                        r.reason.map { "Couldn't list facilities (\($0))." } ?? "Couldn't list facilities.")
-            }
-        }()
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: icon).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink)
-            Text(body).font(.system(size: 12)).foregroundStyle(Theme.ink3)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Theme.panel))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line, lineWidth: 1))
-    }
-
-    // MARK: - Actions
-
-    /// A facility is routable when it has a platform anchor at a real (non-sample)
-    /// relation that differs from the reference platform — i.e. there's a
-    /// platform-to-platform walk to draw.
-    private func isRoutable(_ f: Facility) -> Bool {
-        guard let to = f.nearestPlatform, let r = resolved, r.relationId != 0 else { return false }
-        return to != fromPlatform
-    }
-
-    private func open(_ f: Facility) {
-        guard let r = resolved else { return }
-        guard let to = f.nearestPlatform else {
-            infoNote = "\(f.name ?? categoryLabel) isn't anchored to a platform, so there's no walk to draw — it's \(Fmt.distance(f.distanceM, imperial: imperial)) from the station centre."
-            return
-        }
-        if r.relationId == 0 || to == fromPlatform {
-            infoNote = to == fromPlatform
-                ? "You're already on the platform nearest \(f.name ?? "this facility")."
-                : "Walk geometry isn't available offline — this is the ranked list; connect to route it."
-            return
-        }
-        infoNote = nil
-        // Carry the tapped facility along so the walk geometry draws it beside the
-        // destination platform — the POI's own coordinate/level (from `/facilities`)
-        // is all the server needs to place it in the 3D model.
-        let poi = f.lat.flatMap { lat in f.lon.map { lon in
-            WalkPOI(lat: lat, lon: lon, name: f.name, category: f.category,
-                    subtype: f.subtype, level: f.level)
-        } }
-        model.walkLookup = TripModel.WalkLookup(
-            station: r.name, relationId: r.relationId,
-            fromPlatform: fromPlatform.isEmpty ? to : fromPlatform, toPlatform: to,
-            poi: poi)
-        model.path.append(.walkLookup)
-    }
-
-    // MARK: - Loading
-
-    private func resolveStation(_ name: String) async {
+    private func resolve(_ name: String) async {
         let q = name.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else { return }
         loading = true
         defer { loading = false }
-        // Coordinate from autocomplete, then platforms + relation from that point.
         let hits = await model.stations(matching: q)
         guard let top = hits.first(where: { $0.latitude != nil && $0.longitude != nil }),
               let lat = top.latitude, let lon = top.longitude else {
-            result = FacilitiesResponse(lat: 0, lon: 0, category: category, found: false,
-                                        reason: "station_unresolved")
+            map = FacilityMapResponse(lat: 0, lon: 0, category: category,
+                                      found: false, reason: "station_unresolved")
+            scene = nil
             return
         }
-        let platforms = await model.stationPlatforms(lat: lat, lon: lon)
-        let r = Resolved(name: platforms?.station ?? top.name, lat: lat, lon: lon,
-                         relationId: platforms?.relationId ?? 0, platforms: platforms?.platforms ?? [])
-        resolved = r
-        if fromPlatform.isEmpty || !r.platforms.contains(fromPlatform) {
-            fromPlatform = r.platforms.first ?? ""
-        }
-        await loadFacilities()
+        coord = Coord(lat: lat, lon: lon)
+        stationText = top.name
+        await loadMap()
     }
 
-    private func loadFacilities() async {
-        guard let r = resolved else { return }
-        infoNote = nil
+    private func loadMap() async {
+        guard let c = coord else { return }
         loading = true
         defer { loading = false }
-        result = await model.facilities(lat: r.lat, lon: r.lon, category: category)
+        selected = nil
+        let r = await model.facilityMap(lat: c.lat, lon: c.lon, category: category)
+        map = r
+        if let r, r.found, let export = r.export {
+            scene = WalkScene(export)
+        } else {
+            scene = nil
+        }
     }
 }

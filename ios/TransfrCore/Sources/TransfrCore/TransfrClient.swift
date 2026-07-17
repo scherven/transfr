@@ -135,6 +135,21 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
+    /// GET /facility-map?lat=&lon=&category= — the whole station in 3D with every
+    /// facility of a category pinned (a browse `viz_export` + the ranked list, in one
+    /// round trip). Degrades to `found == false` with a typed `reason` like
+    /// `facilities(...)` when the POI layer isn't available on the host.
+    public func facilityMap(lat: Double, lon: Double, category: String) async throws -> FacilityMapResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("facility-map"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lon", value: String(lon)),
+            URLQueryItem(name: "category", value: category),
+        ]
+        return try await get(comps?.url)
+    }
+
     /// GET /station-health?lat=&lon= — one station's platform-connectivity
     /// breakdown (connected / stitchable / island over every platform pair), for
     /// the Map-health tool's per-station query. Resolves the station nearest the

@@ -273,6 +273,29 @@ class FacilitiesResponse(BaseModel):
     facilities: List[Facility] = Field(default_factory=list)
 
 
+class FacilityMapResponse(BaseModel):
+    """The whole station drawn in 3D with EVERY facility of a category pinned on it
+    -- the map-first "walk to nearest" surface. One round trip: `export` is a browse
+    `viz_export` (all platforms, no single route) with each facility attached as a
+    focus POI, and `facilities` is the matching ranked list, in the SAME order as
+    `export.details` so the client maps a tapped pin (details[i]) back to its
+    facility (facilities[i]). Each facility carries a cheap `nearest_platform`
+    anchor (nearest centroid, no pathfind) so a tapped pin can open its walk.
+    Degrades like `/facilities`: `found=False` with a typed `reason`
+    (`station_unresolved`, `unsupported_category`, `no_poi_layer`, `none_mapped`,
+    or `too_sparse` when the station has too few platforms to draw)."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    category: str
+    found: bool
+    reason: Optional[str] = None
+    export: Optional[Dict[str, Any]] = None
+    facilities: List[Facility] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Walk geometry (viz_export) delivery -- /walk and /walks
 #

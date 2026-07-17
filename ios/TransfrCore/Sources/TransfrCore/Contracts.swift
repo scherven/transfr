@@ -277,6 +277,34 @@ public struct FacilitiesResponse: Codable, Sendable {
     }
 }
 
+/// The whole station drawn in 3D with EVERY facility of a category pinned on it —
+/// the map-first "walk to nearest" surface (from `/facility-map`). `export` is a
+/// browse `viz_export` (all platforms, no single route) with each facility attached
+/// as a focus POI; `facilities` is the ranked list in the SAME order as
+/// `export.details`, so a tapped pin (`details[i]`) maps straight to its facility
+/// (`facilities[i]`). `found == false` (with `reason`) degrades exactly like
+/// `FacilitiesResponse` — `no_poi_layer`, `none_mapped`, `too_sparse`, etc. Mirrors
+/// `api/schemas.py:FacilityMapResponse`.
+public struct FacilityMapResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var relationId: Int?
+    public var station: String?
+    public var category: String
+    public var found: Bool
+    public var reason: String?
+    public var export: VizExport?
+    public var facilities: [Facility]
+
+    public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
+                category: String, found: Bool, reason: String? = nil,
+                export: VizExport? = nil, facilities: [Facility] = []) {
+        self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
+        self.category = category; self.found = found; self.reason = reason
+        self.export = export; self.facilities = facilities
+    }
+}
+
 // MARK: - Station connectivity health (/station-health) — mirrors api/schemas.py
 
 /// One platform pair that doesn't plainly connect — `kind` is "stitchable" (a

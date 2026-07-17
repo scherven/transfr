@@ -43,6 +43,12 @@ public protocol JourneyRepository: Sendable {
     /// layer isn't available for that station — the view shows that honestly.
     func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse
 
+    /// The whole station in 3D with every facility of a category pinned — the
+    /// map-first "walk to nearest" surface (browse geometry + the ranked list in one
+    /// round trip). Same honest degradation as `facilities(...)`. Defaulted below so
+    /// only the live service need implement it.
+    func facilityMap(lat: Double, lon: Double, category: String) async throws -> FacilityMapResponse
+
     /// A single station's platform-connectivity breakdown (connected / stitchable
     /// / island), for the Map-health tool's per-station query.
     func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse
@@ -59,6 +65,15 @@ public enum RepositoryError: Error, LocalizedError, Sendable {
         switch self {
         case .notAvailable(let what): return "\(what) isn't available yet."
         }
+    }
+}
+
+public extension JourneyRepository {
+    /// Default: the facility map is a live-service feature; offline/sample and test
+    /// repositories inherit this "not available" unless they override it, so adding
+    /// the endpoint doesn't force every conformer to implement it.
+    func facilityMap(lat: Double, lon: Double, category: String) async throws -> FacilityMapResponse {
+        FacilityMapResponse(lat: lat, lon: lon, category: category, found: false, reason: "no_poi_layer")
     }
 }
 
@@ -98,6 +113,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
         try await client.facilities(lat: lat, lon: lon, category: category)
+    }
+
+    public func facilityMap(lat: Double, lon: Double, category: String) async throws -> FacilityMapResponse {
+        try await client.facilityMap(lat: lat, lon: lon, category: category)
     }
 
     public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {

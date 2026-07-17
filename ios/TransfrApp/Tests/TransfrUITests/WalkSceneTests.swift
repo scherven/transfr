@@ -197,6 +197,49 @@ struct WalkSceneTests {
         }
     }
 
+    // MARK: - Facility map (every category POI pinned)
+
+    /// The scene surfaces EVERY facility, lifts each to its floor, and frames them.
+    ///
+    /// The fixture is a real `/facility-map` browse export of Berlin Hbf with four
+    /// `focus` toilets attached across floors (L−1, L0, L1) — exactly what the map
+    /// fetches. Every POI must be a flagged detail, sit at its own floor, and lie
+    /// inside the scene's XY box so no pin is ever drawn just off the canvas.
+    @Test func facilityMapExposesAndFramesEveryPOI() throws {
+        let s = try Self.scene("viz_berlin_facility")
+
+        let pois = s.export.details.filter { $0.kind == "poi" }
+        #expect(pois.count == 4)
+        #expect(pois.allSatisfy { $0.focus == true && $0.xyz != nil })
+        #expect(pois.allSatisfy { $0.subtype == "toilets" })
+
+        // Spread across floors, each lifted to its own level (not flattened).
+        let levels = Set(pois.compactMap { $0.xyz.map { s.level(of: $0.z) } })
+        #expect(levels.contains(-1) && levels.contains(0) && levels.contains(1))
+
+        // Every pin is framed inside the box the projection is fit to.
+        for xyz in pois.compactMap(\.xyz) {
+            #expect(CGFloat(xyz.x) >= s.minX && CGFloat(xyz.x) <= s.maxX)
+            #expect(CGFloat(xyz.y) >= s.minY && CGFloat(xyz.y) <= s.maxY)
+        }
+        // The first focus POI is the scene's `focusPOI` (drives the walk view label).
+        #expect(s.focusPOI?.focus == true)
+    }
+
+    /// A plain walk (no facility) has no POI details — the flag is opt-in.
+    @Test func plainWalkHasNoFacilityPOIs() throws {
+        #expect(try Self.scene("viz_berlin_1_16").focusPOI == nil)
+        #expect(try Self.scene("viz_berlin_1_16").export.details.allSatisfy { $0.focus != true })
+        #expect(try Self.scene("viz_dortmund_11_4").focusPOI == nil)
+    }
+
+    /// The map 3D rasterises with a selected pin (all pins + selection run, no crash).
+    @Test func facilityMapCanvasRasterises() throws {
+        let s = try Self.scene("viz_berlin_facility")
+        try rasterize(IsoGeometryCanvas(scene: s, browse: true, selectedPOI: 1),
+                      size: CGSize(width: 360, height: 340), tag: "iso_facility_map_berlin")
+    }
+
     // MARK: - The canvases actually rasterise (projection runs, no NaNs/crash)
 
     @Test func rendersAllThreeCanvases() throws {

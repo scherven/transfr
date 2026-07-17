@@ -757,17 +757,18 @@ def export(
             lons = [lo for _, lo in local]
             dlat = r / 111_320.0
             dlon = r / (111_320.0 * max(0.1, math.cos(math.radians(lat0))))
-            for f in gather_details((min(lons) - dlon, min(lats) - dlat,
-                                     max(lons) + dlon, max(lats) + dlat)):
-                entry = detail_entry(proj, f, path_xy)
-                if entry["dist"] <= r:
-                    details_json.append(entry)
+            gathered = [detail_entry(proj, f, path_xy)
+                        for f in gather_details((min(lons) - dlon, min(lats) - dlat,
+                                                 max(lons) + dlon, max(lats) + dlat))]
+            # The gathered context layer is revealed nearest-first by the slider.
+            details_json.extend(sorted((e for e in gathered if e["dist"] <= r),
+                                       key=lambda d: d["dist"]))
+        # Attached facilities keep their INPUT order (never sorted): the client
+        # renders them as pins and maps a tapped pin back to the facility at the
+        # same index, so `details[i]` must stay aligned with `attach_pois[i]`.
         for poi in (attach_pois or []):
-            # A chosen facility: always kept, flagged focus, and its floor added to
-            # the level set so the 3D lifts + tabs it even when the walk never does.
             details_json.append(detail_entry(proj, {**poi, "kind": "poi", "focus": True}, path_xy))
             levels_seen.add(parse_levels(poi.get("level_raw"))[0])
-        details_json.sort(key=lambda d: d["dist"])
 
     return {
         "meta": {

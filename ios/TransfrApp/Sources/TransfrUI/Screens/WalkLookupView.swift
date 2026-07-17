@@ -33,14 +33,20 @@ struct WalkLookupView: View {
     private var fromRef: String { lookup?.fromPlatform ?? "?" }
     private var toRef: String { lookup?.toPlatform ?? "?" }
 
+    private var isBrowse: Bool { lookup?.browse == true }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                factsRow
-                guidanceBox
-                modePicker
-                stage
-                turnByTurn
+                if isBrowse {
+                    facilityBrowseStage
+                } else {
+                    factsRow
+                    guidanceBox
+                    modePicker
+                    stage
+                    turnByTurn
+                }
             }
             .padding(20)
         }
@@ -68,6 +74,10 @@ struct WalkLookupView: View {
     }
 
     private var subtitle: String {
+        if isBrowse {
+            let n = scene?.export.ways.filter { $0.kind == "platform" }.count ?? 0
+            return n > 0 ? "\(facilityName ?? "Facility") · \(n) platforms" : (facilityName ?? "Facility")
+        }
         var parts = ["Platform \(fromRef) → \(toRef)"]
         if let s = scene, s.found {
             parts.append(Fmt.distance(s.export.path.walkingDistanceMeters, imperial: imperial))
@@ -192,15 +202,36 @@ struct WalkLookupView: View {
         }
     }
 
-    /// The 3D view's legend. When the walk carries a facility (the "walk to nearest"
-    /// door) it names it beside the marker swatch; otherwise it labels the path and
-    /// the vertical circulation.
+    /// The 3D view's legend. Browsing a facility shows the station-map key with the
+    /// facility named; a facility walk names it beside the path; a plain walk labels
+    /// the path and the vertical circulation.
     @ViewBuilder private var threeDLegend: some View {
-        if let facilityName {
+        if isBrowse {
+            legend([("Platform", Theme.panel3), ("Stairs", Theme.stair),
+                    ("Lift", Theme.elev), (facilityName ?? "Facility", Theme.poi)])
+        } else if let facilityName {
             legend([("Your path", Theme.accent), ("Platform", Theme.panel3), (facilityName, Theme.poi)])
         } else {
             legend([("Your path", Theme.accent), ("Platform", Theme.panel3),
                     ("Stairs", Theme.stair), ("Lift", Theme.elev)])
+        }
+    }
+
+    /// The tapped facility on the whole-station 3D map: a caption naming it, the
+    /// browse model with the POI pinned, and the station-map legend. No walk facts —
+    /// a facility is a place to find, not a timed route.
+    @ViewBuilder private var facilityBrowseStage: some View {
+        infoBox(icon: "mappin.circle.fill", tint: Theme.poi, bg: Theme.poiSoft,
+                lead: (facilityName ?? "This facility") + " ",
+                body: "is pinned on \(lookup?.station ?? "the station"). Drag to rotate, pinch to zoom, tap a floor to isolate it.")
+        Panel(padding: 12) {
+            VStack(spacing: 10) {
+                stageBox(height: 340) {
+                    if let scene { IsoGeometryCanvas(scene: scene, browse: true) }
+                    else { SchematicLookupCanvas(from: fromRef, to: toRef) }
+                }
+                threeDLegend
+            }
         }
     }
 
@@ -306,7 +337,7 @@ struct WalkLookupView: View {
         guard let lk = lookup, lk.relationId != 0 else { scene = nil; return }
         let key = WalkKey(relationId: lk.relationId, fromPlatform: lk.fromPlatform,
                           toPlatform: lk.toPlatform, stepFree: settings.avoidElevators,
-                          poi: lk.poi)
+                          allPlatforms: lk.browse, poi: lk.poi)
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s

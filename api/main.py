@@ -55,7 +55,7 @@ from search_context import list_platform_refs
 from api import config, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
-from api.facilities import build_facilities
+from api.facilities import build_facilities, build_facility_map
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
 from api.station_health import build_station_health
@@ -261,6 +261,22 @@ def get_facilities(
     with `reason="no_poi_layer"` rather than guessing. With `from_platform`, each
     facility also carries a routed walk to its nearest platform."""
     return build_facilities(conn, lat, lon, category, from_platform=from_platform)
+
+
+@app.get("/facility-map", response_model=schemas.FacilityMapResponse, dependencies=_PROTECTED)
+def get_facility_map(
+    lat: float,
+    lon: float,
+    category: str = Query(min_length=1, description="facility category, e.g. toilets/coffee/atm"),
+    conn=Depends(get_conn),
+):
+    """The whole station in 3D with EVERY facility of `category` pinned on it -- the
+    map-first "walk to nearest" surface. One round trip: a browse `viz_export` (all
+    platforms, no single route) with each facility attached as a focus POI, plus the
+    matching ranked `facilities` list in the same order, so a tapped pin maps back to
+    its row. Degrades to `found=False` with a typed `reason` (`no_poi_layer`,
+    `none_mapped`, ...) exactly like `/facilities`."""
+    return build_facility_map(conn, lat, lon, category)
 
 
 @app.get("/station-health", response_model=schemas.StationHealthResponse, dependencies=_PROTECTED)
