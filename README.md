@@ -1,54 +1,212 @@
 # transfr
-can you really make that transfer?
 
-Map data (c) [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
+> can you really make that transfer?
 
-## algorithm
+A journey planner tells you a transfer "works" because the timetable says the
+arriving and departing trains overlap at a station. It says nothing about the
+78 metres, two flights of stairs, and the underpass between platform 4 and
+platform 5. **transfr turns every change-of-train into a concrete, walkable,
+timed platform-to-platform route** and returns a verdict —
+`feasible` / `tight` / `infeasible` / `unknown` — before and during the trip.
 
-from stop location:
+## Background
 
-1. if on same platform => easy
+**The gap.** Everyone has journey search. Nobody answers "will I actually make
+this connection, and where the hell is the platform?" transfr owns exactly that
+gap: for a departure + arrival station it searches real journeys (via Transitous
+/ MOTIS 2) and, for every change of train, computes the real platform-to-platform
+walk over OpenStreetMap pedestrian geometry and judges whether it fits inside the
+layover.
 
-2. nearby buffer stop => walk to buffer stop, walk across, walk up
+**How a transfer is judged** (from the arrival stop location):
 
-3. nearby connector => walk to connector, walk across
+1. same platform → trivial.
+2. nearby buffer stop → walk to the buffer stop, across, and up.
+3. nearby connector → walk to the connector, then across.
+4. neither → assume stairs connect the entrances, walk to the stairs.
 
-4. neither => assume stairs connect entrances, walk to stairs
+The result is a walk distance, a walk time, the level changes along the way
+(stairs / escalator / elevator / ramp), and a self-contained, georeferenced walk
+geometry that the client renders as a section / per-level / 3D / AR view.
 
-  29 osmium tags-filter -o planet-filtered-4.pbf /Users/simonchervenak/Documents/GitHub/transfr/server-admin/planet.pbf  "nwr/railway"  "r/route=train"  "r/route=light_rail"  "r/route=tram"  "r/route=subway"  "r/public_transport=stop_area"  "r/public_transport=station"  "nwr/disused:railway"  "nwr/abandoned:railway"  "nwr/razed:railway"  "nwr/construction:railway"  "nwr/proposed:railway"  "w/highway=steps"  "w/highway=footway"
+**The pieces:**
 
-  30 osm2pgsql --create  --database openrailwaymap  --hstore  --slim  --merc  --style /Users/simonchervenak/Documents/GitHub/transfr/server-admin/ansible/roles/tileserver/files/scripts/OpenRailwayMap-CartoCSS/setup/openstreetmap-carto.style  --tag-transform-script /Users/simonchervenak/Documents/GitHub/transfr/server-admin/ansible/roles/tileserver/files/scripts/OpenRailwayMap-CartoCSS/setup/openstreetmap-carto.lua  --multi-geometry  /Users/simonchervenak/Documents/GitHub/transfr/planet-filtered-4.pbf
+| Component | What it is |
+|---|---|
+| `core/` | the platform-to-platform pathfinder over an OSM-derived Postgres database (`transfr_eu`; a parallel `transfr_kr` proves the algorithm is region-agnostic). Produces the walk, the level changes, and the `viz_export` geometry. |
+| `api/` | a FastAPI service tying journey search (Transitous/MOTIS) to per-transfer verdicts — the single JSON contract the client consumes. |
+| `ios/` | a SwiftUI + ARKit **thin** client over `api/`; the routing database and the pathfinder stay server-side. |
+| `deploy/` | the always-on host: uvicorn behind a Cloudflare tunnel, kept alive by launchd (macOS) / systemd (Linux). |
+| `legacy/` | a dormant Flask server, kept for reference; not used by the live API. |
 
-  psql -h localhost -d openrailwaymap -U simonchervenak -c "SELECT pid, now() - query_start AS duration, state, left(query, 120) AS query FROM pg_stat_activity WHERE state != 'idle' ORDER BY duration DESC;"
+Everything is OSM-tag-driven: a "region" is nothing but which OSM extract you
+load — there is no region logic in the code, only the geographic clip applied
+when the source `.pbf` is built.
 
-  psql -h localhost -d openrailwaymap -U simonchervenak -f views.sql
+The design source of truth is [`design/DESIGN.md`](design/DESIGN.md); the iOS
+client has its own [`ios/README.md`](ios/README.md).
 
-## backend API
+## Installation
 
-`api/` is a FastAPI service that connects a user's goal (departure + arrival
-station) to the platform-to-platform pathfinder in `core/`: it searches journeys
-via Transitous (MOTIS 2) and, for each change of train, assesses whether the
-platform transfer is walkable within the layover (`feasible` / `tight` /
-`infeasible` / `unknown`+reason).
+A complete, runnable setup from a fresh clone: system tools → Python env →
+database → API server → iOS app. All commands run **from the repo root** unless
+noted. For the exhaustive database procedure (the full-planet build, South Korea,
+row-count targets, partial rebuilds, and verification) see
+[`md/REBUILD.md`](md/REBUILD.md).
 
-    .venv/bin/uvicorn api.main:app --port 5001
-    
-    # then, e.g.
-    curl 'localhost:5001/journeys?from=Frankfurt&to=Z%C3%BCrich%20HB'
-    curl 'localhost:5001/transfer?lat=48.0732&lon=7.3470&from_platform=A&to_platform=B'
+### Prerequisites
 
-It reads the `core/` `transfr_eu` database (PG* env vars, see `core/db.py`). The
-coordinate-based station resolver and the platform matcher need two index builds:
+```bash
+# System tools (macOS / Homebrew shown; use your package manager otherwise)
+brew install postgresql osmium-tool
+brew services start postgresql          # or: pg_ctl -D <datadir> start
 
-    .venv/bin/python core/dbgen/build_station_index.py     # station_points (~333k rows)
-    .venv/bin/python core/dbgen/build_platform_index.py    # station_stops + osm_nodes coord index (Tier 2)
+# For the iOS app (macOS only): Xcode from the App Store, plus:
+brew install xcodegen
+```
 
-## beta deployment (iOS client, single always-on host)
+Postgres connection parameters come from the standard `PG*` environment
+variables (see `core/db.py`); the local-dev defaults are host `localhost`, port
+`5432`, user `$USER`, empty password. If your Postgres needs explicit values,
+export them once:
+
+```bash
+export PGHOST=localhost PGPORT=5432 PGUSER="$USER" PGPASSWORD=
+```
+
+### 1. Python environment
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt      # pinned: fastapi, uvicorn, psycopg2, pyosmium, ...
+```
+
+### 2. Database — `transfr_eu`
+
+The API and `core/` read the `transfr_eu` database. Build it in four steps. Every
+build script is resumable and interrupt-safe — it commits in batches, so a Ctrl-C
+never corrupts a table; just re-run the same command to finish.
+
+**2a. Build the scoped source `.pbf`.** Reduce a Geofabrik Europe extract to just
+the railway + pedestrian tags (this is the lighter path — no planet dump needed;
+the canonical full-planet path is `core/dbgen/extract_europe.sh`, see REBUILD.md):
+
+```bash
+mkdir -p core/data
+curl -L -o core/data/europe-latest.osm.pbf \
+  https://download.geofabrik.de/europe-latest.osm.pbf          # ~30 GB
+
+osmium tags-filter \
+  -o core/data/europe-railway-pedestrian.pbf -O \
+  core/data/europe-latest.osm.pbf \
+  "nwr/railway=platform,platform_edge,station,halt,subway_entrance,buffer_stop,level_crossing" \
+  "nwr/public_transport=stop_area,stop_area_group,station" \
+  "nwr/highway=footway,steps,corridor,pedestrian,elevator" \
+  "nwr/conveying"
+```
+
+**2b. Create the database and apply the schema** (creates the raw tables, all
+query indexes, and the empty derived tables):
+
+```bash
+createdb transfr_eu
+psql -d transfr_eu -v ON_ERROR_STOP=1 -f core/dbgen/schema.sql
+```
+
+**2c. Load the raw OSM data:**
+
+```bash
+PGDATABASE=transfr_eu .venv/bin/python core/dbgen/etl.py core/data/europe-railway-pedestrian.pbf
+```
+
+**2d. Build the derived tables — in this order** (`build_stitch_bridges` depends
+on `node_way_ids` and on the coordinate index that `build_platform_index`
+creates), then finalise:
+
+```bash
+PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_node_way_ids.py     # node->way adjacency
+PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_station_index.py    # station_points (centroids, ~333k rows)
+PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_platform_index.py   # station_stops + osm_nodes coord index
+PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_stitch_bridges.py   # synthetic_bridges (opt-in stitching)
+
+psql -d transfr_eu -c "ANALYZE;"
+```
+
+A full Europe rebuild takes a few hours, dominated by the `etl.py` load
+(~73 M nodes / ~16 M ways) and the coordinate index. Everything after `etl.py`
+is resumable.
+
+### 3. Run the API server
+
+```bash
+PYTHONPATH=. .venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 5001 --reload
+```
+
+Smoke-test it:
+
+```bash
+curl 'localhost:5001/health'
+curl 'localhost:5001/journeys?from=Frankfurt&to=Z%C3%BCrich%20HB'
+curl 'localhost:5001/transfer?lat=48.0732&lon=7.3470&from_platform=A&to_platform=B'
+```
+
+`/journeys` connects a departure + arrival station to per-transfer verdicts;
+`/transfer` computes one platform-to-platform walk. The access controls (API key,
+rate limit) are **off** unless configured, so local dev needs no key — see
+[Deployment](#deployment) to turn them on.
+
+### 4. Generate and run the iOS app
+
+The Xcode project is generated by [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+from `ios/project.yml`. The generated `.xcodeproj` is gitignored — its run scheme
+bakes in the dev API key, so it must never be committed; regenerate it locally:
+
+```bash
+cd ios && TRANSFR_API_KEY=$(cat ../deploy/secrets/api_key) xcodegen generate && open .
+```
+
+Then open `TransfrApp.xcodeproj`, pick the **TransfrApp** scheme, and Run on a
+simulator. The scheme injects `TRANSFR_API_URL` (default `https://api.trans-fr.com`)
+and `TRANSFR_API_KEY` (expanded from the gitignored secret above) at generation
+time, so no secret lands in source.
+
+- **`deploy/secrets/api_key`** is created by the deploy installer (see
+  [Deployment](#deployment)). To run against your **local** server instead,
+  generate with `TRANSFR_API_URL=http://localhost:5001` and no key (local dev
+  requires none); or set `TRANSFR_USE_SAMPLE=1` to run fully offline on the
+  bundled sample data.
+- The Swift packages build and test without the app shell:
+
+  ```bash
+  cd ios/TransfrCore && xcodebuild test  -scheme TransfrCore -destination 'platform=iOS Simulator,name=iPhone 16'
+  cd ios/TransfrApp  && xcodebuild build -scheme TransfrApp  -destination 'platform=iOS Simulator,name=iPhone 16'
+  ```
+
+  More detail (the walk-geometry contracts, regenerating the test goldens) is in
+  [`ios/README.md`](ios/README.md).
+
+## Testing
+
+```bash
+.venv/bin/python -m pytest tests/ -q                                      # offline (deterministic)
+TRANSFR_DB=1   PGDATABASE=transfr_eu .venv/bin/python -m pytest tests/ -q  # + transfr_eu DB tests
+TRANSFR_LIVE=1 .venv/bin/python -m pytest tests/ -q                       # + real Transitous pulls
+```
+
+The journey tests run against real MOTIS responses captured under
+`tests/fixtures/journeys/` (git-ignored — they're bulky). Regenerate them with:
+
+```bash
+.venv/bin/python tests/capture_journey_fixtures.py           # fill in what's missing
+.venv/bin/python tests/capture_journey_fixtures.py --force   # re-capture all
+```
+
+## Deployment
 
 The API is exposed to the iOS app through a Cloudflare tunnel (no public host
-needed) on an always-on Mac, kept alive by launchd. Full reproducible setup:
+needed) on an always-on Mac, kept alive by launchd. Full reproducible setup below.
 
-### access controls
+### Access controls
 
 Two **opt-in** controls guard the exposed API — both are **off unless configured**,
 so local dev and the test suite (which set neither) are unaffected:
@@ -63,24 +221,28 @@ so local dev and the test suite (which set neither) are unaffected:
 can probe liveness; every data route returns `401` without the key once one is set,
 and `429` past the rate limit. Implemented in `api/security.py`; wired in `api/main.py`.
 
-### 1. one-time host setup
+### 1. One-time host setup
 
-    .venv/bin/pip install -r requirements.txt                 # pinned versions
-    .venv/bin/python core/dbgen/build_station_index.py        # station_points (~333k rows)
-    .venv/bin/python core/dbgen/build_platform_index.py       # station_stops + coord index
-    brew install cloudflared                                  # macOS; Linux: Cloudflare's apt/rpm repo
+Do the [Installation](#installation) steps (Python env + the `transfr_eu`
+database) on the host, then install cloudflared:
 
-Make sure Postgres (`transfr_eu`) starts on boot too — macOS `brew services start
+```bash
+brew install cloudflared          # macOS; Linux: Cloudflare's apt/rpm repo
+```
+
+Make sure Postgres starts on boot too — macOS `brew services start
 postgresql@<v>`, Linux `sudo systemctl enable --now postgresql`. The API tolerates
 it coming up late (lazy pool) but the data routes need it.
 
-### 2. install the auto-restart services
+### 2. Install the auto-restart services
 
 Pick the folder for the host OS — both do the same thing (two auto-restarting
 services + generate the shared key), differing only in the init system:
 
-    deploy/launchd/install.sh          # macOS (launchd)      -> ~/Library/LaunchAgents/
-    sudo deploy/systemd/install.sh     # Linux  (systemd)     -> /etc/systemd/system/
+```bash
+deploy/launchd/install.sh          # macOS (launchd)      -> ~/Library/LaunchAgents/
+sudo deploy/systemd/install.sh     # Linux  (systemd)     -> /etc/systemd/system/
+```
 
 Both are idempotent (re-run after any code change or reboot). They:
 
@@ -101,44 +263,53 @@ macOS, uvicorn is invoked directly rather than via a wrapper because TCC blocks
 launchd from running a shell script under `~/Documents`; Linux has no such limit.)
 See `deploy/launchd/README.md` / `deploy/systemd/README.md` for day-to-day ops.
 
-### 3. named tunnel — one-time setup (stable URL)
+### 3. Named tunnel — one-time setup (stable URL)
 
 The deployment serves `https://api.trans-fr.com`, a Cloudflare **named tunnel** so
 the URL survives restarts/reboots (unlike a quick tunnel). Set up once on the host:
 
-    cloudflared tunnel login                              # browser: authorize the domain
-    cloudflared tunnel create transfr                     # creates the tunnel + <uuid>.json creds
-    cloudflared tunnel route dns transfr api.trans-fr.com # auto-creates the DNS CNAME
+```bash
+cloudflared tunnel login                              # browser: authorize the domain
+cloudflared tunnel create transfr                     # creates the tunnel + <uuid>.json creds
+cloudflared tunnel route dns transfr api.trans-fr.com # auto-creates the DNS CNAME
+```
 
 Then write `~/.cloudflared/config.yml` (outside the repo; the creds are secret):
 
-    tunnel: <uuid from create>
-    credentials-file: /Users/<you>/.cloudflared/<uuid>.json
-    ingress:
-      - hostname: api.trans-fr.com
-        service: http://localhost:5001
-      - service: http_status:404
+```yaml
+tunnel: <uuid from create>
+credentials-file: /Users/<you>/.cloudflared/<uuid>.json
+ingress:
+  - hostname: api.trans-fr.com
+    service: http://localhost:5001
+  - service: http_status:404
+```
 
 The tunnel plist runs `cloudflared tunnel run transfr`, which reads that config.
 Re-running `deploy/launchd/install.sh` keeps it wired.
 
-### 4. point the app at it
+### 4. Point the app at it
 
-    cat deploy/secrets/api_key    # the X-API-Key value
+```bash
+cat deploy/secrets/api_key    # the X-API-Key value
+```
 
 The iOS app defaults to `https://api.trans-fr.com` (`AppConfig.defaultBaseURL`) and
 reads the key from the `TRANSFR_API_KEY` env var (injected by the Xcode scheme, so
-it's never committed). Set it from the file above; override the URL with
-`TRANSFR_API_URL` for a local server, or `TRANSFR_USE_SAMPLE=1` for the offline tier.
+it's never committed — see [Installation §4](#4-generate-and-run-the-ios-app)).
+Override the URL with `TRANSFR_API_URL` for a local server, or set
+`TRANSFR_USE_SAMPLE=1` for the offline tier.
 
-### running by hand (dev, no service manager)
+### Running by hand (dev, no service manager)
 
-    TRANSFR_API_KEY="$(openssl rand -hex 24)" TRANSFR_RATE_LIMIT=60/minute \
-        .venv/bin/uvicorn api.main:app --port 5001
-    cloudflared tunnel run transfr        # named tunnel, separate terminal
-    # or, no domain: cloudflared tunnel --url http://localhost:5001  (random URL)
+```bash
+TRANSFR_API_KEY="$(openssl rand -hex 24)" TRANSFR_RATE_LIMIT=60/minute \
+    .venv/bin/uvicorn api.main:app --port 5001
+cloudflared tunnel run transfr        # named tunnel, separate terminal
+# or, no domain: cloudflared tunnel --url http://localhost:5001  (random URL)
+```
 
-### caveats
+### Caveats
 
 > **No domain?** A **quick tunnel** (`cloudflared tunnel --url http://localhost:5001`)
 > needs no account/domain but its URL is random and changes every restart — read it
@@ -151,14 +322,6 @@ it's never committed). Set it from the file above; override the URL with
 > client ships, tighten `TRANSFR_CORS_ORIGINS` and move to real per-user auth —
 > a shared key embedded in web JS is public.
 
-## development
+---
 
-    .venv/bin/python -m pytest tests/ -q                       # offline (deterministic)
-    TRANSFR_DB=1   .venv/bin/python -m pytest tests/ -q         # + transfr_eu DB tests
-    TRANSFR_LIVE=1 .venv/bin/python -m pytest tests/ -q         # + real Transitous pulls
-
-The journey tests run against real MOTIS responses captured under
-`tests/fixtures/journeys/` (git-ignored — they're bulky). Regenerate them with:
-
-    .venv/bin/python tests/capture_journey_fixtures.py           # fill in what's missing
-    .venv/bin/python tests/capture_journey_fixtures.py --force   # re-capture all
+Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
