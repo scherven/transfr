@@ -67,6 +67,7 @@ def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
             details=False,
             stitch=config.STITCH_BRIDGES,
             avoid_elevators=key.step_free,
+            all_platforms=key.all_platforms,
         )
     except SystemExit:
         # export() raises SystemExit("no coordinates resolved ...") when the

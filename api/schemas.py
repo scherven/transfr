@@ -128,6 +128,9 @@ class WalkKey(BaseModel):
     from_platform: str
     to_platform: str
     step_free: bool = False
+    # Station-map (browse) mode: include every platform at the station, not just
+    # the ones the walked corridor touched.
+    all_platforms: bool = False
 
 
 class BoardingGuidance(BaseModel):

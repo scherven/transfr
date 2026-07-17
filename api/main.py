@@ -178,13 +178,15 @@ def get_walk(
     from_platform: str = Query(min_length=1, description="arrival platform ref"),
     to_platform: str = Query(min_length=1, description="departure platform ref"),
     step_free: bool = Query(default=False, description="route without elevators"),
+    all_platforms: bool = Query(default=False, description="station-map mode: include every platform"),
     conn=Depends(get_conn),
 ):
     """One transfer's drawable walk geometry (the `viz_export` document). Keyed by
     the triple a Transfer already carries, so the client just forwards them. The
     result is deterministic given the DB, hence cacheable."""
     key = schemas.WalkKey(relation_id=relation_id, from_platform=from_platform,
-                          to_platform=to_platform, step_free=step_free)
+                          to_platform=to_platform, step_free=step_free,
+                          all_platforms=all_platforms)
     result = build_walk(conn, key)
     if result.ok:
         response.headers["Cache-Control"] = _WALK_CACHE_CONTROL

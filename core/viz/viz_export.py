@@ -51,7 +51,7 @@ for _p in (_VIZ_DIR, _CORE_DIR, os.path.join(_CORE_DIR, "pathfinding")):
 from algorithms import ALGORITHMS  # noqa: E402
 from db import connect  # noqa: E402
 from graph import is_walkable_way, load_station_ways, way_direction  # noqa: E402
-from search_context import SearchContext  # noqa: E402
+from search_context import SearchContext, list_platform_refs  # noqa: E402
 
 DEFAULT_FLOOR_HEIGHT_M = 4.0
 MAX_RADIUS_M = 350.0  # user-set ceiling for the optional context-widening load
@@ -388,14 +388,25 @@ def export(
     floor_height_m: float = DEFAULT_FLOOR_HEIGHT_M,
     details: bool = False, detail_radius_m: float = DEFAULT_DETAIL_RADIUS_M,
     stitch: bool = False, avoid_elevators: bool = False,
+    all_platforms: bool = False,
 ) -> Dict:
     """Resolve the path, gather context ways, project to metres, return the
-    renderer JSON as a dict."""
+    renderer JSON as a dict. `all_platforms` (station-map / browse mode) also
+    pulls in every platform at the station, not just the ones the walk touched."""
     with conn.cursor() as cur:
         name = _station_name(cur, relation_id)
         ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch,
                             avoid_elevators=avoid_elevators)
         result = ctx.error if ctx.error is not None else ALGORITHMS[algorithm](ctx)
+        # Browse mode: add EVERY platform at the station (resolved by ref -- the
+        # same indexed lookup the search uses for its endpoints, so it's fast),
+        # not just the ones on the walked corridor. The whole-station radius
+        # closure would also do this but is far too slow for a live request.
+        if all_platforms:
+            for ref in list_platform_refs(cur, relation_id):
+                for way_id, nodes, tags in ctx._find_platform_edges_near(ref):
+                    if way_id not in ctx.way_cache:
+                        ctx.way_cache[way_id] = {"nodes": nodes, "tags": tags}
         # Combined geometry pool: everything the search touched, in lat/lon.
         ways: Dict[int, Dict] = {wid: dict(info) for wid, info in ctx.way_cache.items()}
         coords: Dict[int, Tuple[float, float]] = dict(ctx.coord_cache)

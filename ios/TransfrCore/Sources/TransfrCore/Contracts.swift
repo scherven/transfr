@@ -127,12 +127,17 @@ public struct WalkKey: Codable, Hashable, Sendable {
     public var fromPlatform: String
     public var toPlatform: String
     public var stepFree: Bool
+    /// Station-map (browse) mode: include every platform at the station, not just
+    /// the walked corridor's. A distinct cache key from the plain walk.
+    public var allPlatforms: Bool
 
-    public init(relationId: Int, fromPlatform: String, toPlatform: String, stepFree: Bool = false) {
+    public init(relationId: Int, fromPlatform: String, toPlatform: String,
+                stepFree: Bool = false, allPlatforms: Bool = false) {
         self.relationId = relationId
         self.fromPlatform = fromPlatform
         self.toPlatform = toPlatform
         self.stepFree = stepFree
+        self.allPlatforms = allPlatforms
     }
 
     /// Build the key straight from a `Transfer` (nil if it never resolved a

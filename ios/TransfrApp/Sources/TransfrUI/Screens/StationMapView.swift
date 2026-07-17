@@ -139,7 +139,10 @@ struct StationMapView: View {
             message = "Couldn't load this station's platforms."; return
         }
         let refs = resp.platforms
-        let key = WalkKey(relationId: rel, fromPlatform: refs.first!, toPlatform: refs.last!, stepFree: false)
+        // Browse the whole station: `allPlatforms` pulls in every platform, not
+        // just the ones on the first→last corridor.
+        let key = WalkKey(relationId: rel, fromPlatform: refs.first!, toPlatform: refs.last!,
+                          stepFree: false, allPlatforms: true)
         guard let result = await model.walk(for: key), result.ok, let export = result.export else {
             message = "No drawable geometry for this station yet."; return
         }
