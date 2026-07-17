@@ -35,6 +35,27 @@ struct PlatformChip: View {
     }
 }
 
+/// Hint treatment C: a small muted pill reconciling the real platform shown beside
+/// it with the operator timetable's own code, for a platform the feed labels with
+/// an internal number the station signs don't use (Köln Hbf "89" vs Gleis 7). Info
+/// icon + code, so it reads as a note about the number, not another platform.
+struct FeedCodeChip: View {
+    let text: String
+    var accessibility: String? = nil
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "info.circle").font(.system(size: 9, weight: .semibold))
+            Text(text).font(.system(size: 11, weight: .medium, design: .monospaced))
+        }
+        .foregroundStyle(Theme.ink3)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Capsule().fill(Theme.panel))
+        .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+        .accessibilityElement()
+        .accessibilityLabel(accessibility ?? text)
+    }
+}
+
 /// A rounded panel — the prototype's card surface, with the shared radius, a
 /// hairline border, and a soft shadow.
 struct Panel<Content: View>: View {

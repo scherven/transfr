@@ -119,7 +119,7 @@ struct JourneyView: View {
                 out.append(RowItem(kind: .train,
                                    time: Fmt.time(departing.departure),
                                    trainName: departing.trainName,
-                                   trainSub: "Pl \(departing.departurePlatform ?? "—") · dir. \(departing.destination.name ?? "—")",
+                                   trainSub: "Pl \(departing.departurePlatformActual ?? departing.departurePlatform ?? "—") · dir. \(departing.destination.name ?? "—")",
                                    trainDur: dur(departing)))
             }
         }
@@ -229,6 +229,35 @@ struct TransferCard: View {
 
     private var v: Verdict { transfer.verdictKind }
 
+    // Show the real platform sign when the feed's code was recovered by
+    // coordinate (Köln Hbf "89" -> "7"); fall back to the feed's own label.
+    private var shownArr: String { transfer.arrivalPlatformActual ?? transfer.arrivalPlatform ?? "?" }
+    private var shownDep: String { transfer.departurePlatformActual ?? transfer.departurePlatform ?? "?" }
+
+    // The timetable's own codes, for the hint pill -- only the ends that were
+    // actually renumbered (an end left on its real label contributes nothing).
+    private var feedNote: String? {
+        let a = transfer.arrivalPlatformActual != nil ? transfer.arrivalPlatform : nil
+        let d = transfer.departurePlatformActual != nil ? transfer.departurePlatform : nil
+        switch (a, d) {
+        case let (a?, d?): return "Timetable: \(a) → \(d)"
+        case let (a?, nil): return "Timetable: \(a)"
+        case let (nil, d?): return "Timetable: \(d)"
+        default: return nil
+        }
+    }
+
+    private var feedNoteSpoken: String {
+        let a = transfer.arrivalPlatformActual != nil ? transfer.arrivalPlatform : nil
+        let d = transfer.departurePlatformActual != nil ? transfer.departurePlatform : nil
+        switch (a, d) {
+        case let (a?, d?): return "the arrival as platform \(a) and the departure as platform \(d)"
+        case let (a?, nil): return "the arrival as platform \(a)"
+        case let (nil, d?): return "the departure as platform \(d)"
+        default: return ""
+        }
+    }
+
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 10) {
@@ -244,11 +273,16 @@ struct TransferCard: View {
                         Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold))
                     }.foregroundStyle(Theme.ink3)
                 }
-                HStack(spacing: 12) {
-                    PlatformChip(text: "Pl \(transfer.arrivalPlatform ?? "?") → \(transfer.departurePlatform ?? "?")")
-                    walkItem("Walk", Fmt.walkTime(transfer.walkTimeS))
-                    if let spare = transfer.spareSeconds {
-                        walkItem("Left", Fmt.duration(Int(spare)), color: v == .tight ? Theme.tight : Theme.ink)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 12) {
+                        PlatformChip(text: "Pl \(shownArr) → \(shownDep)")
+                        walkItem("Walk", Fmt.walkTime(transfer.walkTimeS))
+                        if let spare = transfer.spareSeconds {
+                            walkItem("Left", Fmt.duration(Int(spare)), color: v == .tight ? Theme.tight : Theme.ink)
+                        }
+                    }
+                    if let note = feedNote {
+                        FeedCodeChip(text: note, accessibility: "The timetable lists \(feedNoteSpoken)")
                     }
                 }
             }

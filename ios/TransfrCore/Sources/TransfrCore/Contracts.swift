@@ -28,6 +28,10 @@ public struct Leg: Codable, Hashable, Sendable {
     public var plannedArrival: String?
     public var departurePlatform: String?
     public var arrivalPlatform: String?
+    /// Real platform sign when this leg boards/alights at a feed-renumbered
+    /// platform (see `Transfer.arrivalPlatformActual`); nil otherwise.
+    public var departurePlatformActual: String?
+    public var arrivalPlatformActual: String?
     public var departureDelayS: Int?
     public var arrivalDelayS: Int?
     public var cancelled: Bool
@@ -39,6 +43,18 @@ public struct Transfer: Codable, Hashable, Sendable {
     public var relationId: Int?
     public var arrivalPlatform: String?
     public var departurePlatform: String?
+    /// The real platform sign when `arrivalPlatform`/`departurePlatform` above is
+    /// an internal feed code the station map doesn't carry (Köln Hbf "89" -> "7").
+    /// Nil when the feed's label already is the real one; a non-nil value is the
+    /// cue to show the real platform with the feed's code as a hint.
+    public var arrivalPlatformActual: String?
+    public var departurePlatformActual: String?
+    /// The two stops' real coordinates, forwarded onto the `WalkKey` so the drawn
+    /// walk can snap to the real platform when the feed's code isn't in OSM.
+    public var arrLat: Double?
+    public var arrLon: Double?
+    public var depLat: Double?
+    public var depLon: Double?
     public var layoverS: Double?
     public var walkTimeS: Double?
     public var walkDistanceM: Double?
@@ -47,10 +63,16 @@ public struct Transfer: Codable, Hashable, Sendable {
 
     public init(atStation: String? = nil, relationId: Int? = nil,
                 arrivalPlatform: String? = nil, departurePlatform: String? = nil,
+                arrivalPlatformActual: String? = nil, departurePlatformActual: String? = nil,
+                arrLat: Double? = nil, arrLon: Double? = nil,
+                depLat: Double? = nil, depLon: Double? = nil,
                 layoverS: Double? = nil, walkTimeS: Double? = nil, walkDistanceM: Double? = nil,
                 verdict: String, reason: String? = nil) {
         self.atStation = atStation; self.relationId = relationId
         self.arrivalPlatform = arrivalPlatform; self.departurePlatform = departurePlatform
+        self.arrivalPlatformActual = arrivalPlatformActual
+        self.departurePlatformActual = departurePlatformActual
+        self.arrLat = arrLat; self.arrLon = arrLon; self.depLat = depLat; self.depLon = depLon
         self.layoverS = layoverS; self.walkTimeS = walkTimeS; self.walkDistanceM = walkDistanceM
         self.verdict = verdict; self.reason = reason
     }
@@ -348,23 +370,38 @@ public struct WalkKey: Codable, Hashable, Sendable {
     /// Station-map (browse) mode: include every platform at the station, not just
     /// the walked corridor's. A distinct cache key from the plain walk.
     public var allPlatforms: Bool
+    /// The platforms' real coordinates, forwarded so the server can snap a
+    /// feed-renumbered platform (whose code isn't in OSM) to the real one and draw
+    /// the same walk the verdict resolved. Nil for browse mode / normal stations.
+    public var fromLat: Double?
+    public var fromLon: Double?
+    public var toLat: Double?
+    public var toLon: Double?
 
     public init(relationId: Int, fromPlatform: String, toPlatform: String,
-                stepFree: Bool = false, allPlatforms: Bool = false) {
+                stepFree: Bool = false, allPlatforms: Bool = false,
+                fromLat: Double? = nil, fromLon: Double? = nil,
+                toLat: Double? = nil, toLon: Double? = nil) {
         self.relationId = relationId
         self.fromPlatform = fromPlatform
         self.toPlatform = toPlatform
         self.stepFree = stepFree
         self.allPlatforms = allPlatforms
+        self.fromLat = fromLat; self.fromLon = fromLon
+        self.toLat = toLat; self.toLon = toLon
     }
 
     /// Build the key straight from a `Transfer` (nil if it never resolved a
-    /// relation/platforms, in which case there is no walk to fetch).
+    /// relation/platforms, in which case there is no walk to fetch). The feed's
+    /// platform refs stay the key (the server resolves them, snapping to the real
+    /// platform via the forwarded coordinates when the ref isn't in OSM).
     public init?(transfer: Transfer, stepFree: Bool = false) {
         guard let rel = transfer.relationId,
               let from = transfer.arrivalPlatform,
               let to = transfer.departurePlatform else { return nil }
-        self.init(relationId: rel, fromPlatform: from, toPlatform: to, stepFree: stepFree)
+        self.init(relationId: rel, fromPlatform: from, toPlatform: to, stepFree: stepFree,
+                  fromLat: transfer.arrLat, fromLon: transfer.arrLon,
+                  toLat: transfer.depLat, toLon: transfer.depLon)
     }
 }
 
