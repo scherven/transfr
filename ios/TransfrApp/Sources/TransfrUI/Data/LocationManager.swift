@@ -3,7 +3,7 @@ import CoreLocation
 import Observation
 
 /// Bridges CoreLocation into the app's observable world. One-shot and **while-in-use
-/// only** (design/route-maps.html §3): we want the user's coordinate to plan *from*
+/// only** (agents/design/route-maps.html §3): we want the user's coordinate to plan *from*
 /// and to place the live "you" dot — never background tracking. The manager is
 /// created on the MainActor, so its delegate callbacks arrive on the main thread;
 /// each one `assumeIsolated`s back onto the actor to publish state that views

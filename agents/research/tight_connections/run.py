@@ -13,7 +13,10 @@ from tight import (  # noqa: E402
     itin_arrival, load_state, save_state, _iso, _db, geocode,
 )
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Four levels up from agents/research/tight_connections/run.py == the repo root.
+REPO = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, REPO)
 
 BUFFER_S = 60.0  # slack required on top of the real walk before we call it makeable

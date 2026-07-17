@@ -10,7 +10,7 @@ osmium==4.3.1
 pytest==8.4.2
 plotly==6.9.0
 
-# Legacy Flask server (legacy/) only — dormant, not used by the live API and not
+# Legacy Flask server (agents/legacy/) only — dormant, not used by the live API and not
 # installed in the .venv. Uncomment + pin if you ever revive it.
 # flask
 # flask-cors

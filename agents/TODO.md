@@ -69,7 +69,7 @@ Compliance** at the bottom.
   fails soft with a message on a junk/unsupported link. Departure is recovered
   from bahn.de only; platform/track is never in these links; the EVA/place-id →
   query step still rides on the §9 name→stop-id gap (we plan by name today). Full
-  survey in `md/PASTE-LINK.md`.
+  survey in `agents/md/PASTE-LINK.md`.
 - 🟢 **Walk-only mode is live.** Picking a station resolves its coordinate to the
   real platform list + relation id via the new `GET /station-platforms` (built on
   `SearchContext.list_platform_refs` — the same footprint/tag ladder a `/walk`

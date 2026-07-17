@@ -16,7 +16,7 @@ public final class TripModel {
     public var destination: String = ""
     public var departure: Date = TripModel.defaultDeparture()
 
-    // Current-location origin (design/route-maps.html §3). `usingCurrentLocation`
+    // Current-location origin (agents/design/route-maps.html §3). `usingCurrentLocation`
     // drives the "From" field's location treatment and the route map's live origin
     // dot; `originUserEdited` guards the first-launch default from clobbering a
     // station the user has typed.

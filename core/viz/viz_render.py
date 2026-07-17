@@ -40,7 +40,7 @@ import plotly.graph_objects as go
 
 # Tab favicon for the rendered walk pages: the "transfr" mark -- a lowercase t in
 # the app azure with a green start / red end tip. Kept in sync with the canonical
-# design/favicon.svg; inlined as an SVG data URI so each page stays self-contained.
+# agents/design/favicon.svg; inlined as an SVG data URI so each page stays self-contained.
 _FAVICON_SVG = (
     "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
     "<rect width='32' height='32' rx='7' fill='#fff'/>"

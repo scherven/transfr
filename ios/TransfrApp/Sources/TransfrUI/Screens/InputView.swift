@@ -5,7 +5,7 @@ import TransfrCore
 /// The planning screen — the prototype's "Where are you headed?" (`#s-input`,
 /// §6.1). Three ways in via a segmented control: **Type it** (from/to), **Paste
 /// link** (a maps/DB link → itinerary), and **Walk only** (station + two platform
-/// refs → the verdict-free walk, §6.9). Gear → Settings.
+/// refs → the verdict-free walk, §6.9). Gear → Settings; shield → Advanced (#26).
 struct InputView: View {
     @Environment(TripModel.self) private var model
     @Environment(LocationManager.self) private var location
@@ -52,7 +52,7 @@ struct InputView: View {
     /// Departure-time editor presented as a sheet (the "Depart" chip is the trigger).
     @State private var showDepartPicker = false
 
-    /// Current-location wiring (design/route-maps.html §3). `awaitingLocation` means
+    /// Current-location wiring (agents/design/route-maps.html §3). `awaitingLocation` means
     /// a fix has been asked for and should be applied when it lands; `manualLocation`
     /// distinguishes a button tap (always applies) from the first-launch default
     /// (which yields to an origin the user has already typed). The persisted flag
@@ -135,6 +135,10 @@ struct InputView: View {
     private var header: some View {
         HStack {
             Spacer()
+            NavigationLink(value: Route.advanced) {
+                Image(systemName: "shield.lefthalf.filled").foregroundStyle(Theme.ink2)
+                    .frame(width: 32, height: 32).background(Circle().fill(Theme.panel2))
+            }
             NavigationLink(value: Route.settings) {
                 Image(systemName: "gearshape").foregroundStyle(Theme.ink2)
                     .frame(width: 32, height: 32).background(Circle().fill(Theme.panel2))
@@ -312,11 +316,6 @@ struct InputView: View {
                         .buttonBorderShape(.capsule)
                         .tint(Theme.accent)
                     }
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                        Text("Reads the stops from a Maps or DB link, then rebuilds it with platform transfers.")
-                            .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                    }
                 }
             }
             recentSection
@@ -453,18 +452,6 @@ struct InputView: View {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Finding this station's platforms…")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-            }
-        } else if !adaptedPlatforms.isEmpty {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                Text("\(adaptedPlatforms.count) platforms at \(lookupStation). Pick any two — we draw the walk between them, timed at your pace.")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-            }
-        } else {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                Text("Any two platforms at one station — we draw the walk between them, timed at your pace. Pick a station above to choose from its real platforms; names are free-form (5a, Gl 1).")
                     .font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
         }
