@@ -24,13 +24,18 @@ Run from the repo root (with the venv):
     .venv/bin/python -m core.dbgen.ingest_gtfs_platforms --out platform_labels.json
     # one country / a cheap validation feed:
     .venv/bin/python -m core.dbgen.ingest_gtfs_platforms --only be --out be.json
+    # AT, once you have the zip (see below):
+    .venv/bin/python -m core.dbgen.ingest_gtfs_platforms --only at --local at=oebb_gtfs.zip --out platform_labels.json
 
 Feeds (static GTFS zips, from the Transitous feed registry):
-    be  SNCB (Belgium, rail-only, ~23 MB)         -- good for a first run
-    nl  OpenOV (Netherlands, all modes, ~270 MB)
-    ch  opentransportdata.swiss (all modes, large)
-    de  DELFI (Germany, all modes, ~1 GB+)
-    at  is split per Verkehrsverbund -- add the rail dataset URL(s) below by hand.
+    be  SNCB (Belgium, rail-only, ~23 MB)          -- anonymous, good for a first run
+    nl  OpenOV (Netherlands, all modes, ~270 MB)   -- anonymous
+    ch  opentransportdata.swiss (all modes, large) -- anonymous
+    de  DELFI (Germany, all modes, ~1 GB+)         -- anonymous
+    at  OeBB national rail ("Railway-Current-Reference-Data", dataset 66) -- AUTH-GATED.
+        Either register (free) at data.mobilitaetsverbuende.at for an API key and set
+        TRANSFR_GTFS_AUTH to the Authorization header value, or download the OeBB GTFS
+        (data.oebb.at, CC-BY-4.0, accept the terms checkbox) once and pass --local at=<zip>.
 """
 
 from __future__ import annotations
@@ -56,9 +61,18 @@ FEEDS: Dict[str, str] = {
     "ch": "https://data.opentransportdata.swiss/de/dataset/timetable-2026-gtfs2020/permalink",
     "de": ("https://www.opendata-oepnv.de/ht/de/datensaetze/sharing?"
            "tx_vrrkit_view%5Bsharing%5D=eyJkYXRhc2V0IjoiZGV1dHNjaGxhbmR3ZWl0ZS1zb2xsZmFocnBsYW5kYXRlbi1ndGZzIn0"),
-    # at: national feed is fragmented across Verkehrsverbuende -- add the rail
-    # dataset URLs from https://data.mobilitaetsverbuende.at as needed.
+    # AT national rail (OeBB + Raaberbahn + Westbahn + ...) = the "Railway-Current-
+    # Reference-Data" dataset (66). Unlike the others this download is AUTH-GATED
+    # (HTTP 401): mobilitaetsverbuende.at issues a free API key on registration,
+    # and OeBB's own copy (data.oebb.at, CC-BY-4.0) is behind a terms-of-use
+    # checkbox. So AT needs one of: TRANSFR_GTFS_AUTH set to the Authorization
+    # header value, or a one-time manual download passed via `--local at=<zip>`.
+    "at": "https://data.mobilitaetsverbuende.at/api/public/v1/data-sets/66/2026/file",
 }
+
+# Feeds whose download is gated behind registration/terms -- surfaced with a
+# helpful message instead of a bare error when the fetch is rejected.
+AUTH_GATED = {"at"}
 
 # Load OSM rail stations within this generous box (DACH+BeNeLux and a margin).
 OSM_BBOX = (45.0, 2.0, 55.5, 18.0)  # min_lat, min_lon, max_lat, max_lon
@@ -176,9 +190,17 @@ def download(url: str, dest: str) -> str:
         print(f"  cached: {dest} ({os.path.getsize(dest) // (1 << 20)} MB)")
         return dest
     print(f"  downloading {url}")
+    headers = {"User-Agent": "transfr/0.1 (+github.com/scherven/transfr)"}
+    auth = os.environ.get("TRANSFR_GTFS_AUTH")  # e.g. an AT mobilitaetsverbuende API key
+    if auth:
+        headers["Authorization"] = auth
     tmp = dest + ".part"
-    with requests.get(url, stream=True, timeout=60,
-                      headers={"User-Agent": "transfr/0.1 (+github.com/scherven/transfr)"}) as r:
+    with requests.get(url, stream=True, timeout=60, headers=headers) as r:
+        if r.status_code in (401, 403):
+            raise ValueError(
+                f"HTTP {r.status_code} (authentication required). Register (free) for an API "
+                f"key and set TRANSFR_GTFS_AUTH to the Authorization header value, or download "
+                f"the zip manually and pass --local <country>=<path>.")
         r.raise_for_status()
         got = 0
         with open(tmp, "wb") as f:
