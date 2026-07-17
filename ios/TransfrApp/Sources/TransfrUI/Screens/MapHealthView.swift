@@ -22,25 +22,16 @@ struct MapHealthView: View {
     @State private var queriedName = ""
     @State private var querying = false
 
-    private struct Health { let connected, stitchable, island: Int; let sampled: String; let measured: Bool
-        let stations: [(String, String, Color)] }
+    private struct Health { let connected, stitchable, island: Int; let sampled: String; let measured: Bool }
 
     private var health: Health {
         switch region {
         case "Korea":
-            return .init(connected: 2, stitchable: 5, island: 93, sampled: "899 platforms", measured: true,
-                         stations: [("Seoul", "mainline — only tracks between islands", Theme.miss),
-                                    ("Busan", "routes via building perimeter", Theme.miss),
-                                    ("Daejeon", "concourse unmapped", Theme.tight)])
+            return .init(connected: 2, stitchable: 5, island: 93, sampled: "899 platforms", measured: true)
         case "Japan":
-            return .init(connected: 61, stitchable: 16, island: 23, sampled: "illustrative until the sweep runs", measured: false,
-                         stations: [("Tōkyō", "dense concourse, well mapped", Theme.go),
-                                    ("Shinjuku", "partial — some islands unlinked", Theme.tight)])
+            return .init(connected: 61, stitchable: 16, island: 23, sampled: "illustrative until the sweep runs", measured: false)
         default:
-            return .init(connected: 71, stitchable: 5, island: 24, sampled: "1,401 platforms", measured: true,
-                         stations: [("Berlin Hbf", "fully connected — 15/15 platforms route", Theme.go),
-                                    ("Colmar", "A→E stitchable — a 3.9 m inferred bridge", Theme.tight),
-                                    ("Olten", "9→12 disconnected — straight-line estimate", Theme.miss)])
+            return .init(connected: 71, stitchable: 5, island: 24, sampled: "1,401 platforms", measured: true)
         }
     }
 
@@ -63,22 +54,6 @@ struct MapHealthView: View {
                             legendDot("island", Theme.miss)
                         }.padding(.top, 8)
                     }
-                }
-
-                SectionHeader(text: "Representative stations")
-                ForEach(Array(health.stations.enumerated()), id: \.offset) { _, st in
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(st.0).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                            Text(st.1).font(.system(size: 11)).foregroundStyle(Theme.ink3)
-                        }
-                        Spacer()
-                        Circle().fill(st.2).frame(width: 10, height: 10)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 11)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Theme.panel))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line, lineWidth: 1))
-                    .padding(.bottom, 6)
                 }
 
                 queryStationSection

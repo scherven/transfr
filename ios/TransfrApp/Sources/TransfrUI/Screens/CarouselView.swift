@@ -38,11 +38,6 @@ struct CarouselView: View {
                 }
                 .padding(.bottom, 8)
             }
-
-            Label("Walk times come from core/'s platform graph — real footway distance, stairs, level changes, plus a 60 s boarding buffer.",
-                  systemImage: "info.circle")
-                .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                .padding(.horizontal, 20).padding(.bottom, 12)
         }
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Transfers")
