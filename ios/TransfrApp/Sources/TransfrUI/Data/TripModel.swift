@@ -9,9 +9,11 @@ import TransfrCore
 @MainActor
 @Observable
 public final class TripModel {
-    // Query
-    public var origin: String = "Hamburg Hbf"
-    public var destination: String = "Stuttgart Hbf"
+    // Query. Both ends start genuinely empty — the input fields carry real
+    // placeholders showing what an entry looks like, rather than shipping an
+    // example query that reads as something the user chose.
+    public var origin: String = ""
+    public var destination: String = ""
     public var departure: Date = TripModel.defaultDeparture()
 
     // Current-location origin (design/route-maps.html §3). `usingCurrentLocation`

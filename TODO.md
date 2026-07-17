@@ -232,8 +232,9 @@ Persisted and real, but several preferences are **not yet applied**:
 - 🟢 **Repository is live by default**, resolved by `Data/AppConfig.swift` from the
   environment (`TRANSFR_API_URL` / `TRANSFR_API_KEY`), injected by the Xcode scheme
   (`project.yml`). `TRANSFR_USE_SAMPLE=1` forces the offline tier; `TRANSFR_AUTOPLAN=1`
-  jumps straight to live results on launch. Settings' "Bundled sample" label is stale
-  (cosmetic). → tracked in #41.
+  plus `TRANSFR_AUTOPLAN_FROM` / `TRANSFR_AUTOPLAN_TO` jumps straight to live results
+  on launch (the input fields ship empty, so autoplan needs the route given to it).
+  Settings' "Bundled sample" label is stale (cosmetic). → tracked in #41.
 - 🟠 **Minimal error/empty states** — `plan()` surfaces a message on the CTA, but no
   retry, no empty-results state, no per-screen loading skeletons. → tracked in #42.
 
