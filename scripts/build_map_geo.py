@@ -426,12 +426,36 @@ def write_atomic(path: Path, text: str) -> None:
         raise
 
 
+BEGIN = "  // >>> BEGIN GENERATED"
+END = "  // <<< END GENERATED"
+
+
+def splice_html(html: str, payload_json: str) -> str:
+    """Re-inline the asset into route-maps.html between its generated markers.
+
+    The page is opened straight off disk, so it cannot fetch(); the data has to
+    live in the file. Owning the splice here means the three copies of this asset
+    (canonical, inlined, iOS bundle) cannot drift apart.
+    """
+    a = html.index(BEGIN)
+    b = html.index(END, a)
+    head = html[a:html.index("\n", html.index("\n", a) + 1) + 1]  # keep the 2 marker comment lines
+    return html[:a] + head + "  const GEO = " + payload_json + ";\n" + html[b:]
+
+
 def main() -> int:
     global MIN_ISLAND_AREA
     repo = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--source", help="path or URL of an admin_0_countries GeoJSON")
-    ap.add_argument("--out", default=str(repo / "design" / "europe-geo.json"))
+    ap.add_argument("--out", default=str(repo / "design" / "europe-geo.json"),
+                    help="the canonical vendored asset")
+    ap.add_argument("--ios-out",
+                    default=str(repo / "ios" / "TransfrApp" / "Sources" / "TransfrUI"
+                               / "Resources" / "europe-geo.json"),
+                    help="bundle copy for RouteMap.swift (Bundle.module)")
+    ap.add_argument("--html", default=str(repo / "design" / "route-maps.html"),
+                    help="page to re-inline the asset into (it opens offline, so it can't fetch)")
     ap.add_argument("--cache", default=str(repo / ".geo-cache" / "ne_admin_0.geojson"),
                     help="where to keep the downloaded source (gitignored)")
     ap.add_argument("--tolerance", type=float, default=TOLERANCE)
@@ -465,24 +489,40 @@ def main() -> int:
         "cities": [[n, round(lo, 2), round(la, 2), r] for n, la, lo, r in _dedupe_cities()],
     }
     text = render(payload)
+    inline = text.rstrip("\n")
 
-    out = Path(args.out)
+    out, ios_out, html_path = Path(args.out), Path(args.ios_out), Path(args.html)
+    html = html_path.read_text() if html_path.exists() else None
+    spliced = splice_html(html, inline) if html else None
+
+    # This asset lives in three places — the canonical file, inlined in the page
+    # (which opens offline and so cannot fetch), and the iOS bundle copy. They are
+    # written together and checked together so they cannot drift.
+    targets = [(out, text), (ios_out, text)]
+    if spliced is not None:
+        targets.append((html_path, spliced))
+
     if args.check:
-        if not out.exists():
-            print(f"FAIL {out} does not exist", file=sys.stderr)
+        stale = []
+        for path, want in targets:
+            if not path.exists():
+                stale.append(f"FAIL {path} does not exist")
+            elif path.read_text() != want:
+                stale.append(f"FAIL {path} is stale")
+        if stale:
+            print("\n".join(stale) + f"\n     re-run {Path(__file__).name}", file=sys.stderr)
             return 1
-        if out.read_text() != text:
-            print(f"FAIL {out} is stale — re-run {Path(__file__).name}", file=sys.stderr)
-            return 1
-        print(f"OK   {out} is up to date ({len(text)/1024:.1f} KB)", file=sys.stderr)
+        print(f"OK   {len(targets)} targets up to date ({len(text)/1024:.1f} KB)", file=sys.stderr)
         return 0
 
-    write_atomic(out, text)
+    for path, want in targets:
+        write_atomic(path, want)
     print(
         f"  rings {len(rings)} · pts {pts_in} → {pts_out} "
         f"({100*pts_out/max(pts_in,1):.0f}%) · coast {len(coast)} arcs · "
         f"borders {len(borders)} arcs · cities {len(payload['cities'])}\n"
-        f"  wrote {out} — {len(text)/1024:.1f} KB",
+        f"  wrote {len(targets)} targets — asset {len(text)/1024:.1f} KB\n"
+        + "\n".join(f"    {p}" for p, _ in targets),
         file=sys.stderr,
     )
     return 0

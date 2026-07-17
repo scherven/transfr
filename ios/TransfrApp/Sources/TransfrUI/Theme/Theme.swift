@@ -53,6 +53,9 @@ public enum Theme {
     public static let mapLand  = dyn(0xDFE6F0, 0x182134)
     public static let mapCoast = dynA(0x0E1626, 0.16, 0xFFFFFF, 0.15)
     public static let mapGrat  = dynA(0x0E1626, 0.055, 0xFFFFFF, 0.05)
+    /// Internal country borders. Softer than the coast: the shore is a real edge
+    /// of the land, a border is an annotation on it.
+    public static let mapBorder = dynA(0x0E1626, 0.22, 0xFFFFFF, 0.18)
     public static let mapCity  = dyn(0xAEB7C7, 0x3A465C)
 
     public static let radius: CGFloat = 22
