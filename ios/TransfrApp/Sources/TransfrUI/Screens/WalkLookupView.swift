@@ -206,9 +206,10 @@ struct WalkLookupView: View {
 
     @ViewBuilder
     private var levelPicker: some View {
-        if let scene, scene.levelsAsc.count > 1 {
+        // `pathLevels`, not `levelsAsc` — see WalkView.levelPicker (#53).
+        if let scene, scene.pathLevels.count > 1 {
             Picker("Level", selection: $level) {
-                ForEach(scene.levelsAsc.reversed(), id: \.self) { lvl in
+                ForEach(scene.pathLevels.reversed(), id: \.self) { lvl in
                     Text(levelPickerLabel(lvl, scene)).tag(lvl)
                 }
             }.pickerStyle(.segmented)
@@ -274,7 +275,7 @@ struct WalkLookupView: View {
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s
-            level = s.levelsAsc.contains(s.startLevel) ? s.startLevel : (s.levelsAsc.first ?? 0)
+            level = s.pathLevels.contains(s.startLevel) ? s.startLevel : (s.pathLevels.first ?? 0)
         } else {
             scene = nil
         }
