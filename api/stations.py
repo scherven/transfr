@@ -1,14 +1,21 @@
 """Local station autocomplete.
 
 The base index is the trainline-eu/stations CSV, loaded once at import time
-(no DB needed -- this is what lets /stations serve before the DB is up).
+(no DB needed -- this is what lets /stations serve before the DB is up). Each
+station is indexed under its local name and, as extra SEARCH-ONLY keys, the
+English exonyms in the CSV's free-form `info:en` column ("Munich" for München,
+"Vienna" for Wien). Those aliases are never displayed or returned --
+autocomplete/resolve always emit the canonical local `name` -- so an English
+speaker who types "Munich" finds the station while the app keeps showing
+"München Hbf" (which the iOS client re-resolves through /journeys unchanged).
+See issue #54.
 
 For regions the CSV doesn't cover -- notably Korea, where it has zero rows, so
 *no* Korean station resolved in any script -- an optional OSM-backed index can be
 layered on top at startup (load_osm_stations, gated by TRANSFR_OSM_STATION_INDEX).
 It draws names straight from the deployed OSM data (`name` + `name:en`), so every
-suggestion is real map truth, and it is purely additive: with the flag off the CSV
-path is byte-identical to before and still needs no DB.
+suggestion is real map truth, and it is purely additive: with the flag off no DB
+is needed.
 """
 
 import csv
@@ -34,6 +41,25 @@ def _strip_accents(s: str) -> str:
 
 def _normalize(s: str) -> str:
     return _strip_accents(s).lower()
+
+
+# CSV columns whose value is an English search alias for the row. `info:en` is a
+# free-form English hint -- a city exonym for the majors ("Munich"), sometimes a
+# description ("8km from Reims") -- which is exactly why it is only ever a SEARCH
+# key here, never a display name.
+_ALIAS_COLUMNS = ("info:en",)
+
+
+def _row_aliases(row: Dict[str, Any]) -> List[str]:
+    """English search aliases for a CSV row. Skips values that add nothing once
+    accent-folded (e.g. an info:en equal to the local name)."""
+    name_norm = _normalize(row.get("name", ""))
+    out: List[str] = []
+    for col in _ALIAS_COLUMNS:
+        val = (row.get(col) or "").strip()
+        if val and _normalize(val) != name_norm and val not in out:
+            out.append(val)
+    return out
 
 
 def _fold(s: str) -> str:
@@ -71,9 +97,17 @@ def _load_stations() -> None:
                 "db_id": row.get("db_id", "") or None,
                 "uic": row.get("uic", "") or None,
                 "is_main_station": row.get("is_main_station") == "t",
+                "aliases": _row_aliases(row),
             })
 
-    _search_index = [(_normalize(s["name"]), i) for i, s in enumerate(_stations)]
+    # The local name is the primary key; each English exonym is an extra key
+    # pointing back at the same station (issue #54). autocomplete_station de-dupes
+    # by index, so a station matched by both its name and an alias appears once.
+    _search_index = []
+    for i, s in enumerate(_stations):
+        _search_index.append((_normalize(s["name"]), i))
+        for alias in s.get("aliases", ()):
+            _search_index.append((_normalize(alias), i))
 
 
 _load_stations()
@@ -131,9 +165,20 @@ def resolve_station(name: str) -> Dict[str, Any]:
     """
     q = _normalize(name.strip())
 
-    for norm_name, idx in _search_index:
-        if norm_name == q:
-            return _stations[idx]
+    exact = [idx for norm_name, idx in _search_index if norm_name == q]
+    if exact:
+        # A query can now match several stations at once -- a shared city exonym
+        # ("Munich" -> the whole München cluster), or a local name that is also
+        # another city's English alias. Rank: main station first; then a station
+        # matched by its own local NAME over one matched only by an alias (so
+        # "Bari" stays Bari, not a namesake whose info:en happens to be "Bari");
+        # then earliest. Main-station exonyms ("Munich" -> München Hbf) still win.
+        exact.sort(key=lambda i: (
+            not _stations[i]["is_main_station"],
+            _normalize(_stations[i]["name"]) != q,
+            i,
+        ))
+        return _stations[exact[0]]
 
     results = autocomplete_station(name, max_results=1)
     if not results:
