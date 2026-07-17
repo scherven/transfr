@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Build the vendored Europe map outline (`design/europe-geo.json`) from Natural Earth.
+"""Build the vendored Europe map outline (`agents/design/europe-geo.json`) from Natural Earth.
 
-The route map (`design/route-maps.html`, `ios/…/Map/RouteMap.swift`) used to draw a
+The route map (`agents/design/route-maps.html`, `ios/…/Map/RouteMap.swift`) used to draw a
 hand-typed silhouette of *Germany only*, so any route outside it — Paris, Wien,
 Milano — projected off-canvas onto a map of the wrong country (#18). This turns a
 Natural Earth `admin_0_countries` GeoJSON into a small vendored asset covering the
@@ -9,7 +9,7 @@ whole area `stations.csv` can autocomplete.
 
     ./scripts/build_map_geo.py --check          # verify the committed asset is current
     ./scripts/build_map_geo.py                  # download to a cache and rebuild
-    ./scripts/build_map_geo.py --source ne.geojson --out design/europe-geo.json
+    ./scripts/build_map_geo.py --source ne.geojson --out agents/design/europe-geo.json
 
 Why the topology step (the interesting part)
 --------------------------------------------
@@ -47,7 +47,7 @@ byte-identical file. The download is cached, output is written to a temp file an
 atomically renamed, and Ctrl-C leaves the previous asset untouched.
 
 Natural Earth is public domain (CC0); no attribution is required, but see
-design/DESIGN.md §6.11 and the app's Attributions screen.
+agents/design/DESIGN.md §6.11 and the app's Attributions screen.
 """
 
 from __future__ import annotations
@@ -448,13 +448,13 @@ def main() -> int:
     repo = Path(__file__).resolve().parent.parent
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--source", help="path or URL of an admin_0_countries GeoJSON")
-    ap.add_argument("--out", default=str(repo / "design" / "europe-geo.json"),
+    ap.add_argument("--out", default=str(repo / "agents" / "design" / "europe-geo.json"),
                     help="the canonical vendored asset")
     ap.add_argument("--ios-out",
                     default=str(repo / "ios" / "TransfrApp" / "Sources" / "TransfrUI"
                                / "Resources" / "europe-geo.json"),
                     help="bundle copy for RouteMap.swift (Bundle.module)")
-    ap.add_argument("--html", default=str(repo / "design" / "route-maps.html"),
+    ap.add_argument("--html", default=str(repo / "agents" / "design" / "route-maps.html"),
                     help="page to re-inline the asset into (it opens offline, so it can't fetch)")
     ap.add_argument("--cache", default=str(repo / ".geo-cache" / "ne_admin_0.geojson"),
                     help="where to keep the downloaded source (gitignored)")

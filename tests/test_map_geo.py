@@ -1,5 +1,5 @@
 """
-Tests for scripts/build_map_geo.py — the Natural Earth → design/europe-geo.json
+Tests for scripts/build_map_geo.py — the Natural Earth → agents/design/europe-geo.json
 generator behind the route map's Europe outline (#18).
 
 Offline and deterministic: everything runs on synthetic rings built in-test, so
@@ -245,7 +245,7 @@ def test_quantize_drops_consecutive_duplicates_and_closes_the_ring():
 # ── The committed asset ─────────────────────────────────────────────────────
 
 def _asset():
-    path = os.path.join(os.path.dirname(__file__), "..", "design", "europe-geo.json")
+    path = os.path.join(os.path.dirname(__file__), "..", "agents", "design", "europe-geo.json")
     with open(path) as f:
         return json.load(f)
 
