@@ -45,6 +45,13 @@ public final class TripModel {
     // `verdict == pending` IS its loading state; no parallel bookkeeping needed.
     private var verdictTask: Task<Void, Never>?
 
+    /// Supersedes an in-flight `/journeys`. Nav is instant (#17), so the user can
+    /// be back on the input screen searching again while the first fetch is still
+    /// out; without this the slower, older response could land last and overwrite
+    /// the newer search's results. This is NOT walk bookkeeping — verdict loading
+    /// is still carried by `verdict == pending` alone (see above).
+    private var planGeneration = 0
+
     /// On-demand geometry cache for the walk detail screens (a separate, later
     /// layer than the verdicts). Keyed by the exact `WalkKey`, so a walk opened
     /// once — or step-free vs not — is served instantly next time.
@@ -86,20 +93,33 @@ public final class TripModel {
     /// Plan the current query and land on the results screen. Fails soft — the
     /// error is surfaced in `load` for the UI, never thrown to a crash.
     ///
-    /// Progressive: fetches the itineraries with `assess=false` so the list shows
-    /// the instant the search returns (no waiting on the transfer pathfinding),
-    /// then streams the real verdicts in behind it.
+    /// Progressive, in two steps (#17). The nav happens FIRST — before the
+    /// `/journeys` await — so the tap is answered instantly and the search is
+    /// shown happening on the results screen instead of freezing the CTA. Then:
+    ///
+    ///   A  `load == .loading`, `response == nil`  — ResultsView shows skeletons.
+    ///   B  the itineraries land (`assess=false`, so transfers are `pending`).
+    ///   C  `streamVerdicts` fills each real verdict in behind the list.
+    ///
+    /// `response` is cleared up front on purpose: once nav is instant, a previous
+    /// search's journeys would otherwise sit on screen — under the new query's
+    /// title — reading as results for a search that hasn't happened yet.
     public func plan() async {
+        planGeneration += 1
+        let generation = planGeneration
         load = .loading
         verdictTask?.cancel()
         selectedIndex = nil
+        response = nil
+        path = [.results]
         do {
             let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false)
+            guard generation == planGeneration else { return }
             response = resp
             load = .loaded
-            path = [.results]
             streamVerdicts()
         } catch {
+            guard generation == planGeneration else { return }
             load = .failed(message(for: error))
         }
     }

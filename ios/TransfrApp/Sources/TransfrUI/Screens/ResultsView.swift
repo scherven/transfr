@@ -3,20 +3,25 @@ import TransfrCore
 
 /// The options list — the prototype's `#s-results`. One `JourneyCard` per option,
 /// the first flagged "Best". Tapping a card selects it and pushes the timeline.
+///
+/// This screen is reached the instant "Find connections" is tapped (#17), so it
+/// owns the whole search, not just its result. It has no journeys at all until
+/// `/journeys` lands, and that window is drawn as skeletons — never as fabricated
+/// journeys. The phases, mirroring `TripModel.plan()`:
+///
+///   A  `.loading`  skeleton cards + a "Searching…" spinner in the subtitle
+///   B  `.loaded`   the real cards, every verdict `pending` → "Checking…"
+///   C             `streamVerdicts` settles each verdict in place, as it lands
+///
+/// C needs no code here: `JourneyCard` already reads `verdictKind`, and `pending`
+/// already renders as ink-3 / panel-2 / "Checking…" (Theme.swift).
 struct ResultsView: View {
     @Environment(TripModel.self) private var model
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
-                ForEach(Array(model.journeys.enumerated()), id: \.element.id) { idx, journey in
-                    Button {
-                        model.select(journey)
-                    } label: {
-                        JourneyCard(journey: journey, isBest: idx == 0)
-                    }
-                    .buttonStyle(.plain)
-                }
+                content
             }
             .padding(20)
         }
@@ -27,9 +32,82 @@ struct ResultsView: View {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 1) {
                     Text(navTitle).font(.system(size: 16, weight: .semibold))
-                    Text(subtitle).font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(Theme.ink3)
+                    subtitle
                 }
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch model.load {
+        case .loading:
+            searching
+        case .failed(let message):
+            failed(message)
+        case .idle, .loaded:
+            if model.journeys.isEmpty { empty } else { list }
+        }
+    }
+
+    /// Phase A. Three skeletons — a neutral "a few options" shape, carrying no
+    /// data of its own; the real count is unknowable until the search returns.
+    private var searching: some View {
+        ForEach(0 ..< 3, id: \.self) { _ in
+            JourneyCardSkeleton()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Searching for connections")
+    }
+
+    private var list: some View {
+        ForEach(Array(model.journeys.enumerated()), id: \.element.id) { idx, journey in
+            Button {
+                model.select(journey)
+            } label: {
+                JourneyCard(journey: journey, isBest: idx == 0)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// The search failed *after* we already navigated here, so the error has to be
+    /// recoverable on this screen rather than stranding the user on an empty list:
+    /// re-run the same query, or go back and change it.
+    private func failed(_ message: String) -> some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 14) {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.miss)
+                Text("The search didn't finish, so there's nothing to show yet.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                Button {
+                    Task { await model.plan() }
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Try again")
+                    }
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                Button("Change the search") { model.path.removeAll() }
+                    .buttonStyle(GhostButtonStyle())
+            }
+        }
+    }
+
+    /// The search succeeded and honestly returned nothing. Distinct from `failed`:
+    /// nothing broke, there just isn't a connection to show.
+    private var empty: some View {
+        Panel {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("No connections found", systemImage: "magnifyingglass")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.ink)
+                Text("Nothing runs between these stations at this time.")
+                    .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                Button("Change the search") { model.path.removeAll() }
+                    .buttonStyle(GhostButtonStyle())
             }
         }
     }
@@ -38,13 +116,98 @@ struct ResultsView: View {
         "\(short(model.origin)) → \(short(model.destination))"
     }
 
-    private var subtitle: String {
+    @ViewBuilder private var subtitle: some View {
+        switch model.load {
+        case .loading:
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.mini)
+                Text("Searching…")
+            }
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(Theme.ink3)
+        case .failed:
+            Text("Search failed")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Theme.miss)
+        case .idle, .loaded:
+            Text(settledSubtitle)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundStyle(Theme.ink3)
+        }
+    }
+
+    private var settledSubtitle: String {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "HH:mm"
-        return "Today · from \(f.string(from: model.departure)) · \(model.journeys.count) options"
+        let n = model.journeys.count
+        return "Today · from \(f.string(from: model.departure)) · \(n) option\(n == 1 ? "" : "s")"
     }
 
     private func short(_ s: String) -> String {
         s.replacingOccurrences(of: " Hbf", with: "")
+    }
+}
+
+/// Phase A's stand-in for one option: the `JourneyCard` skeleton, at the same
+/// geometry (Panel, 16pt inset, 12pt rows) so the real card lands in place rather
+/// than jumping. Deliberately contentless — bars, never plausible-looking times.
+struct JourneyCardSkeleton: View {
+    var body: some View {
+        Panel(padding: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    SkeletonBar(width: 146, height: 19)   // "08:12 → 12:47"
+                    Spacer()
+                    SkeletonBar(width: 62, height: 23, radius: 8)   // verdict badge
+                }
+                HStack(spacing: 6) {                      // the change flow
+                    SkeletonBar(width: 40, height: 23)
+                    SkeletonBar(width: 106, height: 23)
+                    SkeletonBar(width: 86, height: 23)
+                }
+                HStack(spacing: 14) {                     // duration · changes
+                    SkeletonBar(width: 56, height: 13)
+                    SkeletonBar(width: 70, height: 13)
+                    Spacer()
+                }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The prototype's `.sk`: a panel-2 bar with a panel-3 highlight sweeping across.
+/// Reduced motion freezes the sweep — the bar stays, it just stops moving
+/// (DESIGN.md:133, locked).
+struct SkeletonBar: View {
+    var width: CGFloat
+    var height: CGFloat
+    var radius: CGFloat = 7
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweeping = false
+
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: radius, style: .continuous) }
+
+    var body: some View {
+        shape.fill(Theme.panel2)
+            .frame(width: width, height: height)
+            .overlay {
+                if !reduceMotion {
+                    LinearGradient(colors: [.clear, Theme.panel3, .clear],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: width)
+                        .offset(x: sweeping ? width : -width)
+                }
+            }
+            .clipShape(shape)
+            .onAppear {
+                guard !reduceMotion else { return }
+                withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                    sweeping = true
+                }
+            }
     }
 }
 

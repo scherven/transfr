@@ -34,6 +34,12 @@ struct InputView: View {
     @State private var stationLatLon: (lat: Double, lon: Double)?
     @State private var resolvedForStation = ""
     @State private var resolvingWalk = false
+    /// The paste door's pre-navigation work: expanding a short link and resolving
+    /// its endpoints, which happens while the user is still standing on this
+    /// screen. Local state, like `resolvingWalk` — deliberately not `model.load`,
+    /// which since #17 also covers the journeys fetch that runs *after* we've
+    /// navigated away (see `ctaBusy`).
+    @State private var resolvingLink = false
 
     /// Station-autocomplete state, shared across the From/To/Station fields — one
     /// focused field owns the suggestion list at a time. `.link` joins in so the
@@ -603,8 +609,21 @@ struct InputView: View {
 
     private var ctaLabel: String { mode == .walk ? "Show walk" : "Find connections" }
 
-    /// The CTA shows a spinner while planning (type/paste) or resolving the walk.
-    private var ctaBusy: Bool { mode == .walk ? resolvingWalk : model.load == .loading }
+    /// The CTA shows a spinner only while work is happening *on this screen*.
+    ///
+    /// Since #17 a typed search navigates instantly and does its waiting on the
+    /// results screen, so there is nothing to spin for here — and gating on
+    /// `model.load == .loading` would actively hurt: pop back mid-search and the
+    /// CTA would sit disabled, unable to start the new search you came back to
+    /// make. The paste door still resolves its link before navigating, so it keeps
+    /// a spinner — its own, scoped to that hop.
+    private var ctaBusy: Bool {
+        switch mode {
+        case .walk:  return resolvingWalk
+        case .paste: return resolvingLink
+        case .type:  return false
+        }
+    }
 
     private var cta: some View {
         VStack(spacing: 8) {
@@ -616,7 +635,11 @@ struct InputView: View {
             Button {
                 switch mode {
                 case .walk:  Task { await showWalk() }
-                case .paste: Task { await model.planFromLink(link) }
+                case .paste: Task {
+                    resolvingLink = true
+                    defer { resolvingLink = false }
+                    await model.planFromLink(link)
+                }
                 case .type:  Task { await model.plan() }
                 }
             } label: {
