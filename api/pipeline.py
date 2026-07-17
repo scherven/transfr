@@ -71,6 +71,8 @@ def _transfer(a: TransferAssessment, fallback_station: Optional[str]) -> schemas
         relation_id=a.relation_id,
         arrival_platform=a.arrival_platform,
         departure_platform=a.departure_platform,
+        arrival_platform_actual=a.arrival_platform_actual,
+        departure_platform_actual=a.departure_platform_actual,
         layover_s=a.layover_s,
         walk_time_s=a.walk_time_s,
         walk_distance_m=a.walk_distance_m,

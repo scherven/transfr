@@ -43,6 +43,13 @@ class Transfer(BaseModel):
     relation_id: Optional[int] = None
     arrival_platform: Optional[str] = None
     departure_platform: Optional[str] = None
+    # The real platform sign when the feed's label above is an internal code the
+    # station map doesn't carry (e.g. Köln Hbf reports "89"/"88" for public tracks
+    # 7/6). Recovered by coordinate; null when the feed's label already is the real
+    # one. When present, show "platform <actual>" with <arrival_platform> as a "the
+    # operator lists it as N" hint.
+    arrival_platform_actual: Optional[str] = None
+    departure_platform_actual: Optional[str] = None
     layover_s: Optional[float] = None
     walk_time_s: Optional[float] = None
     walk_distance_m: Optional[float] = None
