@@ -27,6 +27,11 @@ enum LaunchPhase {
     static let hold: Double = 2.35       // finished wordmark — the END POSE (shorter pause before the fly)
     static let fly: Double = 0.55        // the end pose flies up onto the app title
     static let flyEnd: Double = 2.90     // hold + fly — the hand-off to InputView
+    /// The app phases in during the *back* of the fly: the backdrop holds opaque for
+    /// this fraction of the fly after it begins (so the mark visibly lifts off before
+    /// the main screen shows through), then clears — finishing as the mark lands. Turn
+    /// this down for an earlier reveal, up for a later one. See `backdropOpacity`.
+    static let revealDelayFraction: Double = 0.35
     /// Reduced-motion: how long to show the static end pose before revealing the app.
     static let reduceHold: Double = 0.8
 }
@@ -121,6 +126,21 @@ enum LaunchGeometry {
         if t <= LaunchPhase.hold { return 0 }
         if t >= LaunchPhase.flyEnd { return 1 }
         return easeFly((t - LaunchPhase.hold) / LaunchPhase.fly)
+    }
+
+    /// Opacity of the opaque launch backdrop (the paper that hides the app during the
+    /// mark). It stays opaque through the write, the end pose, AND a short beat after
+    /// the fly begins (`revealDelayFraction` of the fly) — so the mark visibly lifts off
+    /// before the app shows through — then clears over the back of the fly, reaching 0
+    /// exactly as the mark lands. So the main screen phases in *slightly after* the
+    /// movement starts and is fully shown the instant the mark touches down. The mark is
+    /// drawn separately and stays fully opaque, so it still visibly lands and then hands
+    /// off to InputView's identical (now-revealed) title.
+    static func backdropOpacity(at t: Double) -> Double {
+        let revealStart = LaunchPhase.hold + LaunchPhase.fly * LaunchPhase.revealDelayFraction
+        if t <= revealStart { return 1 }
+        if t >= LaunchPhase.flyEnd { return 0 }
+        return 1 - smooth((t - revealStart) / (LaunchPhase.flyEnd - revealStart))
     }
 
     /// The finished wordmark's tight bounding box in STAGE (360x440) coords at the
@@ -405,16 +425,26 @@ public struct LaunchView: View {
         // resolved `targetRect`; the inset that keeps the mark off the edges lives
         // inside LaunchMark's fit.
         GeometryReader { geo in
-            ZStack {
-                Theme.paper
+            Group {
                 if reduceMotion {
-                    // Static end pose already parked on the title, so the reveal is
-                    // an in-place crossfade rather than any motion.
-                    LaunchMark(t: LaunchPhase.flyEnd, targetRect: targetRect)
+                    // No motion to sync with: keep the opaque backdrop and let the
+                    // reveal be the in-place crossfade at `finish()`.
+                    ZStack {
+                        Theme.paper
+                        LaunchMark(t: LaunchPhase.flyEnd, targetRect: targetRect)
+                    }
                 } else {
                     TimelineView(.animation) { timeline in
                         let t = min(timeline.date.timeIntervalSince(startDate), LaunchPhase.flyEnd)
-                        LaunchMark(t: t, targetRect: targetRect)
+                        ZStack {
+                            // The backdrop fades out *as the mark flies onto the title*,
+                            // so the main screen loads into view during the move and is
+                            // fully shown the moment the mark lands. The mark stays fully
+                            // opaque (drawn on top), so it still visibly lands and then
+                            // hands off to InputView's identical title underneath.
+                            Theme.paper.opacity(LaunchGeometry.backdropOpacity(at: t))
+                            LaunchMark(t: t, targetRect: targetRect)
+                        }
                     }
                 }
             }
@@ -444,6 +474,19 @@ struct WordmarkAnchorKey: PreferenceKey {
     static let defaultValue: Anchor<CGRect>? = nil
     static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
         value = value ?? nextValue()
+    }
+}
+
+/// True while the cold-launch overlay is still playing (RootView drives it from
+/// `showLaunch`). InputView reads it to keep its OWN "transfr" title hidden until the
+/// flying launch mark lands — so during the fly the mark is the only wordmark on
+/// screen (no doubling as the app reveals underneath), and the two swap at the
+/// hand-off. Defaults to false, so the title is visible whenever there's no launch.
+struct LaunchingKey: EnvironmentKey { static let defaultValue = false }
+extension EnvironmentValues {
+    var isLaunching: Bool {
+        get { self[LaunchingKey.self] }
+        set { self[LaunchingKey.self] = newValue }
     }
 }
 

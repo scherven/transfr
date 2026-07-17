@@ -9,6 +9,10 @@ import TransfrCore
 struct InputView: View {
     @Environment(TripModel.self) private var model
     @Environment(LocationManager.self) private var location
+    /// While the cold-launch mark is still flying, this view's own "transfr" title
+    /// stays hidden so the flying mark is the only wordmark on screen; it fades in as
+    /// the launch hands off (see `WordmarkAnchorKey` / LaunchView).
+    @Environment(\.isLaunching) private var isLaunching
 
     enum Mode: String, CaseIterable, Identifiable { case type, paste, walk
         var id: String { rawValue }
@@ -66,9 +70,19 @@ struct InputView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 // The brand wordmark — the SAME mark the launch animation lands, so
-                // the fly-up hand-off is pixel-identical. Its frame is the fly target.
+                // the fly-up hand-off is pixel-identical. Its frame is the fly target,
+                // so we keep publishing the anchor (opacity doesn't change layout) but
+                // hold it invisible until the flying mark lands, then fade it in as the
+                // overlay fades out — a seamless swap of two identical marks.
                 Wordmark(height: 40)
                     .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
+                    .opacity(isLaunching ? 0 : 1)
+                    // Snap (don't fade) at the hand-off: the title appears at full opacity
+                    // the instant the launch ends, so it's a solid floor under the identical
+                    // launch mark as the overlay fades out on top. Fading it in would instead
+                    // cross-dissolve two ~half-opaque copies of the mark — the composite only
+                    // ~75% opaque — which reads as a brief lightening of the blue (the flash).
+                    .animation(nil, value: isLaunching)
                     .padding(.top, 4)
 
                 SegmentedControl(options: Mode.allCases, selection: $mode) { $0.label }

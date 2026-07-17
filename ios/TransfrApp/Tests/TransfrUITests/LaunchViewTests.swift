@@ -90,6 +90,24 @@ struct LaunchViewTests {
         #expect(box.width >= target.width - 0.5 || box.height >= target.height - 0.5)  // …touching one axis
     }
 
+    /// The opaque backdrop holds through the write, the end pose, AND a short beat into
+    /// the fly (so the mark lifts off before the app shows), then clears over the back
+    /// of the fly — reaching 0 exactly as the mark lands. So the main screen phases in
+    /// slightly after the movement begins and is fully shown the moment it touches down.
+    @Test func backdropClearsInTheBackOfTheFly() {
+        #expect(LaunchGeometry.backdropOpacity(at: LaunchPhase.writeEnd) == 1)  // opaque while writing
+        #expect(LaunchGeometry.backdropOpacity(at: LaunchPhase.hold) == 1)      // opaque as the fly begins
+        // Still fully opaque a touch into the fly — the reveal is deliberately delayed.
+        let delayed = LaunchPhase.hold + LaunchPhase.fly * LaunchPhase.revealDelayFraction * 0.5
+        #expect(LaunchGeometry.backdropOpacity(at: delayed) == 1)
+        #expect(LaunchGeometry.backdropOpacity(at: LaunchPhase.flyEnd) == 0)    // fully cleared on landing
+        #expect(LaunchGeometry.backdropOpacity(at: LaunchPhase.flyEnd + 1) == 0)
+        // Then it clears monotonically over the back of the fly.
+        let early = LaunchGeometry.backdropOpacity(at: LaunchPhase.hold + LaunchPhase.fly * 0.6)
+        let late = LaunchGeometry.backdropOpacity(at: LaunchPhase.hold + LaunchPhase.fly * 0.85)
+        #expect(early > late && late > 0 && early < 1)
+    }
+
     /// With no target (anchor not yet resolved) the mark stays put — the fly is a
     /// no-op and the launch still falls through to its centred pose.
     @Test func noTargetLeavesMarkCentred() {
