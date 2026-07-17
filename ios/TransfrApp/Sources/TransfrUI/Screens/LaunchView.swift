@@ -19,14 +19,14 @@ import SwiftUI
 // MARK: - Timeline (seconds)
 
 enum LaunchPhase {
-    static let a: Double = 0.35          // hold on the "t"
-    static let b: Double = 0.95          // camera dolly (t -> wordmark) finishes
-    static let writeStart: Double = 0.90 // pen starts writing (overlaps the dolly)
-    static let writeEnd: Double = 2.05   // pen finishes
-    static let settle: Double = 2.22     // red-dot "plant" as it lands
-    static let hold: Double = 3.05       // finished wordmark — the END POSE
+    static let a: Double = 0.30          // hold on the "t" (shorter — write starts sooner)
+    static let b: Double = 0.90          // camera dolly (t -> wordmark) finishes
+    static let writeStart: Double = 0.65 // pen starts writing (sooner; still overlaps the dolly)
+    static let writeEnd: Double = 1.85   // pen finishes
+    static let settle: Double = 2.02     // red-dot "plant" as it lands (0.17s after writeEnd)
+    static let hold: Double = 2.35       // finished wordmark — the END POSE (shorter pause before the fly)
     static let fly: Double = 0.55        // the end pose flies up onto the app title
-    static let flyEnd: Double = 3.60     // hold + fly — the hand-off to InputView
+    static let flyEnd: Double = 2.90     // hold + fly — the hand-off to InputView
     /// Reduced-motion: how long to show the static end pose before revealing the app.
     static let reduceHold: Double = 0.8
 }
@@ -38,7 +38,7 @@ enum LaunchGeometry {
     static let center = CGPoint(x: 180, y: 220)     // stage centre
     static let tFocus = CGPoint(x: 28, y: 34)       // the t's optical centre (Phase A)
     static let wordFocus = CGPoint(x: 134, y: 33)   // the whole wordmark's centre (Phase B)
-    static let scaleA: Double = 2.60                // icon scale (Phase A)
+    static let scaleA: Double = 2.25                // icon scale (Phase A) — the "t" doesn't zoom quite as large before the write
     static let scaleB: Double = 1.20                // wordmark scale (Phase B)
     static let start = CGPoint(x: 43, y: 58)        // red dot home: the t's bottom-right tip
     static let rest = CGPoint(x: 253, y: 33)        // red dot destination: end of the final r
@@ -57,6 +57,17 @@ enum LaunchGeometry {
     static func smooth(_ u: Double) -> Double { let x = clamp(u, 0, 1); return x * x * (3 - 2 * x) }
     /// ease-in-out sine (pen)
     static func easeWrite(_ u: Double) -> Double { let x = clamp(u, 0, 1); return -(cos(.pi * x) - 1) / 2 }
+    /// Cubic ease-in-out (easeInOutCubic) for the fly-to-title. More pronounced than
+    /// the camera's smoothstep, so the hand-off reads as a deliberate *curved* move —
+    /// a gentle acceleration out of the end pose, easing into the landing — rather
+    /// than a near-linear slide. Monotonic 0->1 with no overshoot, so the mark still
+    /// lands pixel-exact on the title.
+    static func easeFly(_ u: Double) -> Double {
+        let x = clamp(u, 0, 1)
+        if x < 0.5 { return 4 * x * x * x }
+        let f = -2 * x + 2
+        return 1 - f * f * f / 2
+    }
 
     // MARK: camera / writing / settle as pure functions of time
 
@@ -109,7 +120,7 @@ enum LaunchGeometry {
     static func landProgress(at t: Double) -> Double {
         if t <= LaunchPhase.hold { return 0 }
         if t >= LaunchPhase.flyEnd { return 1 }
-        return smooth((t - LaunchPhase.hold) / LaunchPhase.fly)
+        return easeFly((t - LaunchPhase.hold) / LaunchPhase.fly)
     }
 
     /// The finished wordmark's tight bounding box in STAGE (360x440) coords at the
