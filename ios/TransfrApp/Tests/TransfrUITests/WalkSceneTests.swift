@@ -164,12 +164,15 @@ struct WalkSceneTests {
         #expect(vn.icon == "questionmark.circle")
     }
 
-    /// The 3D's floors must actually separate — "exploded floors" is the feature.
+    /// The 3D's floors must stay clearly stacked — "exploded floors" is the feature.
     ///
-    /// `levelUnit` was a constant 20 while the thing it has to clear (the iso-
-    /// projected footprint) is data- and angle-dependent, so Berlin's −2/−1/0 fused
-    /// into one plate. Projected through the real `IsoFit`, not the formula: two
-    /// adjacent floors' plates must not share any screen-y, at any orbit angle.
+    /// `levelUnit` was a constant 20 while the thing it tracks (the iso-projected
+    /// footprint) is data- and angle-dependent, so Berlin's −2/−1/0 fused into one
+    /// plate (#53). It now scales with the footprint, but lifts by ~a third of it
+    /// (not the old full clearance) so risers aren't stretched — floors deliberately
+    /// *overlap*, yet each must still sit distinctly above the one below. Projected
+    /// through the real `IsoFit`, not the formula: every floor's plate is lifted
+    /// above the floor below by a readable fraction of a plate's depth, at any orbit.
     @Test func exploded3DFloorsDoNotFuse() throws {
         let s = try Self.scene("viz_berlin_1_16")
         let size = CGSize(width: 360, height: 300)
@@ -187,12 +190,18 @@ struct WalkSceneTests {
                 }
                 return (lo, hi)
             }
-            // Screen-y grows downward, so the upper floor's plate must end above
-            // where the lower floor's plate begins.
+            // Screen-y grows downward, so the upper floor sits at smaller y. Each
+            // floor's whole plate must be shifted up from the one below (stacked, not
+            // fused) by a clear fraction of a plate's depth — the plates now overlap,
+            // but a one-floor lift is never so small the floors read as one.
             for level in s.levelsAsc.dropLast() {
                 let lower = plateY(level), upper = plateY(level + 1)
-                #expect(upper.hi < lower.lo,
-                        "angle \(angle): L\(level+1) plate (…\(upper.hi)) overlaps L\(level) (\(lower.lo)…)")
+                let depth = lower.hi - lower.lo             // one plate's screen-y span
+                let lift  = lower.lo - upper.lo             // how far the upper floor rises
+                #expect(upper.hi < lower.hi && upper.lo < lower.lo,
+                        "angle \(angle): L\(level+1) not stacked above L\(level)")
+                #expect(lift >= 0.25 * depth,
+                        "angle \(angle): L\(level+1) lift \(lift) < ¼ of plate depth \(depth) — floors nearly fused")
             }
         }
     }
