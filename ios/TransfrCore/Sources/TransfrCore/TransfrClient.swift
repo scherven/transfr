@@ -148,7 +148,7 @@ public struct TransfrClient: Sendable {
     /// transfer's drawable walk geometry (the `viz_export` document). Keyed by the
     /// triple a `Transfer` already carries, so callers forward them verbatim.
     public func walk(relationId: Int, from: String, to: String,
-                     stepFree: Bool = false) async throws -> WalkResult {
+                     stepFree: Bool = false, allPlatforms: Bool = false) async throws -> WalkResult {
         var comps = URLComponents(url: baseURL.appendingPathComponent("walk"),
                                   resolvingAgainstBaseURL: false)
         comps?.queryItems = [
@@ -156,6 +156,7 @@ public struct TransfrClient: Sendable {
             URLQueryItem(name: "from_platform", value: from),
             URLQueryItem(name: "to_platform", value: to),
             URLQueryItem(name: "step_free", value: stepFree ? "true" : "false"),
+            URLQueryItem(name: "all_platforms", value: allPlatforms ? "true" : "false"),
         ]
         return try await get(comps?.url)
     }

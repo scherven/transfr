@@ -201,6 +201,18 @@ Persisted and real, but several preferences are **not yet applied**:
   ~~**Add:** let the user query a single station.~~ — **done** (#10).
 - 🔴 **Offline & regions** (`OfflineRegionsView`) — static cards; no real region
   download, prefetch, or storage accounting. 🚧 device-side + packaging work.
+- 🟢 **3D station map** — the old static iso viewer is replaced everywhere by the interactive
+  `IsoGeometryCanvas`: one-finger **pan**, pinch/button **zoom**, two-finger-twist **rotate**,
+  a **level-select** chip row (isolate a floor), and **every platform labelled + lifted**
+  (server `Way.ref`/`Way.level`); a walk shows only walk-relevant connectors (`Way.walkRelevant`),
+  browse shows all. New **Station map (3D)** screen (`StationMapView`) in the Advanced hub —
+  search a station, browse its whole layout (the `all_platforms` `/walk` flag pulls in every
+  platform). **Follow-up:** not yet visually verified in-sim (build-only — UI snapshot tests
+  are Xcode-only here).
+- 🔴 **[deferred] Bring back POIs on the station map** — facility pins (food / ATM /
+  toilets / lift) are intentionally hidden on the walk view for now to cut clutter. The
+  data already exists (`viz_export` `details` layer, same as **Nearest facility** above);
+  re-surface them as a toggleable layer once the station-map screen is built.
 - **Placement:** move **Advanced** to a button next to Settings, or go tab-based. → #26.
 
 ## 8. Offline & caching (cross-cutting)

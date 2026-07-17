@@ -104,16 +104,9 @@ struct WalkView: View {
             }
         case .threeD:
             Panel(padding: 12) {
-                VStack(spacing: 10) {
-                    stageBox(height: 260) {
-                        if let scene { IsoGeometryCanvas(scene: scene) }
-                        else { threeDPlaceholder }
-                    }
-                    if scene != nil {
-                        Text("Exploded floors, drawn from the walk's real geometry — the same viz_export the Section and Levels tabs project.")
-                            .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                stageBox(height: 260) {
+                    if let scene { IsoGeometryCanvas(scene: scene) }
+                    else { threeDPlaceholder }
                 }
             }
         }
