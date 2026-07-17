@@ -14,12 +14,10 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 0) {
                 SectionHeader(text: "Getting around")
-                SettingRow(icon: "figure.walk", title: "Stairs-free routes",
-                           subtitle: "Route via lifts and ramps") {
+                SettingRow(icon: "figure.walk", title: "Stairs-free routes") {
                     TransfrToggle(isOn: $s.stepFree)
                 }.padding(.bottom, 8)
-                SettingStack(icon: "figure.walk.motion", title: "Walking pace",
-                             subtitle: "Assumed pace between platforms") {
+                SettingStack(icon: "figure.walk.motion", title: "Walking pace") {
                     SegmentedControl(options: SettingsStore.Pace.allCases, selection: $s.pace) { $0.label }
                 }.padding(.bottom, 8)
                 SettingRow(icon: "stairs", title: "Prefer escalators",
@@ -35,12 +33,10 @@ struct SettingsView: View {
                 }
 
                 SectionHeader(text: "Appearance")
-                SettingStack(icon: "moon.stars", title: "Theme",
-                             subtitle: "Light, dark, or system") {
+                SettingStack(icon: "moon.stars", title: "Theme") {
                     SegmentedControl(options: SettingsStore.ThemeMode.allCases, selection: $s.theme) { $0.label }
                 }.padding(.bottom, 8)
-                SettingStack(icon: "ruler", title: "Distance units",
-                             subtitle: "Shown on walks and platforms") {
+                SettingStack(icon: "ruler", title: "Distance units") {
                     SegmentedControl(options: SettingsStore.Units.allCases, selection: $s.units) { $0.label }
                 }
 
