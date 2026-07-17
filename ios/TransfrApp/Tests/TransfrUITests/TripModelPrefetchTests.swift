@@ -17,11 +17,12 @@ final class TripModelStreamingTests: XCTestCase {
         private(set) var assessCalls = 0
         init(assessDelayNs: UInt64 = 0) { self.assessDelayNs = assessDelayNs }
 
-        func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
+        func journeys(from: String, to: String, when: Date?, assess: Bool,
+                      noElevators: Bool = false) async throws -> JourneysResponse {
             let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
             return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
         }
-        func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] {
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
             assessCalls += 1
             if assessDelayNs > 0 { try? await Task.sleep(nanoseconds: assessDelayNs) }
             return interchanges.map {

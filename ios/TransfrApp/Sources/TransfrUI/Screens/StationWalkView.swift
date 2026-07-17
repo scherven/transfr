@@ -5,7 +5,7 @@ import TransfrCore
 /// station (autocomplete → `/station-platforms` resolves its relation + real
 /// platforms), pick a source platform, and `/station-walk` runs one pathfind from
 /// it to every other platform — distance / walk time to each, sorted nearest-first,
-/// with a step-free marker. Tapping a reachable row opens the full walk view (§6.5)
+/// with an "avoid lifts" marker. Tapping a reachable row opens the full walk view (§6.5)
 /// for the real `(relation, from, to)`. Degrades gracefully: an unmapped station or
 /// the offline sample tier still populates (sample rows are synthesized; a tapped
 /// row falls back to the schematic).
@@ -39,9 +39,9 @@ struct StationWalkView: View {
     }
 
     /// A change to any of these re-runs the pathfind: the resolved station, the
-    /// source platform, or the step-free preference (a different, elevator-free route).
+    /// source platform, or the "avoid lifts" preference (a different, elevator-free route).
     private struct FetchKey: Hashable { var station: String; var source: String; var stepFree: Bool }
-    private var fetchKey: FetchKey { .init(station: resolvedForStation, source: source, stepFree: settings.stepFree) }
+    private var fetchKey: FetchKey { .init(station: resolvedForStation, source: source, stepFree: settings.avoidElevators) }
 
     var body: some View {
         ScrollView {
@@ -239,8 +239,8 @@ struct StationWalkView: View {
         .padding(.bottom, 6)
     }
 
-    /// Source pin, an unreachable ✕, the green step-free figure (when Stairs-free is
-    /// on — every found row is then routed step-free), or a tap chevron otherwise.
+    /// Source pin, an unreachable ✕, the green stairs figure (when Avoid lifts is
+    /// on — every found row is then routed without lifts), or a tap chevron otherwise.
     @ViewBuilder private func marker(found: Bool, isSource: Bool) -> some View {
         if isSource {
             Image(systemName: "mappin.circle.fill").font(.system(size: 12))
@@ -248,8 +248,8 @@ struct StationWalkView: View {
         } else if !found {
             Image(systemName: "xmark.circle").font(.system(size: 12))
                 .foregroundStyle(Theme.miss.opacity(0.7)).frame(width: 16)
-        } else if settings.stepFree {
-            Image(systemName: "figure.roll").font(.system(size: 12))
+        } else if settings.avoidElevators {
+            Image(systemName: "figure.stairs").font(.system(size: 12))
                 .foregroundStyle(Theme.go).frame(width: 16)
         } else {
             Image(systemName: "chevron.right").font(.system(size: 11, weight: .bold))
@@ -284,8 +284,8 @@ struct StationWalkView: View {
 
     private var note: String {
         let base = "Tap a reachable platform to see the walk as a full 3D view."
-        return settings.stepFree
-            ? base + " Routed step-free; the green figure marks a step-free reachable platform."
+        return settings.avoidElevators
+            ? base + " Routed without lifts; the green figure marks a reachable platform."
             : base
     }
 
@@ -363,7 +363,7 @@ struct StationWalkView: View {
         loadingWalk = true
         defer { loadingWalk = false }
         walk = await model.stationWalk(lat: coord.lat, lon: coord.lon,
-                                       fromPlatform: source, stepFree: settings.stepFree)
+                                       fromPlatform: source, stepFree: settings.avoidElevators)
     }
 
     /// Open the full walk view for a real `(relation, from, to)`. relationId 0

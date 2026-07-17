@@ -108,7 +108,7 @@ struct ARView: View {
     }
 
     private func loadBoarding() async {
-        guard let t = transfer, let key = WalkKey(transfer: t, stepFree: settings.stepFree) else { return }
+        guard let t = transfer, let key = WalkKey(transfer: t, stepFree: settings.avoidElevators) else { return }
         boarding = await model.walk(for: key)?.boarding
     }
 

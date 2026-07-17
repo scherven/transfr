@@ -73,6 +73,12 @@ public final class TripModel {
     public var walkLookup: WalkLookup?
 
     private let repo: JourneyRepository
+    /// The routing profile the current `response` was searched under, captured at
+    /// `plan()` time. The streamed verdicts must use the SAME profile as the
+    /// search that produced the itineraries — reading the live setting per
+    /// `/assess` call instead would let a mid-stream toggle flip leave one
+    /// itinerary holding a mix of with-lift and lift-free verdicts.
+    private var plannedAvoidElevators = false
     /// Expands a pasted short link (HTTP redirect) before parsing. Injectable so a
     /// test can supply a stub instead of hitting the network.
     private let linkExpander: LinkExpanding
@@ -97,12 +103,18 @@ public final class TripModel {
     /// Progressive: fetches the itineraries with `assess=false` so the list shows
     /// the instant the search returns (no waiting on the transfer pathfinding),
     /// then streams the real verdicts in behind it.
-    public func plan() async {
+    ///
+    /// `avoidElevators` is the caller's `SettingsStore.avoidElevators` — the
+    /// lift-free routing profile. It changes the VERDICTS, not just the drawn
+    /// walk, so it is captured for the whole search (see `plannedAvoidElevators`).
+    public func plan(avoidElevators: Bool = false) async {
         load = .loading
         verdictTask?.cancel()
         selectedIndex = nil
+        plannedAvoidElevators = avoidElevators
         do {
-            let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false)
+            let resp = try await repo.journeys(from: origin, to: destination, when: departure,
+                                               assess: false, noElevators: avoidElevators)
             response = resp
             load = .loaded
             path = [.results]
@@ -122,7 +134,7 @@ public final class TripModel {
     /// `RouteLinkParser`, and converges on the same `plan()` path as typed input.
     /// Fails soft — a bad or unsupported link surfaces a message on the CTA, never
     /// a crash.
-    public func planFromLink(_ raw: String) async {
+    public func planFromLink(_ raw: String, avoidElevators: Bool = false) async {
         load = .loading
         let parsed: RouteLinkParser.ParsedRouteLink
         do {
@@ -147,7 +159,7 @@ public final class TripModel {
         usingCurrentLocation = false
         originUserEdited = true
         if let dep = parsed.departure { departure = dep }
-        await plan()
+        await plan(avoidElevators: avoidElevators)
     }
 
     /// Expand (only if a short link) then parse. Pure parsing lives in
@@ -285,10 +297,11 @@ public final class TripModel {
 
     private func runVerdictStream(_ work: [(j: Int, t: Int, ic: AssessInterchange)]) async {
         let repo = self.repo
+        let noElevators = plannedAvoidElevators   // the search's profile, not the live setting
         await withTaskGroup(of: (Int, Int, Transfer?).self) { group in
             for item in work {
                 let (j, t, ic) = (item.j, item.t, item.ic)
-                group.addTask { (j, t, (try? await repo.assess([ic]))?.first) }
+                group.addTask { (j, t, (try? await repo.assess([ic], noElevators: noElevators))?.first) }
             }
             for await (j, t, transfer) in group {
                 if Task.isCancelled { return }

@@ -80,7 +80,7 @@ def _transfer(a: TransferAssessment, fallback_station: Optional[str]) -> schemas
 
 
 def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
-            buffer_s: float, algorithm: str,
+            buffer_s: float, algorithm: str, avoid_elevators: bool = False,
             resolve_cache: Dict[Any, Any] = None) -> schemas.Transfer:
     arr, dep = arrive.get("destination") or {}, depart.get("origin") or {}
     a = assess_transfer(
@@ -89,7 +89,8 @@ def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
         arr_platform=arrive.get("arrival_platform"), arr_time=arrive.get("arrival"),
         dep_lat=dep.get("latitude"), dep_lon=dep.get("longitude"),
         dep_platform=depart.get("departure_platform"), dep_time=depart.get("departure"),
-        buffer_s=buffer_s, algorithm=algorithm, resolve_cache=resolve_cache,
+        buffer_s=buffer_s, algorithm=algorithm, avoid_elevators=avoid_elevators,
+        resolve_cache=resolve_cache,
     )
     return _transfer(a, arr.get("name"))
 
@@ -114,11 +115,17 @@ def _pending_transfer(arrive: Dict[str, Any], depart: Dict[str, Any]) -> schemas
 def enrich(conn, search_result: Dict[str, Any], *,
            buffer_s: float = DEFAULT_BUFFER_S,
            algorithm: str = DEFAULT_ALGORITHM,
+           avoid_elevators: bool = False,
            assess: bool = True) -> schemas.JourneysResponse:
     """Build the typed journeys response. With `assess=True` every change of train
     is walk-assessed (the full product path). With `assess=False` the transfers
     come back `pending` -- no DB, no pathfinding -- so the itinerary list renders
-    instantly and the client streams the verdicts in afterwards via `/assess`."""
+    instantly and the client streams the verdicts in afterwards via `/assess`.
+
+    `avoid_elevators` selects core/'s --no-elevators profile for every transfer
+    walk (a lift is not traversable; route over stairs/escalators/ramps), so the
+    whole response's verdicts honour a "no elevators" preference (the
+    `assess=False` pending pass has no walk, so it's unaffected)."""
     journeys_out: List[schemas.Journey] = []
     # One change of train (same station + platforms) commonly recurs across a
     # search's journeys; its walk is clock-independent, so pathfind it once and
@@ -127,7 +134,7 @@ def enrich(conn, search_result: Dict[str, Any], *,
     for j in search_result.get("journeys", []):
         if assess:
             transfers = [
-                _assess(conn, arrive, depart, buffer_s, algorithm, resolve_cache)
+                _assess(conn, arrive, depart, buffer_s, algorithm, avoid_elevators, resolve_cache)
                 for arrive, depart in interchanges(j)
             ]
         else:
@@ -154,11 +161,15 @@ def enrich(conn, search_result: Dict[str, Any], *,
 
 def assess_interchanges(conn, interchanges_in: List["schemas.AssessInterchange"], *,
                         buffer_s: float = DEFAULT_BUFFER_S,
-                        algorithm: str = DEFAULT_ALGORITHM) -> schemas.AssessResponse:
+                        algorithm: str = DEFAULT_ALGORITHM,
+                        avoid_elevators: bool = False) -> schemas.AssessResponse:
     """Assess a batch of already-searched changes of train (the `/assess`
     endpoint): the same per-transfer work `enrich` does, but keyed on the
     interchange fields the client already holds, so verdicts can stream in behind
-    a fast `/journeys?assess=false`. Shares one resolve cache across the batch."""
+    a fast `/journeys?assess=false`. Shares one resolve cache across the batch.
+    `avoid_elevators` routes every walk without lifts, so a "no elevators"
+    journey's streamed verdicts match what an `assess=True` search would have
+    returned."""
     resolve_cache: Dict[Any, Any] = {}
     out: List[schemas.Transfer] = []
     for ic in interchanges_in:
@@ -168,7 +179,8 @@ def assess_interchanges(conn, interchanges_in: List["schemas.AssessInterchange"]
             arr_platform=ic.arr_platform, arr_time=ic.arr_time,
             dep_lat=ic.dep_lat, dep_lon=ic.dep_lon,
             dep_platform=ic.dep_platform, dep_time=ic.dep_time,
-            buffer_s=buffer_s, algorithm=algorithm, resolve_cache=resolve_cache,
+            buffer_s=buffer_s, algorithm=algorithm, avoid_elevators=avoid_elevators,
+            resolve_cache=resolve_cache,
         )
         out.append(_transfer(a, ic.at_station))
     return schemas.AssessResponse(transfers=out)

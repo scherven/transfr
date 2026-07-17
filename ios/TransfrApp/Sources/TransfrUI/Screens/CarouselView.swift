@@ -69,9 +69,9 @@ struct TransferDetailCard: View {
                 buttons
             }
         }
-        // Same key as the walk screen: flipping step-free refetches the elevator-
+        // Same key as the walk screen: flipping "avoid lifts" refetches the elevator-
         // free route, whose step-off (and level note) can differ.
-        .task(id: settings.stepFree) { await loadWalk() }
+        .task(id: settings.avoidElevators) { await loadWalk() }
     }
 
     /// A step-free / stairs summary from the walk's real `transitions` — nil until
@@ -87,7 +87,7 @@ struct TransferDetailCard: View {
     }
 
     private func loadWalk() async {
-        guard let key = WalkKey(transfer: transfer, stepFree: settings.stepFree) else { return }
+        guard let key = WalkKey(transfer: transfer, stepFree: settings.avoidElevators) else { return }
         walk = await model.walk(for: key)
     }
 

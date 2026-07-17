@@ -45,9 +45,9 @@ struct WalkLookupView: View {
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle(lookup?.station ?? "Walk").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
-        // Re-keyed on `stepFree` so flipping the preference refetches the
+        // Re-keyed on `avoidElevators` so flipping the preference refetches the
         // elevator-free variant (a different route, hence different geometry).
-        .task(id: settings.stepFree) { await load() }
+        .task(id: settings.avoidElevators) { await load() }
     }
 
     private var principal: some View {
@@ -96,10 +96,10 @@ struct WalkLookupView: View {
                         lead: "One level, step-free.",
                         body: " Walk straight across — no stairs between Platform \(fromRef) and \(toRef).")
             } else {
-                infoBox(icon: settings.stepFree ? "figure.roll" : "figure.walk", tint: Theme.go, bg: Theme.goSoft,
+                infoBox(icon: settings.avoidElevators ? "figure.stairs" : "figure.walk", tint: Theme.go, bg: Theme.goSoft,
                         lead: connectorSummary(verticals) + ".",
-                        body: settings.stepFree
-                            ? " Routed step-free (Stairs-free is on in Settings)."
+                        body: settings.avoidElevators
+                            ? " Routed without lifts (Avoid lifts is on in Settings)."
                             : " \(WalkScene.label(forLevel: s.startLevel)) → \(WalkScene.label(forLevel: s.endLevel)).")
             }
         } else if lookup?.relationId == 0 {
@@ -270,7 +270,7 @@ struct WalkLookupView: View {
         defer { loading = false }
         guard let lk = lookup, lk.relationId != 0 else { scene = nil; return }
         let key = WalkKey(relationId: lk.relationId, fromPlatform: lk.fromPlatform,
-                          toPlatform: lk.toPlatform, stepFree: settings.stepFree)
+                          toPlatform: lk.toPlatform, stepFree: settings.avoidElevators)
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s

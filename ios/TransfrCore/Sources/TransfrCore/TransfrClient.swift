@@ -44,13 +44,18 @@ public struct TransfrClient: Sendable {
     /// (no server-side pathfinding), to be filled in via `assess(_:)` — the
     /// progressive load. Defaults true (the full product path).
     public func journeys(from: String, to: String, when: String? = nil,
-                         max: Int? = nil, assess: Bool = true) async throws -> JourneysResponse {
+                         max: Int? = nil, assess: Bool = true,
+                         noElevators: Bool = false) async throws -> JourneysResponse {
         var comps = URLComponents(url: baseURL.appendingPathComponent("journeys"),
                                   resolvingAgainstBaseURL: false)
         var items = [URLQueryItem(name: "from", value: from), URLQueryItem(name: "to", value: to)]
         if let when { items.append(URLQueryItem(name: "time", value: when)) }
         if let max { items.append(URLQueryItem(name: "max", value: String(max))) }
         if !assess { items.append(URLQueryItem(name: "assess", value: "false")) }
+        // The routing profile: routes every transfer's VERDICT without lifts, not
+        // just the drawn walk. Omitted when false, so an ordinary search is
+        // byte-for-byte the request it always was.
+        if noElevators { items.append(URLQueryItem(name: "no_elevators", value: "true")) }
         comps?.queryItems = items
         return try await get(comps?.url)
     }
@@ -180,12 +185,14 @@ public struct TransfrClient: Sendable {
     /// fast `/journeys?assess=false` deferred). Called with one interchange per
     /// request, fired concurrently, it fills a journey's verdicts in as each
     /// pathfind returns.
-    public func assess(_ interchanges: [AssessInterchange]) async throws -> AssessResponse {
+    public func assess(_ interchanges: [AssessInterchange],
+                       noElevators: Bool = false) async throws -> AssessResponse {
         let url = baseURL.appendingPathComponent("assess")
         var req = authorized(url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try TransfrJSON.encoder.encode(AssessRequest(interchanges: interchanges))
+        req.httpBody = try TransfrJSON.encoder.encode(
+            AssessRequest(interchanges: interchanges, noElevators: noElevators))
         let (data, response) = try await transport.data(for: req)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw TransfrClientError.badStatus(http.statusCode)
