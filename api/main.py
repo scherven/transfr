@@ -22,7 +22,7 @@ Endpoints:
                                                  the 'full station walk' tool: from one
                                                  source platform, the walk to every other
                                                  platform at the nearest station,
-                                                 nearest-first (one pathfind each)
+                                                 in platform-ref order (one pathfind each)
   GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
                                                  station, nearest first; degrades to a
                                                  typed reason when the POI layer is absent
@@ -224,7 +224,7 @@ def get_station_walk(
 ):
     """The 'full station walk' advanced tool: from one source platform, the real
     walk to every OTHER platform at the station nearest (lat, lon), one pathfind
-    each, sorted nearest-first. Honest degradation: an unreachable platform is a
+    each, in platform-ref order. Honest degradation: an unreachable platform is a
     `found=False` row with core/'s reason; a coordinate with no station near it
     returns a top-level `found=False`. `step_free` routes elevator-free."""
     return build_station_walk(conn, lat, lon, from_platform, step_free)

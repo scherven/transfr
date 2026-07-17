@@ -4,7 +4,7 @@ import TransfrCore
 /// Full station walk — the prototype's `#s-stationwalk` (§6.10). Now LIVE: pick a
 /// station (autocomplete → `/station-platforms` resolves its relation + real
 /// platforms), pick a source platform, and `/station-walk` runs one pathfind from
-/// it to every other platform — distance / walk time to each, sorted nearest-first,
+/// it to every other platform — distance / walk time to each, in platform-ref order,
 /// with an "avoid lifts" marker. Tapping a reachable row opens the full walk view (§6.5)
 /// for the real `(relation, from, to)`. Degrades gracefully: an unmapped station or
 /// the offline sample tier still populates (sample rows are synthesized; a tapped

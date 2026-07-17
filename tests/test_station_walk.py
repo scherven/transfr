@@ -3,13 +3,13 @@ Tests for the 'full station walk' tool -- from one source platform, the walk to
 every other platform at a station (api/station_walk.py + GET /station-walk).
 
   * Offline: build_station_walk's shaping with the primitives stubbed --
-    skip-the-source, honest per-row degradation, nearest-first ordering, and the
+    skip-the-source, honest per-row degradation, platform-ref ordering, and the
     station-unresolved top-level failure. No DB.
   * Route-shape (TestClient): the HTTP contract -- routing, query validation,
     response shape -- with the builder stubbed (mirrors tests/test_api.py's
     /walk tests).
   * DB-gated (TRANSFR_DB=1): the real chain against transfr_eu -- the Berlin Hbf
-    coordinate reaches several platforms with sane times, sorted nearest-first.
+    coordinate reaches several platforms with sane times, in platform-ref order.
 """
 
 import os
@@ -104,12 +104,15 @@ def test_unreachable_platform_is_a_found_false_row_with_reason(monkeypatch):
     assert by_ref["99"].walk_time_s is None
 
 
-def test_rows_sorted_nearest_first_then_unreachable(monkeypatch):
+def test_rows_sorted_by_platform_ref_numeric_then_alphabetic(monkeypatch):
     _stub_station(monkeypatch)
+    # Refs arrive deliberately out of order. Rows come back in platform-ref
+    # order: numeric first, ascending ("2" before "10", NOT lexicographically),
+    # then alphabetic ("A", "D06"). "10" is unreachable and its distance would
+    # be smallest, proving a row sorts by its ref -- not its verdict or distance.
     monkeypatch.setattr(station_walk, "list_platform_refs",
-                        lambda cur, rel: ["1", "2", "3", "4", "5"])
-    # Distances deliberately out of ref order; "5" is unreachable.
-    dist = {"2": 120.0, "3": 15.0, "4": 60.0}
+                        lambda cur, rel: ["10", "2", "1", "A", "D06"])
+    dist = {"2": 120.0, "A": 15.0, "D06": 60.0}
 
     def _fake_path(conn, rel, src, dst, **kw):
         if dst in dist:
@@ -120,9 +123,9 @@ def test_rows_sorted_nearest_first_then_unreachable(monkeypatch):
     monkeypatch.setattr(station_walk, "find_shortest_path", _fake_path)
     resp = build_station_walk(_FakeConn(), *BERLIN_HBF, "1")
     order = [r.to_platform for r in resp.results]
-    # Reachable by ascending distance (3 < 4 < 2), then the unreachable one last.
-    assert order == ["3", "4", "2", "5"]
-    assert resp.results[-1].found is False
+    assert order == ["2", "10", "A", "D06"]
+    # The unreachable "10" keeps its numeric-ref slot, not shoved to the end.
+    assert resp.results[1].to_platform == "10" and resp.results[1].found is False
 
 
 def test_step_free_threads_avoid_elevators(monkeypatch):
@@ -252,9 +255,8 @@ def test_real_berlin_hbf_reaches_several_platforms():
         assert r.walk_distance_m and r.walk_distance_m > 0
         assert r.reason is None
 
-    # Nearest-first: reachable rows by ascending distance, all before any unreachable.
-    dists = [r.walk_distance_m for r in reachable]
-    assert dists == sorted(dists)
-    first_unreachable = next((i for i, r in enumerate(resp.results) if not r.found),
-                             len(resp.results))
-    assert all(resp.results[i].found for i in range(first_unreachable))
+    # Platform-ref order: rows come back naturally sorted by ref (numeric before
+    # alphabetic), the same order list_platform_refs returns them in.
+    from search_context import _natural_key
+    out_refs = [r.to_platform for r in resp.results]
+    assert out_refs == sorted(out_refs, key=_natural_key)
