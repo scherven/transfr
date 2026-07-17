@@ -302,16 +302,8 @@ struct InputView: View {
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
                             .focused($focused, equals: .link)
                     }
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                        Text("Reads the stops from a Maps or DB link, then rebuilds it with platform transfers.")
-                            .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                    }
                 }
             }
-            SectionHeader(text: "Recent")
-            recentRow(title: "Hamburg Hbf → Stuttgart Hbf", when: "yesterday")
-            recentRow(title: "Berlin Hbf → Basel SBB", when: "Mon")
         }
     }
 
@@ -427,18 +419,6 @@ struct InputView: View {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Finding this station's platforms…")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-            }
-        } else if !adaptedPlatforms.isEmpty {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                Text("\(adaptedPlatforms.count) platforms at \(lookupStation). Pick any two — we draw the walk between them, timed at your pace.")
-                    .font(.system(size: 12)).foregroundStyle(Theme.ink3)
-            }
-        } else {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
-                Text("Any two platforms at one station — we draw the walk between them, timed at your pace. Pick a station above to choose from its real platforms; names are free-form (5a, Gl 1).")
                     .font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
         }
