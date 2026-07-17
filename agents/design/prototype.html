@@ -206,6 +206,36 @@
   .jc-meta span{display:flex;align-items:center;gap:5px}
   .jc-meta svg{width:13px;height:13px}
 
+  /* ---------- RESULTS: search choreography (issue #17) ---------- */
+  /* #jList/#jSkel became .scr's flex child in place of the bare cards, so they
+     restate .scr's column gap — the settled list stays pixel-identical. */
+  #jList, #jSkel{display:flex; flex-direction:column; gap:14px}
+
+  /* Phase A — journeys themselves not back yet. */
+  .jcard.skel{cursor:default}
+  .jcard.skel:hover{border-color:var(--line); transform:none; box-shadow:none}
+  .sk{display:block; background:var(--panel-2); border-radius:7px; position:relative; overflow:hidden}
+  .sk::after{content:""; position:absolute; inset:0; transform:translateX(-100%);
+             background:linear-gradient(90deg,transparent,var(--panel-3),transparent); animation:shimmer 1.4s ease-in-out infinite}
+  @keyframes shimmer{100%{transform:translateX(100%)}}
+  .spin{display:inline-block; width:11px; height:11px; border-radius:50%; vertical-align:-1px; margin-right:7px;
+        border:1.6px solid var(--line); border-top-color:var(--ink-3); animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* Phase B — journeys have landed; each walk verdict is still resolving.
+     Pending is ink-3 on panel-2, deliberately NOT --nodata: nodata is the
+     *honest gap* (§7.5, D11) — a settled answer meaning "no platform feed" —
+     so reusing it for "still checking" would dress a transient state as a
+     locked verdict. Mirrors the shipped client's Verdict.pending
+     (Theme.swift:85/95, label :106, ellipsis icon :116). Cards stay tappable:
+     the journey is real, only its verdicts are in flight. */
+  .jcard.pending .jc-top .badge:not(.pend){display:none}
+  .jcard.pending .jc-meta .mono:not(.pend-tag){display:none}
+  /* the "1 unknown" card carries its node colours inline, hence !important */
+  .jcard.pending .xfer-node{color:var(--ink-3) !important; background:var(--panel-2) !important}
+  .badge.pend{color:var(--ink-3); background:var(--panel-2)}
+  .pend-tag{color:var(--ink-3)}
+
   /* ---------- JOURNEY (timeline) ---------- */
   .tl{display:flex; flex-direction:column; position:relative; padding-left:6px}
   .tl-row{display:grid; grid-template-columns:50px 16px 1fr; column-gap:11px; row-gap:0; position:relative}
@@ -492,6 +522,9 @@
   @media (prefers-reduced-motion:reduce){
     .screen{transition:opacity .01s}
     .ar-scan{animation:none}
+    /* the search indicators stay legible, they just stop moving (§ reduced motion) */
+    .sk::after{animation:none}
+    .spin{animation:none; border-color:var(--ink-3); opacity:.55}
     *{scroll-behavior:auto !important}
   }
 </style>
@@ -659,6 +692,11 @@
                 </div>
               </div>
 
+              <!-- The settled list. This static markup is the TERMINAL state, not the
+                   initial one: the 02 nav item and the journey back-chevron both land
+                   here directly, so loading must never be the default. #planCta drives
+                   the screen down into the search and back up (see planPhase). -->
+              <div id="jList">
               <div class="jcard best" data-go="journey">
                 <span class="best-tab">Best</span>
                 <div class="jc-top">
@@ -714,6 +752,7 @@
                   <span class="mono" style="margin-left:auto">no platform feed</span>
                 </div>
               </div>
+              </div><!-- /#jList -->
             </div>
           </section>
 
@@ -1848,6 +1887,90 @@
     planCta.setAttribute("data-go", m==="walk"?"walklookup":"results");
     planCtaLabel.textContent = m==="walk"?"Show the walk":"Find connections";
   });
+
+  // ---- search choreography (issue #17) --------------------------------------
+  // "Find connections" already navigates instantly — the delegated router below
+  // fires on click and go() reveals the next screen synchronously. What was
+  // missing is the *search*: the results screen simply appeared, fully settled,
+  // as if the answer had been there all along.
+  //
+  // This prototype is deliberately self-contained and offline-openable (there is
+  // no fetch() anywhere in the file), so the search is SIMULATED with timers. The
+  // shape it mimes is the real one — see memory `progressive-load-architecture`:
+  // journeys land first, then each walk verdict streams in and settles.
+  //
+  // Bound to the CTA element itself, so it runs at the target during bubbling —
+  // i.e. before the document-level router — and lays out the pending state
+  // *before* go() reveals the screen. There is no flash of settled content, and
+  // nav stays instant.
+  var jList=document.getElementById("jList");
+  var resSub=document.querySelector("#s-results .topbar .sub");
+  var SUB_DONE=resSub?resSub.textContent:"";
+  var PEND_BADGE='<span class="badge pend"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 12h.01M12 12h.01M18 12h.01"/></svg>Checking…</span>';
+  var timers=[], gen=0;
+  function at(ms,fn){ timers.push(setTimeout(fn,ms)); }
+
+  function skelCard(){
+    var d=document.createElement("div");
+    d.className="jcard skel"; d.setAttribute("aria-hidden","true");
+    d.innerHTML='<div class="jc-top"><span class="sk" style="width:46%;height:19px"></span>'+
+                '<span class="sk" style="width:62px;height:23px;border-radius:8px"></span></div>'+
+                '<div class="jc-flow"><span class="sk" style="width:40px;height:23px"></span>'+
+                '<span class="sk" style="width:106px;height:23px"></span>'+
+                '<span class="sk" style="width:86px;height:23px"></span></div>'+
+                '<div class="jc-meta"><span class="sk" style="width:56px;height:13px"></span>'+
+                '<span class="sk" style="width:70px;height:13px"></span></div>';
+    return d;
+  }
+
+  // Idempotent: the pending badge/tag are injected rather than authored into the
+  // cards, so the static markup stays the settled state and nothing needs to be
+  // stashed and restored.
+  function setPending(card,on){
+    card.classList.toggle("pending",on);
+    var b=card.querySelector(".badge.pend"); if(b) b.remove();
+    var t=card.querySelector(".pend-tag"); if(t) t.remove();
+    if(!on) return;
+    card.querySelector(".jc-top").insertAdjacentHTML("beforeend",PEND_BADGE);
+    var tag=document.createElement("span");
+    tag.className="mono pend-tag"; tag.style.marginLeft="auto"; tag.textContent="checking…";
+    card.querySelector(".jc-meta").appendChild(tag);
+  }
+
+  function planPhase(){
+    // Walk-only mode repoints the CTA at the walk lookup — no search to run.
+    if(!jList || planCta.getAttribute("data-go")!=="results") return;
+    var my=++gen;                                   // cancels any run still in flight
+    timers.forEach(clearTimeout); timers=[];
+    var stale=document.getElementById("jSkel"); if(stale) stale.remove();
+    var cards=[].slice.call(jList.querySelectorAll(".jcard"));
+
+    // A — searching: nothing is known yet, so the cards are skeletons.
+    var skel=document.createElement("div"); skel.id="jSkel";
+    cards.forEach(function(){ skel.appendChild(skelCard()); });
+    cards.forEach(function(c){ setPending(c,true); });
+    jList.style.display="none";
+    jList.parentNode.insertBefore(skel,jList);
+    if(resSub) resSub.innerHTML='<span class="spin"></span>Searching…';
+
+    // B — the journeys land. Times, changes and platforms are real; every walk
+    //     verdict is still resolving.
+    at(800,function(){
+      if(my!==gen) return;
+      skel.remove();
+      jList.style.display="";
+      if(resSub) resSub.textContent=SUB_DONE;
+    });
+
+    // C — verdicts settle one at a time, top-down, to the authored answers.
+    [400,900,1400].forEach(function(d,i){
+      at(800+d,function(){
+        if(my!==gen || !cards[i]) return;
+        setPending(cards[i],false);
+      });
+    });
+  }
+  planCta.addEventListener("click", planPhase);
 
   // swap from/to
   document.getElementById("swapBtn").addEventListener("click", function(){
