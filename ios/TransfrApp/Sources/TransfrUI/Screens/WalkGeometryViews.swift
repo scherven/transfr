@@ -412,15 +412,14 @@ struct IsoGeometryCanvas: View {
         .overlay(alignment: .topTrailing) { controls }
         .overlay(alignment: .bottom) { levelChips }
         .overlay(alignment: .top) {
-            // Emoji says the gesture; the word says what it does. Pinned to the top
-            // so it never collides with the level chips along the bottom.
-            Text("👆 Pan    🤏 Zoom    🔄 Rotate")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Theme.ink2)
-                .padding(.horizontal, 11).padding(.vertical, 5)
-                .background(Capsule().fill(Theme.panel.opacity(0.92)))
-                .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
-                .padding(.top, 8)
+            // One gray icon-label per gesture, no chip — kept at the top so they
+            // stay clear of the level chips along the bottom.
+            HStack(spacing: 14) {
+                Label("Pan", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                Label("Zoom", systemImage: "magnifyingglass")
+                Label("Rotate", systemImage: "rotate.3d")
+            }
+            .font(.system(size: 9.5)).foregroundStyle(Theme.ink3).padding(.top, 6)
         }
     }
 
