@@ -2,7 +2,8 @@ import SwiftUI
 
 /// The Advanced hub — the prototype's `#s-advanced` (§6.10). Power tools that
 /// answer *station* questions (not journey questions), all over the same
-/// `viz_export` / pathfinder. Reached from Settings → Power tools.
+/// `viz_export` / pathfinder. Reached from the Plan header — the shield button
+/// beside Settings (#26).
 struct AdvancedView: View {
     var body: some View {
         ScrollView {

@@ -5,7 +5,7 @@ import TransfrCore
 /// The planning screen — the prototype's "Where are you headed?" (`#s-input`,
 /// §6.1). Three ways in via a segmented control: **Type it** (from/to), **Paste
 /// link** (a maps/DB link → itinerary), and **Walk only** (station + two platform
-/// refs → the verdict-free walk, §6.9). Gear → Settings.
+/// refs → the verdict-free walk, §6.9). Gear → Settings; shield → Advanced (#26).
 struct InputView: View {
     @Environment(TripModel.self) private var model
     @Environment(LocationManager.self) private var location
@@ -145,6 +145,10 @@ struct InputView: View {
     private var header: some View {
         HStack {
             Spacer()
+            NavigationLink(value: Route.advanced) {
+                Image(systemName: "shield.lefthalf.filled").foregroundStyle(Theme.ink2)
+                    .frame(width: 32, height: 32).background(Circle().fill(Theme.panel2))
+            }
             NavigationLink(value: Route.settings) {
                 Image(systemName: "gearshape").foregroundStyle(Theme.ink2)
                     .frame(width: 32, height: 32).background(Circle().fill(Theme.panel2))
