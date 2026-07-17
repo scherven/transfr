@@ -47,6 +47,9 @@ public struct RootView: View {
         .environment(model)
         .environment(settings)
         .environment(location)
+        // Tell InputView the launch is playing, so it hides its own title until the
+        // flying mark lands on it (the mark is the sole wordmark during the fly).
+        .environment(\.isLaunching, showLaunch)
         .tint(Theme.accent)
         // The launch overlay reads InputView's "transfr" title frame (published as
         // a bounds anchor) so the finished mark can fly up and settle onto it —
