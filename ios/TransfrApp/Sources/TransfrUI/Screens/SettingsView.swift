@@ -52,11 +52,6 @@ struct SettingsView: View {
                     }
                 }
 
-                SectionHeader(text: "Power tools")
-                NavRow(icon: "shield.lefthalf.filled", title: "Advanced",
-                       subtitle: "Station walks · nearest facilities · offline data · map health",
-                       route: .advanced)
-
                 SectionHeader(text: "About")
                 NavRow(icon: "info.circle", title: "Attributions & data sources",
                        subtitle: "Map data © OpenStreetMap contributors · licences",
@@ -64,6 +59,12 @@ struct SettingsView: View {
             }
             .padding(20)
         }
+        // The page never *scrolls* sideways -- content width already equals the
+        // container's -- but it still rubber-bands sideways and springs back (#32).
+        // `axes:` defaults to `[.vertical]`, so the older `.scrollBounceBehavior(
+        // .basedOnSize)` never governed this axis. `.basedOnSize` bounces only when
+        // the content overflows, which horizontally it never does -> travel is zero.
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)

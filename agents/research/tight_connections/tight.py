@@ -37,7 +37,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# This file lives at agents/research/tight_connections/, i.e. four directory
+# levels below the repo root (which is what core/ and api/ import off).
+REPO = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # this dir (for iris)
 sys.path.insert(0, os.path.join(REPO, "core"))
 sys.path.insert(0, REPO)

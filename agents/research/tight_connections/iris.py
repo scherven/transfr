@@ -26,7 +26,9 @@ from typing import Dict, List, Optional, Tuple
 
 import requests
 
-REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# This file lives at agents/research/tight_connections/iris.py, i.e. four
+# directory levels below the repo root, which is where stations.csv lives.
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 STATIONS_CSV = os.path.join(REPO, "stations.csv")
 
 _session = requests.Session()

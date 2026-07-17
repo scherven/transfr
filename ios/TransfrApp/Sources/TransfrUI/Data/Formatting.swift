@@ -13,6 +13,33 @@ enum Fmt {
         return f
     }()
 
+    private static let weekday: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    private static let dayMonth: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB")
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
+    /// "Today" / "Yesterday" / a weekday inside the last week / "3 Jul" — the
+    /// relative day a past search was last run (#38). The weekday form stops at 6
+    /// days back, since at 7 the name would repeat today's and read as this week.
+    /// `now` is injectable so the boundary is testable.
+    static func relativeDay(_ date: Date, now: Date = Date()) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(date) { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date),
+                                      to: cal.startOfDay(for: now)).day ?? 0
+        return (0...6).contains(days) ? weekday.string(from: date) : dayMonth.string(from: date)
+    }
+
     /// Parse an ISO-8601 string (with or without a trailing Z / offset).
     static func date(_ iso: String?) -> Date? {
         guard let iso else { return nil }

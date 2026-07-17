@@ -9,12 +9,14 @@ import TransfrCore
 @MainActor
 @Observable
 public final class TripModel {
-    // Query
-    public var origin: String = "Hamburg Hbf"
-    public var destination: String = "Stuttgart Hbf"
+    // Query. Both ends start genuinely empty — the input fields carry real
+    // placeholders showing what an entry looks like, rather than shipping an
+    // example query that reads as something the user chose.
+    public var origin: String = ""
+    public var destination: String = ""
     public var departure: Date = TripModel.defaultDeparture()
 
-    // Current-location origin (design/route-maps.html §3). `usingCurrentLocation`
+    // Current-location origin (agents/design/route-maps.html §3). `usingCurrentLocation`
     // drives the "From" field's location treatment and the route map's live origin
     // dot; `originUserEdited` guards the first-launch default from clobbering a
     // station the user has typed.
@@ -80,11 +82,17 @@ public final class TripModel {
     /// Expands a pasted short link (HTTP redirect) before parsing. Injectable so a
     /// test can supply a stub instead of hitting the network.
     private let linkExpander: LinkExpanding
+    /// Past searches, recorded on every successful plan for one-tap reuse (#38).
+    /// Optional so a test (or a headless model) can skip persistence — the recording
+    /// is a no-op when absent.
+    private let recents: RecentSearchStore?
 
     public init(repository: JourneyRepository,
-                linkExpander: LinkExpanding = URLSessionLinkExpander()) {
+                linkExpander: LinkExpanding = URLSessionLinkExpander(),
+                recents: RecentSearchStore? = nil) {
         self.repo = repository
         self.linkExpander = linkExpander
+        self.recents = recents
     }
 
     public var journeys: [Journey] { response?.journeys ?? [] }
@@ -110,6 +118,11 @@ public final class TripModel {
             response = resp
             load = .loaded
             path = [.results]
+            // The query planned without error — remember it for one-tap reuse (#38).
+            // This is the single choke point typed, pasted and recent-row plans all
+            // converge on. A failed search throws above and is never recorded; a
+            // resolved-but-empty result still is (the endpoints were real).
+            recents?.record(origin: origin, destination: destination)
             streamVerdicts()
         } catch {
             load = .failed(message(for: error))

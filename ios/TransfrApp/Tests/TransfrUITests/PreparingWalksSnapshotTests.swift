@@ -34,6 +34,12 @@ final class PreparingWalksSnapshotTests: XCTestCase {
         func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
             throw RepositoryError.notAvailable("stationWalk")
         }
+        func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+            throw RepositoryError.notAvailable("facilities")
+        }
+        func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+            throw RepositoryError.notAvailable("stationHealth")
+        }
         func walk(for key: WalkKey) async throws -> WalkResult {
             WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
                        toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)

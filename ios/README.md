@@ -10,10 +10,10 @@ routing database and the `core/` pathfinder stay server-side; the phone consumes
 two stable JSON contracts and caches their outputs for offline use:
 
 - **`api/schemas.py`** → journeys / verdicts / station suggestions.
-- **`core/viz_export.py`** → one self-contained walk geometry per transfer, the
+- **`core/viz/viz_export.py`** → one self-contained walk geometry per transfer, the
   single input to all four walk renderers (section / per-level / 3D / AR).
 
-See `design/DESIGN.md` §13 for the full mapping and the data-tiering / offline
+See `agents/design/DESIGN.md` §13 for the full mapping and the data-tiering / offline
 strategy.
 
 ## `TransfrCore` (Swift Package)
@@ -27,7 +27,7 @@ ports cleanly if the app shell is ever rebuilt.
 |---|---|
 | `Verdict.swift` | `enum Verdict` + worst-wins `rolledUp()` (port of `api/pipeline.py:rollup_verdict`) |
 | `Contracts.swift` | `Journey`/`Leg`/`Transfer`/`Place`/… mirroring `api/schemas.py` |
-| `VizExport.swift` | `VizExport` mirroring the `core/viz_export.py` JSON (keystone contract) |
+| `VizExport.swift` | `VizExport` mirroring the `core/viz/viz_export.py` JSON (keystone contract) |
 | `TransfrJSON.swift` | the one configured `JSONDecoder`/`Encoder` (`.convertFromSnakeCase`) |
 | `TransfrClient.swift` | async `URLSession` client over `/journeys`, `/stations`, `/transfer`, `/walk`, `/walks` |
 

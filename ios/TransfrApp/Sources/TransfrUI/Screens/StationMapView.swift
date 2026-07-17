@@ -34,7 +34,7 @@ struct StationMapView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Explore a station in 3D")
                     .font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.ink)
-                Text("Search a station to see its platforms, walkways, and the stairs, escalators and lifts between them — as a rotatable model.")
+                Text("Search a station to see its platforms, walkways, and the stairs, escalators and lifts between them.")
                     .font(.system(size: 13)).foregroundStyle(Theme.ink2)
 
                 HStack(spacing: 8) {

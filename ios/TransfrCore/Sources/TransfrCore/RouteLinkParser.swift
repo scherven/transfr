@@ -10,7 +10,7 @@ import Foundation
 /// (see `LinkExpander.swift`) and re-`parse` the expanded URL — which is again a
 /// pure string this file handles.
 ///
-/// Three link families are recognised (see `md/PASTE-LINK.md` for the full survey):
+/// Three link families are recognised (see `agents/md/PASTE-LINK.md` for the full survey):
 ///   • **Google Maps** — `/maps/dir/<from>/<to>/…` path segments, plus the `data=`
 ///     block's `!1d<lng>!2d<lat>` endpoint coordinates and `!3e<n>` travel mode;
 ///     also the `?api=1&origin=&destination=` Maps-URLs API form.
