@@ -33,7 +33,7 @@ Compliance** at the bottom.
 | 5 | Walk views | `WalkView.swift` | 🟢 | Section / Levels / **3D** all project real `viz_export` geometry (`WalkGeometryViews.swift`); turn-by-turn from real `transitions`. Schematic only stands in for the sample tier. |
 | 6 | AR | `ARView.swift` | 🔴 | Camera/grid mocked (v2, §5); **overlay text now real** — step-off, platform, train, distance from `/walk`. |
 | 7 | Live | `LiveView.swift` | 🟠 | **Next-transfer card is live** (verdict/platforms/walk/spare/step-off); route map kept as a labelled "PREVIEW" — no CoreLocation/live feed yet (§4). |
-| 8 | Settings | `SettingsView.swift` | 🟠 | Persisted & real; Theme 🟢, **step-free rides `/walk`** 🟢, **units (m/ft) applied** 🟢; makeable-%, pace, buffer still don't affect routing (§6). |
+| 8 | Settings | `SettingsView.swift` | 🟠 | Persisted & real; Theme 🟢, **avoid-lifts rides `/walk` + the journey profile** 🟢, **units (m/ft) applied** 🟢; makeable-%, pace, buffer still don't affect routing (§6). |
 | 9 | Walk lookup | `WalkLookupView.swift` | 🟢 | Resolves the picked station to its real platforms + relation (`/station-platforms`) and projects live `/walk` geometry through the shared Section/Levels/3D canvases; schematic only for the sample tier. |
 | 10 | Advanced (hub) | `AdvancedView.swift` | 🟢 | Pure navigation; nothing to wire. |
 | 11 | Full station walk | `StationWalkView.swift` | 🚧 | Live per-platform pathfind in progress (PR #11); static Berlin list until it lands. |
@@ -170,20 +170,22 @@ Persisted and real, but several preferences are **not yet applied**:
 - 🟢 **Rebuild the settings page + drop the "bounce" hack — done** (#14, write-through persistence).
 - 🟢 **Verify settings apply end-to-end — done** (#14, `settings-rebuild-verify`).
 - 🟢 **Theme** — fully wired to `.preferredColorScheme`.
-- 🟢 **Step-free** — rides every `/walk` request: `WalkView` reads `settings.stepFree`
-  into `WalkKey(transfer:stepFree:)` and re-keys its geometry fetch so the toggle
-  refetches the elevator-free variant. The server-side profile it wanted now exists
-  (`/journeys?no_elevators=`, below); wiring the toggle to it is the open half.
-- 🟠 **Add a "no elevators" toggle → feed into routing.** (#35) **Server half done:**
-  `/journeys?no_elevators=` and `POST /assess {no_elevators}` thread core's
+- 🟢 **Avoid lifts (was "Step-free") → routing.** (#35) **Done, both halves.** One
+  toggle, not two: `step_free` and `no_elevators` select the *same* core flag, so a
+  second setting would have duplicated it. `SettingsStore.avoidElevators` (renamed
+  from `stepFree`, which described the opposite of what it does; persisted under the
+  legacy `"stepFree"` key so saved preferences survive) now drives **both** the drawn
+  walk (`/walk`'s `step_free`) and the journey routing profile:
+  `/journeys?no_elevators=` + `POST /assess {no_elevators}` thread core's
   `avoid_elevators` through the whole verdict path (`enrich` → `assess_transfer` →
-  `resolve_walk` → core), profile-keyed in the resolve cache, and `reassess` keeps the
-  profile across a platform-change replan. **Client half open, needs a product call:**
-  `step_free` and `no_elevators` select the *same* core flag, so a second Settings
-  toggle would duplicate `stepFree` rather than pair with it — decide whether to wire
-  the existing toggle to `no_elevators` or add a distinct one. NB `SettingsView`'s
-  copy ("Stairs-free routes" / "Route via lifts and ramps") describes the *opposite*
-  of `avoid_elevators`; resolve that before feeding it into verdicts.
+  `resolve_walk` → core), profile-keyed in the resolve cache, with `reassess` keeping
+  the profile across a platform-change replan. `TripModel` captures the profile at
+  `plan()` time so streamed verdicts match the search that produced them.
+  **Behaviour change:** the toggle now moves VERDICTS, not just the drawn geometry.
+  Follow-ups: `/walk`'s `step_free` wire param keeps its misleading name (renaming it
+  is a breaking contract change — the Swift `stepFree:` labels mirror it deliberately);
+  and flipping the toggle does not re-plan an existing results list (walk screens
+  re-key and refetch, journeys need a fresh search).
 - 🟠 **Makeable %** — doesn't re-verdict. Could recompute client-side from
   `layover_s`/`walk_time_s`, but **deferred as not-a-quick-win:** a safe re-verdict
   must not override the server's honest `unknown`/`infeasible` (and the boarding
@@ -256,7 +258,7 @@ The spine is done — this is a punch-list, not a teardown:
   durations, changes, layover, walk time & distance, delays.
 - **Verdict system** — pills/nodes/rings + worst-wins rollup, honest `unknown(reason)`.
 - **`/walk` fetch + Section/Levels/3D render**, **turn-by-turn**.
-- **Theme, navigation (all 15 routes), Settings persistence, units (m/ft), step-free walk.**
+- **Theme, navigation (all 15 routes), Settings persistence, units (m/ft), avoid-lifts walk + journey profile (#35).**
 
 ---
 

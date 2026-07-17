@@ -8,6 +8,7 @@ import TransfrCore
 /// refs → the verdict-free walk, §6.9). Gear → Settings.
 struct InputView: View {
     @Environment(TripModel.self) private var model
+    @Environment(SettingsStore.self) private var settings
     @Environment(LocationManager.self) private var location
     /// While the cold-launch mark is still flying, this view's own "transfr" title
     /// stays hidden so the flying mark is the only wordmark on screen; it fades in as
@@ -108,7 +109,9 @@ struct InputView: View {
                 if !location.isDenied { requestLocation(manual: false) }
             }
             // Opt-in (TRANSFR_AUTOPLAN=1): jump straight to live results on launch.
-            if AppConfig.autoplanOnLaunch, model.load == .idle { await model.plan() }
+            if AppConfig.autoplanOnLaunch, model.load == .idle {
+                await model.plan(avoidElevators: settings.avoidElevators)
+            }
         }
         .onChange(of: location.coordinate?.latitude) { _, _ in applyLocationIfReady() }
         .onChange(of: model.origin) { _, new in
@@ -326,7 +329,7 @@ struct InputView: View {
             model.destination = parts[1]
             model.usingCurrentLocation = false
             model.originUserEdited = true
-            Task { await model.plan() }
+            Task { await model.plan(avoidElevators: settings.avoidElevators) }
         } label: {
             HStack(spacing: 10) {
                 SetIcon("clock")
@@ -632,8 +635,8 @@ struct InputView: View {
             Button {
                 switch mode {
                 case .walk:  Task { await showWalk() }
-                case .paste: Task { await model.planFromLink(link) }
-                case .type:  Task { await model.plan() }
+                case .paste: Task { await model.planFromLink(link, avoidElevators: settings.avoidElevators) }
+                case .type:  Task { await model.plan(avoidElevators: settings.avoidElevators) }
                 }
             } label: {
                 HStack {

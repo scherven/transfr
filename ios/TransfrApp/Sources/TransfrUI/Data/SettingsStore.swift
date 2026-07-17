@@ -8,9 +8,9 @@ import Observation
 /// plumbing to forget). `load()` seeds the initial values in `init()`.
 ///
 /// These are real and durable; whether each one yet *affects routing* is tracked
-/// in the repo-root `TODO.md` §6 (e.g. `stepFree` rides every walk request; the
-/// makeable cut-off would re-verdict client-side). The theme override is fully
-/// wired to `.preferredColorScheme`.
+/// in the repo-root `TODO.md` §6 (e.g. `avoidElevators` rides every walk request
+/// *and* the journey routing profile; the makeable cut-off would re-verdict
+/// client-side). The theme override is fully wired to `.preferredColorScheme`.
 @MainActor
 @Observable
 public final class SettingsStore {
@@ -28,7 +28,17 @@ public final class SettingsStore {
     }
 
     // Getting around
-    public var stepFree = false { didSet { write(stepFree, "stepFree") } }
+    /// Never route through a lift: core/'s `avoid_elevators` profile, which omits
+    /// every elevator and routes over stairs/escalators/ramps instead. Drives both
+    /// the drawn walk (`/walk`'s `step_free` wire param — the same profile under an
+    /// older name) and, since #35, the journey routing profile behind each
+    /// transfer's verdict (`/journeys?no_elevators=`).
+    ///
+    /// Persisted under the legacy `"stepFree"` key on purpose: the property was
+    /// renamed (it described the opposite of what it does), but the key is the
+    /// user's saved preference on disk, so renaming it would silently reset the
+    /// toggle for everyone who has already set it.
+    public var avoidElevators = false { didSet { write(avoidElevators, "stepFree") } }
     public var pace: Pace = .normal { didSet { write(pace.rawValue, "pace") } }
     public var preferEscalators = true { didSet { write(preferEscalators, "preferEscalators") } }
     // Making the connection
@@ -59,7 +69,7 @@ public final class SettingsStore {
     private func load() {
         isLoading = true
         defer { isLoading = false }
-        stepFree = d.bool(forKey: "stepFree")
+        avoidElevators = d.bool(forKey: "stepFree")   // legacy key — see the property
         if let p = d.string(forKey: "pace").flatMap(Pace.init) { pace = p }
         preferEscalators = d.object(forKey: "preferEscalators") as? Bool ?? true
         makeablePct = d.object(forKey: "makeablePct") as? Int ?? 70

@@ -44,9 +44,9 @@ struct WalkView: View {
         .navigationTitle(transfer?.atStation ?? "Walk")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
-        // Re-keyed on `stepFree` so flipping the preference refetches the
+        // Re-keyed on `avoidElevators` so flipping the preference refetches the
         // elevator-free variant (a different route, hence different geometry).
-        .task(id: settings.stepFree) { await loadGeometry() }
+        .task(id: settings.avoidElevators) { await loadGeometry() }
     }
 
     private var principal: some View {
@@ -246,7 +246,7 @@ struct WalkView: View {
     private func loadGeometry() async {
         defer { loading = false }
         guard let t = transfer,
-              let key = WalkKey(transfer: t, stepFree: settings.stepFree) else { return }
+              let key = WalkKey(transfer: t, stepFree: settings.avoidElevators) else { return }
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s

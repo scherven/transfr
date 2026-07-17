@@ -12,11 +12,12 @@ final class PreparingWalksSnapshotTests: XCTestCase {
     /// Frankfurt assesses instantly; Mannheim hangs, so the screen sits at
     /// [feasible, pending].
     actor MixedRepo: JourneyRepository {
-        func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
+        func journeys(from: String, to: String, when: Date?, assess: Bool,
+                      noElevators: Bool = false) async throws -> JourneysResponse {
             let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
             return try dec.decode(JourneysResponse.self, from: Data(PreparingWalksSnapshotTests.json.utf8))
         }
-        func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] {
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
             var out: [Transfer] = []
             for ic in interchanges {
                 if ic.atStation == "Mannheim Hbf" { try? await Task.sleep(nanoseconds: 60_000_000_000) }
