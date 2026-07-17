@@ -13,6 +13,7 @@ struct InputView: View {
     /// stays hidden so the flying mark is the only wordmark on screen; it fades in as
     /// the launch hands off (see `WordmarkAnchorKey` / LaunchView).
     @Environment(\.isLaunching) private var isLaunching
+    @Environment(RecentSearchStore.self) private var recents
 
     enum Mode: String, CaseIterable, Identifiable { case type, paste, walk
         var id: String { rawValue }
@@ -309,28 +310,44 @@ struct InputView: View {
                     }
                 }
             }
-            SectionHeader(text: "Recent")
-            recentRow(title: "Hamburg Hbf → Stuttgart Hbf", when: "yesterday")
-            recentRow(title: "Berlin Hbf → Basel SBB", when: "Mon")
+            recentSection
         }
     }
 
-    /// A recent route. Tapping it plans that "A → B" example through the same live
-    /// path as typed input — so the paste screen is fully interactive, not just the
-    /// link field. (These are illustrative examples, not persisted history yet.)
-    private func recentRow(title: String, when: String) -> some View {
+    /// Past searches offered back for one-tap reuse (#38): the persisted history
+    /// from `RecentSearchStore`, newest first. On a fresh install (no history yet)
+    /// it falls back to two illustrative examples, which keep the paste screen
+    /// interactive — the eventual placement / empty-state of "Recent" is its own
+    /// polish (TODO.md, #43).
+    @ViewBuilder private var recentSection: some View {
+        SectionHeader(text: "Recent")
+        if recents.items.isEmpty {
+            recentRow(origin: "Hamburg Hbf", destination: "Stuttgart Hbf", when: "yesterday")
+            recentRow(origin: "Berlin Hbf", destination: "Basel SBB", when: "Mon")
+        } else {
+            ForEach(recents.items) { search in
+                recentRow(origin: search.origin, destination: search.destination,
+                          when: Fmt.relativeDay(search.date))
+            }
+        }
+    }
+
+    /// A recent route. Tapping it plans that "A → B" through the same live path as
+    /// typed input — so the paste screen is fully interactive, not just the link
+    /// field, and a real history row re-runs its search.
+    private func recentRow(origin: String, destination: String, when: String) -> some View {
         Button {
-            let parts = title.components(separatedBy: "→").map { $0.trimmingCharacters(in: .whitespaces) }
-            guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return }
-            model.origin = parts[0]
-            model.destination = parts[1]
+            guard !origin.isEmpty, !destination.isEmpty else { return }
+            model.origin = origin
+            model.destination = destination
             model.usingCurrentLocation = false
             model.originUserEdited = true
             Task { await model.plan() }
         } label: {
             HStack(spacing: 10) {
                 SetIcon("clock")
-                Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                Text("\(origin) → \(destination)")
+                    .font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
                 Spacer()
                 Text(when).font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
