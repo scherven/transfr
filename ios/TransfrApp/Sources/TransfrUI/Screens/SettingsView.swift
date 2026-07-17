@@ -64,6 +64,12 @@ struct SettingsView: View {
             }
             .padding(20)
         }
+        // The page never *scrolls* sideways -- content width already equals the
+        // container's -- but it still rubber-bands sideways and springs back (#32).
+        // `axes:` defaults to `[.vertical]`, so the older `.scrollBounceBehavior(
+        // .basedOnSize)` never governed this axis. `.basedOnSize` bounces only when
+        // the content overflows, which horizontally it never does -> travel is zero.
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
