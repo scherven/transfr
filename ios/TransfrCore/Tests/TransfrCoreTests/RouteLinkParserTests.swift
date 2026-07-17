@@ -6,7 +6,7 @@ import Testing
 /// fixture — **no network** — so short links are exercised via the
 /// `shortLinkNeedsExpansion` throw and the *expanded* URL is tested directly (it's
 /// the real string `maps.app.goo.gl/JWTvpehbneTcqad39` redirects to; see
-/// `md/PASTE-LINK.md`). Covers the three link families plus graceful failure.
+/// `agents/md/PASTE-LINK.md`). Covers the three link families plus graceful failure.
 struct RouteLinkParserTests {
     typealias P = RouteLinkParser
 

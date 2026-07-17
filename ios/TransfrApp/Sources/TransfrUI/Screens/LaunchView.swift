@@ -5,7 +5,7 @@ import SwiftUI
 // the end of the r. The end pose IS the main-screen wordmark (green dot on the t,
 // red dot at the end of the r), so the handoff to InputView reads as one mark.
 //
-// Ported 1:1 from design/loading-animation.html (the human-approved preview):
+// Ported 1:1 from agents/design/loading-animation.html (the human-approved preview):
 // same timeline, camera, stroke plan, and colours. SwiftUI mapping (from that
 // file's notes):
 //   • CAMERA     -> a scale+offset (CGAffineTransform) on the mark canvas.

@@ -1,6 +1,6 @@
 # Transfr — product & UX backlog
 
-**See also:** [`design/DESIGN.md`](design/DESIGN.md) (the design doc + decision log) and [`design/prototype.html`](design/prototype.html) (the interactive prototype).
+**See also:** [`agents/design/DESIGN.md`](agents/design/DESIGN.md) (the design doc + decision log) and [`agents/design/prototype.html`](agents/design/prototype.html) (the interactive prototype).
 
 Ideas surfaced while prototyping the mobile app (the interactive click-through:
 plan → connections → transfer carousel → 3D walk → AR → live). Each one is

@@ -13,7 +13,7 @@ two stable JSON contracts and caches their outputs for offline use:
 - **`core/viz/viz_export.py`** → one self-contained walk geometry per transfer, the
   single input to all four walk renderers (section / per-level / 3D / AR).
 
-See `design/DESIGN.md` §13 for the full mapping and the data-tiering / offline
+See `agents/design/DESIGN.md` §13 for the full mapping and the data-tiering / offline
 strategy.
 
 ## `TransfrCore` (Swift Package)

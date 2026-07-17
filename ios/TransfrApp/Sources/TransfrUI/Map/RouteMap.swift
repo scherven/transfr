@@ -1,7 +1,7 @@
 import SwiftUI
 import TransfrCore
 
-/// The vector "paper map" (design/route-maps.html, signed off 2026-07-15): every
+/// The vector "paper map" (agents/design/route-maps.html, signed off 2026-07-15): every
 /// connection drawn *where it actually goes*, over a soft silhouette of Germany.
 /// No MapKit — this is a `Canvas` that projects the real leg coordinates so it
 /// matches the app's palette, works offline, and costs nothing per thumbnail.
