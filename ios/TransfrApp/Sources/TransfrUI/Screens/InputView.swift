@@ -315,15 +315,15 @@ struct InputView: View {
     }
 
     /// Past searches offered back for one-tap reuse (#38): the persisted history
-    /// from `RecentSearchStore`, newest first. On a fresh install (no history yet)
-    /// it falls back to two illustrative examples, which keep the paste screen
-    /// interactive — the eventual placement / empty-state of "Recent" is its own
-    /// polish (TODO.md, #43).
+    /// from `RecentSearchStore`, newest first. Every row is a search the user
+    /// actually ran — until there is one, the section says so plainly rather than
+    /// showing seeded examples. (Where "Recent" belongs is its own polish, #43.)
     @ViewBuilder private var recentSection: some View {
         SectionHeader(text: "Recent")
         if recents.items.isEmpty {
-            recentRow(origin: "Hamburg Hbf", destination: "Stuttgart Hbf", when: "yesterday")
-            recentRow(origin: "Berlin Hbf", destination: "Basel SBB", when: "Mon")
+            Text("No recent searches yet.")
+                .font(.system(size: 13)).foregroundStyle(Theme.ink3)
+                .padding(.vertical, 20)
         } else {
             ForEach(recents.items) { search in
                 recentRow(origin: search.origin, destination: search.destination,
@@ -332,9 +332,8 @@ struct InputView: View {
         }
     }
 
-    /// A recent route. Tapping it plans that "A → B" through the same live path as
-    /// typed input — so the paste screen is fully interactive, not just the link
-    /// field, and a real history row re-runs its search.
+    /// One past search. Tapping it re-runs that route through the same live path as
+    /// typed input.
     private func recentRow(origin: String, destination: String, when: String) -> some View {
         Button {
             guard !origin.isEmpty, !destination.isEmpty else { return }

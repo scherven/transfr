@@ -27,6 +27,16 @@ final class RecentSearchStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    /// A fresh install starts with a genuinely empty history and no seeded
+    /// examples. The "Recent" section renders `items` and nothing else, so this is
+    /// the invariant that keeps fabricated rows out of the UI: no history means no
+    /// rows, and the section shows its empty state instead.
+    @MainActor
+    func testFreshStoreHasNoSeededHistory() {
+        XCTAssertTrue(RecentSearchStore(defaults: defaults).items.isEmpty,
+                      "a fresh store must seed nothing, not example routes")
+    }
+
     @MainActor
     func testRecordPersistsAcrossReload() {
         let store = RecentSearchStore(defaults: defaults)
