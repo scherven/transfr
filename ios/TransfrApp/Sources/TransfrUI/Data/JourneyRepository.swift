@@ -10,8 +10,15 @@ import TransfrCore
 /// §13.9): a `CachingRepository` decorator can wrap `LiveRepository` and persist
 /// each planned journey + its prefetched walks, and nothing upstream changes.
 public protocol JourneyRepository: Sendable {
-    /// Plan a trip. `when` is the desired departure; nil means "now".
-    func journeys(from: String, to: String, when: Date?) async throws -> JourneysResponse
+    /// Plan a trip. `when` is the desired departure; nil means "now". `assess:
+    /// false` returns the itineraries instantly with `pending` transfers, to be
+    /// filled in via `assess(_:)` — the progressive load.
+    func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse
+
+    /// Assess a batch of changes of train, returning the real transfers. The
+    /// client fires these per-interchange, concurrently, to stream a journey's
+    /// verdicts in behind a fast `journeys(assess: false)`.
+    func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer]
 
     /// Station autocomplete. (The app also bundles `stations.csv` for instant
     /// offline suggestions; this is the online-refresh path — DESIGN.md §13.2.)
@@ -21,6 +28,20 @@ public protocol JourneyRepository: Sendable {
     /// station nearest a coordinate. Powers the walk-only door: the platform
     /// pickers adapt to the entered station.
     func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse
+
+    /// Every platform's walk FROM one source platform at the station nearest a
+    /// coordinate — the "full station walk" Advanced tool (§6.10). One pathfind per
+    /// platform, sorted nearest-first.
+    func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse
+
+    /// Facilities (POIs) of a category near the station nearest a coordinate,
+    /// nearest first. May be `found == false` with a typed `reason` when the POI
+    /// layer isn't available for that station — the view shows that honestly.
+    func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse
+
+    /// A single station's platform-connectivity breakdown (connected / stitchable
+    /// / island), for the Map-health tool's per-station query.
+    func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse
 
     /// One transfer's drawable walk geometry, keyed by the triple a `Transfer`
     /// already carries. May be `ok == false` when no geometry exists yet.
@@ -48,9 +69,13 @@ public struct LiveRepository: JourneyRepository {
         self.client = TransfrClient(baseURL: baseURL, transport: transport, apiKey: apiKey)
     }
 
-    public func journeys(from: String, to: String, when: Date?) async throws -> JourneysResponse {
+    public func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
         let iso = when.map { ISO8601DateFormatter.transfr.string(from: $0) }
-        return try await client.journeys(from: from, to: to, when: iso)
+        return try await client.journeys(from: from, to: to, when: iso, assess: assess)
+    }
+
+    public func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] {
+        try await client.assess(interchanges).transfers
     }
 
     public func stations(query: String) async throws -> [StationSuggestion] {
@@ -59,6 +84,18 @@ public struct LiveRepository: JourneyRepository {
 
     public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
         try await client.stationPlatforms(lat: lat, lon: lon)
+    }
+
+    public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+        try await client.stationWalk(lat: lat, lon: lon, fromPlatform: fromPlatform, stepFree: stepFree)
+    }
+
+    public func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+        try await client.facilities(lat: lat, lon: lon, category: category)
+    }
+
+    public func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+        try await client.stationHealth(lat: lat, lon: lon)
     }
 
     public func walk(for key: WalkKey) async throws -> WalkResult {

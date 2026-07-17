@@ -9,10 +9,14 @@ import TransfrCore
 struct InputView: View {
     @Environment(TripModel.self) private var model
     @Environment(LocationManager.self) private var location
+    /// While the cold-launch mark is still flying, this view's own "transfr" title
+    /// stays hidden so the flying mark is the only wordmark on screen; it fades in as
+    /// the launch hands off (see `WordmarkAnchorKey` / LaunchView).
+    @Environment(\.isLaunching) private var isLaunching
 
     enum Mode: String, CaseIterable, Identifiable { case type, paste, walk
         var id: String { rawValue }
-        var label: String { switch self { case .type: "Type it"; case .paste: "Paste link"; case .walk: "Walk only" } }
+        var label: String { switch self { case .type: "Plan"; case .paste: "Paste link"; case .walk: "Walk only" } }
         var icon: String { switch self { case .type: "text.alignleft"; case .paste: "link"; case .walk: "figure.walk" } }
     }
     @State private var mode: Mode = .type
@@ -32,9 +36,19 @@ struct InputView: View {
     @State private var resolvingWalk = false
 
     /// Station-autocomplete state, shared across the From/To/Station fields — one
-    /// focused field owns the suggestion list at a time.
-    enum Field: Hashable { case from, to, station }
+    /// focused field owns the suggestion list at a time. `.link` joins in so the
+    /// paste field gets the same focus-to-clear treatment (it owns no suggestions).
+    enum Field: Hashable { case from, to, station, link }
     @FocusState private var focused: Field?
+
+    /// Placeholder-style seeding: From / To / the paste link ship with an example
+    /// value, but the first time you focus a field that *still holds its seed*, it
+    /// clears so you type into a blank (placeholder-showing) field. Seeds are
+    /// captured on first appear so a location-resolved origin — which replaces the
+    /// seed before you ever touch it — is never wiped.
+    @State private var originSeed: String?
+    @State private var destinationSeed: String?
+    @State private var linkSeed: String?
     @State private var suggestions: [StationSuggestion] = []
     @State private var searchTask: Task<Void, Never>?
 
@@ -55,9 +69,20 @@ struct InputView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                Text("transfr")
-                    .font(.system(size: 34, weight: .bold))
-                    .foregroundStyle(Theme.ink)
+                // The brand wordmark — the SAME mark the launch animation lands, so
+                // the fly-up hand-off is pixel-identical. Its frame is the fly target,
+                // so we keep publishing the anchor (opacity doesn't change layout) but
+                // hold it invisible until the flying mark lands, then fade it in as the
+                // overlay fades out — a seamless swap of two identical marks.
+                Wordmark(height: 40)
+                    .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
+                    .opacity(isLaunching ? 0 : 1)
+                    // Snap (don't fade) at the hand-off: the title appears at full opacity
+                    // the instant the launch ends, so it's a solid floor under the identical
+                    // launch mark as the overlay fades out on top. Fading it in would instead
+                    // cross-dissolve two ~half-opaque copies of the mark — the composite only
+                    // ~75% opaque — which reads as a brief lightening of the blue (the flash).
+                    .animation(nil, value: isLaunching)
                     .padding(.top, 4)
 
                 SegmentedControl(options: Mode.allCases, selection: $mode) { $0.label }
@@ -93,12 +118,32 @@ struct InputView: View {
                 model.usingCurrentLocation = false
             }
         }
+        .onAppear {
+            // Capture the pristine seeds once, before any location fix replaces them.
+            if originSeed == nil {
+                originSeed = model.origin; destinationSeed = model.destination; linkSeed = link
+            }
+        }
+        .onChange(of: focused) { _, now in
+            if let now { clearSeedIfPristine(now) }
+        }
+    }
+
+    /// First focus on a still-seeded field clears its example so you type into a
+    /// blank field (the built-in placeholder then shows) — the "press it and the
+    /// content deletes" ask. A value the user, or a location fix, already changed is
+    /// left untouched, so this only ever clears the shipped example.
+    private func clearSeedIfPristine(_ field: Field) {
+        switch field {
+        case .from:    if model.origin == originSeed { model.origin = "" }
+        case .to:      if model.destination == destinationSeed { model.destination = "" }
+        case .link:    if link == linkSeed { link = "" }
+        case .station: break   // walk-only station keeps its example (not requested)
+        }
     }
 
     private var header: some View {
         HStack {
-            Text("PLAN A TRIP").font(.system(size: 11, weight: .semibold)).tracking(0.8)
-                .foregroundStyle(Theme.ink3)
             Spacer()
             NavigationLink(value: Route.settings) {
                 Image(systemName: "gearshape").foregroundStyle(Theme.ink2)
@@ -127,8 +172,6 @@ struct InputView: View {
                 chip(key: "Travellers", value: "1 adult")
                 Spacer(minLength: 0)
             }
-            Label("Tap any field to edit.", systemImage: "pencil")
-                .font(.system(size: 13)).foregroundStyle(Theme.ink3)
         }
     }
 
@@ -257,6 +300,7 @@ struct InputView: View {
                         TextField("Paste a route link", text: $link)
                             .font(.system(size: 13, design: .monospaced)).foregroundStyle(Theme.ink)
                             .autocorrectionDisabled().textInputAutocapitalization(.never)
+                            .focused($focused, equals: .link)
                     }
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark").font(.system(size: 12, weight: .bold)).foregroundStyle(Theme.go)
@@ -430,7 +474,7 @@ struct InputView: View {
             if let lat = s.latitude, let lon = s.longitude {
                 Task { await resolvePlatforms(name: s.name, lat: lat, lon: lon) }
             }
-        case nil:      break
+        case .link, nil: break   // the paste field owns no suggestions
         }
         searchTask?.cancel()
         suggestions = []

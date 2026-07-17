@@ -24,6 +24,8 @@ from typing import List
 
 from viz_export import export  # resolved via api/__init__ sys.path setup
 
+from typing import Callable, Optional
+
 from api import config, schemas
 from api.boarding import compute_boarding, stepoff_node_of
 
@@ -34,23 +36,36 @@ WALK_BUILD_FAILED = "walk_build_failed"
 NO_GEOMETRY = "no_geometry_for_platforms"
 
 
-def _boarding_for(conn, key: schemas.WalkKey, doc: dict) -> schemas.BoardingGuidance | None:
+def _boarding_for(
+    conn, key: schemas.WalkKey, doc: dict,
+    formation_provider: Optional[Callable[[], object]] = None,
+) -> schemas.BoardingGuidance | None:
     """Step-off guidance for a found walk, or None. Best-effort: a failure here
     (a coarse platform, a DB hiccup) must never fail the walk it enriches, so
-    everything is caught and dropped -- the geometry still returns."""
+    everything is caught and dropped -- the geometry still returns.
+
+    `formation_provider` is the coach-enrichment seam: when the arriving train's
+    identity is available, production can pass `boarding.db_formation_provider(...)`
+    (or any zero-arg provider) to fill the coach. It is not in the WalkKey today,
+    so this defaults to None -- position-only, unchanged behaviour."""
     stepoff = stepoff_node_of(doc)
     if stepoff is None:
         return None
     try:
-        g = compute_boarding(conn, key.relation_id, key.from_platform, key.to_platform, stepoff)
+        g = compute_boarding(conn, key.relation_id, key.from_platform, key.to_platform,
+                             stepoff, formation_provider=formation_provider)
     except Exception:  # noqa: BLE001 -- boarding is progressive enhancement
         return None
     return schemas.BoardingGuidance(**g.as_dict())
 
 
-def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
+def build_walk(
+    conn, key: schemas.WalkKey,
+    formation_provider: Optional[Callable[[], object]] = None,
+) -> schemas.WalkResult:
     """Produce one walk's viz_export (plus step-off guidance), degrading to a
-    typed reason on failure."""
+    typed reason on failure. `formation_provider` is threaded to boarding for
+    optional coach enrichment (default None -- position-only)."""
     base = dict(
         relation_id=key.relation_id,
         from_platform=key.from_platform,
@@ -76,7 +91,8 @@ def build_walk(conn, key: schemas.WalkKey) -> schemas.WalkResult:
     except Exception:  # noqa: BLE001 -- one bad key must not fail a batch
         return schemas.WalkResult(**base, ok=False, reason=WALK_BUILD_FAILED)
 
-    return schemas.WalkResult(**base, ok=True, export=doc, boarding=_boarding_for(conn, key, doc))
+    return schemas.WalkResult(**base, ok=True, export=doc,
+                              boarding=_boarding_for(conn, key, doc, formation_provider))
 
 
 def build_walks(conn, keys: List[schemas.WalkKey]) -> schemas.WalksResponse:

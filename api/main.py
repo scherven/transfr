@@ -14,6 +14,17 @@ Endpoints:
   GET  /station-platforms?lat=&lon=              the platforms (+ relation_id) at the
                                                  station nearest a coordinate; powers
                                                  the walk-only door's platform pickers
+  GET  /station-walk?lat=&lon=&from_platform=&step_free=
+                                                 the 'full station walk' tool: from one
+                                                 source platform, the walk to every other
+                                                 platform at the nearest station,
+                                                 nearest-first (one pathfind each)
+  GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
+                                                 station, nearest first; degrades to a
+                                                 typed reason when the POI layer is absent
+  GET  /station-health?lat=&lon=                 one station's platform-connectivity
+                                                 breakdown (connected/stitchable/island
+                                                 over every pair); the Map-health tool
   GET  /walk?relation_id=&from_platform=&to_platform=&step_free=
                                                  one transfer's drawable walk geometry
                                                  (viz_export); cacheable
@@ -40,8 +51,11 @@ from search_context import list_platform_refs
 from api import config, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
-from api.pipeline import plan_journeys
+from api.facilities import build_facilities
+from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
+from api.station_health import build_station_health
+from api.station_walk import build_station_walk
 from api.transfers import STATION_UNRESOLVED
 from api.walks import build_walk, build_walks
 
@@ -111,16 +125,34 @@ def get_journeys(
     to: str = Query(min_length=1, description="destination station name"),
     time: Optional[str] = Query(default=None, description="ISO 8601 departure time; defaults to now"),
     max: int = Query(default=config.DEFAULT_MAX_JOURNEYS, ge=1, le=config.MAX_JOURNEYS_LIMIT),
+    assess: bool = Query(default=True, description="assess each transfer's walkability; "
+                         "false returns pending transfers instantly to be streamed via /assess"),
     conn=Depends(get_conn),
 ):
     when = _parse_when(time)
     try:
-        return plan_journeys(conn, from_, to, when, max_journeys=max, buffer_s=config.BUFFER_S)
+        return plan_journeys(conn, from_, to, when, max_journeys=max,
+                             buffer_s=config.BUFFER_S, assess=assess)
     except ValueError as e:
         # unresolvable origin/destination name
         raise HTTPException(status_code=404, detail=str(e))
     except requests.RequestException as e:
         raise HTTPException(status_code=502, detail=f"journey provider error: {e}")
+
+
+@app.post("/assess", response_model=schemas.AssessResponse, dependencies=_PROTECTED)
+def post_assess(req: schemas.AssessRequest, conn=Depends(get_conn)):
+    """Assess a batch of changes of train, streaming the verdicts a fast
+    `/journeys?assess=false` deferred. The client sends the interchange fields it
+    already holds (from the journey's legs); each comes back as a full Transfer.
+    Called with one interchange per request, fired concurrently, it fills a
+    journey's verdicts in as fast as each pathfind returns."""
+    if len(req.interchanges) > config.MAX_ASSESS_BATCH:
+        raise HTTPException(
+            status_code=413,
+            detail=f"too many interchanges: {len(req.interchanges)} > {config.MAX_ASSESS_BATCH}",
+        )
+    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S)
 
 
 @app.get("/transfer", response_model=schemas.PlatformWalkResponse, dependencies=_PROTECTED)
@@ -169,6 +201,51 @@ def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
         lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
         found=True, platforms=refs,
     )
+
+
+@app.get("/station-walk", response_model=schemas.StationWalkResponse, dependencies=_PROTECTED)
+def get_station_walk(
+    lat: float,
+    lon: float,
+    from_platform: str = Query(min_length=1, description="source platform ref to walk from"),
+    step_free: bool = Query(default=False, description="route without elevators"),
+    conn=Depends(get_conn),
+):
+    """The 'full station walk' advanced tool: from one source platform, the real
+    walk to every OTHER platform at the station nearest (lat, lon), one pathfind
+    each, sorted nearest-first. Honest degradation: an unreachable platform is a
+    `found=False` row with core/'s reason; a coordinate with no station near it
+    returns a top-level `found=False`. `step_free` routes elevator-free."""
+    return build_station_walk(conn, lat, lon, from_platform, step_free)
+
+
+@app.get("/facilities", response_model=schemas.FacilitiesResponse, dependencies=_PROTECTED)
+def get_facilities(
+    lat: float,
+    lon: float,
+    category: str = Query(min_length=1, description="facility category, e.g. toilets/coffee/atm"),
+    from_platform: Optional[str] = Query(default=None, min_length=1,
+                                         description="optional platform anchor for a routed walk"),
+    conn=Depends(get_conn),
+):
+    """Facilities of `category` near the station nearest (lat, lon), nearest first.
+
+    The POI layer is the optional `viz_export` details extract (amenity/shop/...);
+    where it isn't producible on this host the response degrades to `found=False`
+    with `reason="no_poi_layer"` rather than guessing. With `from_platform`, each
+    facility also carries a routed walk to its nearest platform."""
+    return build_facilities(conn, lat, lon, category, from_platform=from_platform)
+
+
+@app.get("/station-health", response_model=schemas.StationHealthResponse, dependencies=_PROTECTED)
+def get_station_health(lat: float, lon: float, conn=Depends(get_conn)):
+    """One station's platform-connectivity breakdown for the Map-health tool: the
+    station nearest (lat, lon), with every unordered platform pair bucketed
+    connected / stitchable / island (two find_shortest_path passes each -- plain,
+    then with stitch bridges). A very large station is sampled to bound the pair
+    count (see api/station_health.py); `found=False` when nothing resolves near
+    the coordinate."""
+    return build_station_health(conn, lat, lon)
 
 
 @app.get("/walk", response_model=schemas.WalkResult, dependencies=_PROTECTED)

@@ -4,6 +4,9 @@ Merged backlog: **app-usage triage** (2026-07-15) + the **SwiftUI live-data wiri
 status**. Quick fixes are done; this tracks the rest. "Routing from the map" was
 dropped intentionally.
 
+_Status refreshed 2026-07-16: reflects merged PRs #6, #9, #10, #12, #13, #14; open
+items are cross-linked to issues #33–#45._
+
 Everything under §1–§9 concerns `ios/TransfrApp` (`TransfrUI`) — all **15 prototype
 screens** (DESIGN.md §3) exist and are navigable; the work is driving them from the
 real `api/` service + live-delay feed. Cross-cutting items that aren't app-screen
@@ -26,16 +29,16 @@ Compliance** at the bottom.
 | 1 | Plan / Input | `InputView.swift` | 🟢 | Type mode plans live; **station autocomplete** 🟢 & **editable departure** 🟢 now wired; **walk-only** 🟢 (platforms adapt to the station via `/station-platforms`, live `/walk` geometry); **paste-link** 🟢 now parses Google/Apple Maps + bahn.de links (`RouteLinkParser`) and plans through `/journeys`. |
 | 2 | Connections | `ResultsView.swift` | 🟢 | Fully from `/journeys`. |
 | 3 | The connection | `JourneyView.swift` | 🟢 | Legs/transfers/delays from live data. |
-| 4 | Transfers (carousel) | `CarouselView.swift` | 🟢 | Core stats + **boarding/step-off** now live from `/walk` `boarding` (§3); coach name is the only 🚧 (needs a formation feed). |
+| 4 | Transfers (carousel) | `CarouselView.swift` | 🟢 | Core stats + **boarding/step-off** live from `/walk` `boarding` (§3); **coach name** now resolved from the step-off position (#12). |
 | 5 | Walk views | `WalkView.swift` | 🟢 | Section / Levels / **3D** all project real `viz_export` geometry (`WalkGeometryViews.swift`); turn-by-turn from real `transitions`. Schematic only stands in for the sample tier. |
 | 6 | AR | `ARView.swift` | 🔴 | Camera/grid mocked (v2, §5); **overlay text now real** — step-off, platform, train, distance from `/walk`. |
 | 7 | Live | `LiveView.swift` | 🟠 | **Next-transfer card is live** (verdict/platforms/walk/spare/step-off); route map kept as a labelled "PREVIEW" — no CoreLocation/live feed yet (§4). |
 | 8 | Settings | `SettingsView.swift` | 🟠 | Persisted & real; Theme 🟢, **step-free rides `/walk`** 🟢, **units (m/ft) applied** 🟢; makeable-%, pace, buffer still don't affect routing (§6). |
 | 9 | Walk lookup | `WalkLookupView.swift` | 🟢 | Resolves the picked station to its real platforms + relation (`/station-platforms`) and projects live `/walk` geometry through the shared Section/Levels/3D canvases; schematic only for the sample tier. |
 | 10 | Advanced (hub) | `AdvancedView.swift` | 🟢 | Pure navigation; nothing to wire. |
-| 11 | Full station walk | `StationWalkView.swift` | 🔴 | Static Berlin platform list; no per-platform pathfind. |
-| 12 | Nearest facility | `NearestFacilityView.swift` | 🔴 | Static POIs; no OSM POI query. |
-| 13 | Map health | `MapHealthView.swift` | 🟠 | EU/KR figures are the real survey numbers; JP + station lists illustrative. Read-only by design. |
+| 11 | Full station walk | `StationWalkView.swift` | 🚧 | Live per-platform pathfind in progress (PR #11); static Berlin list until it lands. |
+| 12 | Nearest facility | `NearestFacilityView.swift` | 🟢 | Live via `/facilities` + station-queryable UI (#13). |
+| 13 | Map health | `MapHealthView.swift` | 🟠 | EU/KR figures are the real survey numbers; JP + station lists illustrative. **Single-station query added** (#10). |
 | 14 | Offline & regions | `OfflineRegionsView.swift` | 🔴 | Static region cards; no real download/storage management. |
 | 15 | Attributions | `AttributionsView.swift` | 🟢 | Static **by design** — a licence page, no data to wire. |
 
@@ -55,7 +58,7 @@ Compliance** at the bottom.
   `TripModel.departure` (plus a "Leave now" shortcut); the chip label reflects
   Today / Tomorrow / "Wed 16". Left *unrestricted* (past times allowed). `plan()`
   already forwards `departure` to `/journeys?time=`.
-- 🔴 **Remove the "Travellers" chip.** Decorative; drop it.
+- 🔴 **Remove the "Travellers" chip.** Decorative; drop it. → tracked in #33.
 - 🟢 **Paste-link mode is wired.** `TransfrCore.RouteLinkParser` (pure,
   unit-tested) turns a Google Maps (`maps.app.goo.gl` short links expanded over
   HTTP + full `/maps/dir/…` + `?api=1` form), Apple Maps (`saddr`/`daddr`/place),
@@ -90,10 +93,19 @@ Compliance** at the bottom.
   Verified headless via `TransfrUITests` (Berlin 1→16 and Dortmund 11→4).
 - 🟢 **Turn-by-turn is derived from real `transitions`** + endpoints (step-off →
   each level change → board). Synthesized copy remains only for the sample tier.
-- 🟠 **3D view is outdated — trim what it renders.** It draws too much; cut it back
-  to what's legible. (See also "3D slowness" under Investigation.)
-- 🟠 **Levels rendering — vertical changes aren't obvious.** Likely a z-value fix so
-  level transitions read clearly on the top-down plan.
+- 🟢 **3D view trimmed to what's legible.** The Levels + 3D canvases no longer draw
+  the station's whole mapped web (Stuttgart 61 / Karlsruhe 142 / Berlin 372 context
+  ways) — the connectors among them, each spanning two floors, exploded across the
+  stacked levels into a forest of near-vertical lines that buried the route. Both
+  now follow `core/viz/viz_render.py`: the 3D shows faint labelled floor planes, the
+  route, and one riser per real `transition` coloured by connector; the scene is
+  reframed on the path so the walk fills the view. (Far less per-frame draw work also
+  addresses the "3D slowness" note.)
+- 🟢 **Levels — vertical changes now obvious.** Each floor-change is a bold,
+  connector-coloured disc with an up/down chevron and a dodged label ("Escalator ↑
+  L+1") read from the current floor's perspective, over a decluttered plan (only the
+  route, the start/end platform slab, and a floor tag). Replaces the tiny ambiguous
+  "•/▲/▼" dots that were lost in the context web.
 
 ## 3. Boarding & step-off — `CarouselView.swift`, `LiveView.swift`, `WalkView.swift` ✅
 
@@ -117,11 +129,11 @@ Compliance** at the bottom.
   says "coach numbers need a live formation feed" rather than guessing. A
   coarse-mapped platform (stop-position snap anchor) degrades to
   `platform_geometry_unavailable` — position-less, not wrong.
-- 🚧 **Coach naming** is the one remaining piece, and it's server/data-side: wire a
-  reachable formation source into `compute_boarding` (the `NormalizedFormation` →
-  coach-span lookup is already built in `core/boarding/formation_model.py`).
+- 🟢 **Coach naming landed** (#12) — the boarding coach is resolved from the step-off
+  position (`NormalizedFormation` → coach-span in `core/boarding/formation_model.py`).
+  Still degrades to `no_formation_feed` where a reachable formation source is missing.
 - 🟠 **"Spot between makeable & boarding buffer looks weird"** — geometry/render fix
-  on the transfer visual (unrelated to the boarding module).
+  on the transfer visual (unrelated to the boarding module). → tracked in #34.
 
 ## 4. Live tracking & delays — `LiveView.swift`
 
@@ -138,9 +150,8 @@ Compliance** at the bottom.
   to re-verdict against fresh delays. 🚧 needs the realtime feed + polling/APNs. (See
   "Is live reassessment actually working?" under Investigation.)
 - 🔴 **Routing from current location** — location services as the trip origin.
-- 🔴 **Progressive load** — return journeys first, stream walks in once the journey
-  screen is showing; transition to the results screen with live updates. **Prereq:**
-  API profiling (Investigation).
+- 🟢 **Progressive load — done** (#9, stream-connections). Journeys return first and
+  walks stream in as the results screen updates live.
 
 ## 5. AR — `ARView.swift`
 
@@ -156,8 +167,8 @@ Compliance** at the bottom.
 ## 6. Settings — `SettingsView.swift` / `SettingsStore.swift`
 
 Persisted and real, but several preferences are **not yet applied**:
-- 🔴 **Rebuild the settings page correctly — drop the "bounce" hack.**
-- 🔴 **Verify settings actually apply — walk each toggle end-to-end.**
+- 🟢 **Rebuild the settings page + drop the "bounce" hack — done** (#14, write-through persistence).
+- 🟢 **Verify settings apply end-to-end — done** (#14, `settings-rebuild-verify`).
 - 🟢 **Theme** — fully wired to `.preferredColorScheme`.
 - 🟢 **Step-free** — rides every `/walk` request: `WalkView` reads `settings.stepFree`
   into `WalkKey(transfer:stepFree:)` and re-keys its geometry fetch so the toggle
@@ -165,13 +176,14 @@ Persisted and real, but several preferences are **not yet applied**:
   routing profile server-side (needs a step-free profile server-side).
 - 🔴 **Add a "no elevators" toggle → feed into routing.** core already has
   `--no-elevators` / `avoid_elevators`; surface it as a setting and thread it into the
-  routing profile (pairs with step-free above).
+  routing profile (pairs with step-free above). → tracked in #35.
 - 🟠 **Makeable %** — doesn't re-verdict. Could recompute client-side from
   `layover_s`/`walk_time_s`, but **deferred as not-a-quick-win:** a safe re-verdict
   must not override the server's honest `unknown`/`infeasible` (and the boarding
   buffer factors into feasibility too). Product-semantics pass, not mechanical wiring.
+  (Deferred — no issue filed.)
 - 🟠 **Walking pace / boarding buffer** — display only; should scale walk time /
-  feed the server's buffer check.
+  feed the server's buffer check. → tracked in #36.
 - 🟢 **Units** — `Fmt.distance(_:imperial:)` renders m or ft, and every live distance
   site threads `settings.units` (`WalkView`, `CarouselView`'s `TransferDetailCard`,
   the `ARView` badge). Remaining `"NN m"` strings on 🔴 stub screens stay literal
@@ -180,42 +192,40 @@ Persisted and real, but several preferences are **not yet applied**:
 
 ## 7. Advanced tools — Station walk / Nearest facility / Map health / Offline
 
-- 🔴 **Full station walk** (`StationWalkView`) — static Berlin list; a live build runs
-  one pathfind per platform from the source (needs a `/station-walk` style endpoint
-  or N `/walk` calls). Rows navigate to the **static** lookup, not the real pair.
-- 🔴 **Nearest facility** (`NearestFacilityView`) — static POIs; needs the OSM
-  `amenity`/`shop` layer from `viz_export` details + routing to each. 🚧 endpoint.
+- 🚧 **Full station walk** (`StationWalkView`) — live per-platform pathfind **in
+  progress** (PR #11). Static Berlin list until it lands.
+- 🟢 **Nearest facility** (`NearestFacilityView`) — **done** (#13): live `/facilities`
+  endpoint (OSM `amenity`/`shop` from `viz_export` details) + station-queryable UI.
 - 🟠 **Map health** (`MapHealthView`) — EU/KR bars are the real `stitch_survey.py`
   numbers; JP + the representative-station lists are illustrative. Read-only by design.
-  **Add:** let the user query a single station.
+  ~~**Add:** let the user query a single station.~~ — **done** (#10).
 - 🔴 **Offline & regions** (`OfflineRegionsView`) — static cards; no real region
   download, prefetch, or storage accounting. 🚧 device-side + packaging work.
-- 🟢 **3D station map** (branch `station-map-3d`) — the old static iso viewer is replaced
-  everywhere by the interactive `IsoGeometryCanvas`: drag-rotate, pinch/button **zoom**,
-  left-edge **level tabs**, **every platform labelled + lifted** (server `Way.ref`/`Way.level`),
-  and **only walk-relevant connectors** on a walk (`Way.walkRelevant`; browse shows all).
-  New **Station map (3D)** screen (`StationMapView`, browse mode) in the Advanced hub — search
-  a station, rotate/zoom its layout. **Follow-ups:** (a) browse coverage is the touched-pool of
-  one cross-station `/walk`, so far platforms can be missing — add a radius/station-geometry
-  endpoint for full coverage; (b) reach the map from a transfer too; (c) not yet visually
-  verified in-sim (build + prototype-parity only — UI snapshot tests are Xcode-only here).
+- 🟢 **3D station map** — the old static iso viewer is replaced everywhere by the interactive
+  `IsoGeometryCanvas`: one-finger **pan**, pinch/button **zoom**, two-finger-twist **rotate**,
+  a **level-select** chip row (isolate a floor), and **every platform labelled + lifted**
+  (server `Way.ref`/`Way.level`); a walk shows only walk-relevant connectors (`Way.walkRelevant`),
+  browse shows all. New **Station map (3D)** screen (`StationMapView`) in the Advanced hub —
+  search a station, browse its whole layout (the `all_platforms` `/walk` flag pulls in every
+  platform). **Follow-up:** not yet visually verified in-sim (build-only — UI snapshot tests
+  are Xcode-only here).
 - 🔴 **[deferred] Bring back POIs on the station map** — facility pins (food / ATM /
   toilets / lift) are intentionally hidden on the walk view for now to cut clutter. The
   data already exists (`viz_export` `details` layer, same as **Nearest facility** above);
   re-surface them as a toggleable layer once the station-map screen is built.
-- **Placement:** move **Advanced** to a button next to Settings, or go tab-based.
+- **Placement:** move **Advanced** to a button next to Settings, or go tab-based. → #26.
 
 ## 8. Offline & caching (cross-cutting)
 
 - 🔴 **No `CachingRepository`.** The `JourneyRepository` seam was designed for a
   caching decorator; none exists. Planned journeys and walk geometry aren't persisted,
-  so "reopen a planned trip offline" doesn't work.
-- 🔴 **Save searches (persistence)** — persist past searches for reuse.
+  so "reopen a planned trip offline" doesn't work. → tracked in #37.
+- 🔴 **Save searches (persistence)** — persist past searches for reuse. → tracked in #38.
 - 🟡 **Batch walk prefetch is never called.** `TransfrClient.walks()` + `WalkKey(transfer:)`
   exist and are tested, but selecting a journey doesn't prefetch its transfers'
-  geometry. Fire `walks([...])` on `select(_:)` and cache the results.
+  geometry. Fire `walks([...])` on `select(_:)` and cache the results. → tracked in #39.
 - 🔴 **No bundled `stations.csv`** — offline autocomplete corpus isn't in the bundle;
-  `SampleRepository` uses a 9-station seed.
+  `SampleRepository` uses a 9-station seed. → tracked in #40.
 
 ## 9. Data-source configuration & states
 
@@ -223,9 +233,9 @@ Persisted and real, but several preferences are **not yet applied**:
   environment (`TRANSFR_API_URL` / `TRANSFR_API_KEY`), injected by the Xcode scheme
   (`project.yml`). `TRANSFR_USE_SAMPLE=1` forces the offline tier; `TRANSFR_AUTOPLAN=1`
   jumps straight to live results on launch. Settings' "Bundled sample" label is stale
-  (cosmetic).
+  (cosmetic). → tracked in #41.
 - 🟠 **Minimal error/empty states** — `plan()` surfaces a message on the CTA, but no
-  retry, no empty-results state, no per-screen loading skeletons.
+  retry, no empty-results state, no per-screen loading skeletons. → tracked in #42.
 
 ---
 
@@ -245,43 +255,49 @@ The spine is done — this is a punch-list, not a teardown:
 
 ## Infrastructure
 
-- **[infra] 401 error → switch to a *named* tunnel.** Infra config; stops the
-  intermittent 401s.
+- ~~**[infra] 401 error → switch to a *named* tunnel.**~~ — **done.** Named tunnel
+  stops the intermittent 401s.
 
 ## UI polish
 
-- **Loading screen** — the `t` from the favicon expands; the red dot writes out the
-  rest of "transfr".
-- **Main screen wordmark** — put a green dot on top of the `t` and a red dot at the
-  end of the `r`.
-- **"Recent" as its own section** (or surfaced per-section).
-- **Advanced placement** — button next to Settings, or tab-based (also §7).
+- ~~**Loading screen** — the `t` from the favicon expands; the red dot writes out the
+  rest of "transfr".~~ — **done** (SwiftUI `LaunchView.swift`: camera dolly off the
+  favicon `t` → wordmark, red pen writes "ransfr", end pose = the main-screen
+  wordmark; plays once on cold launch then reveals InputView; respects reduced motion).
+- ~~**Main screen wordmark** — put a green dot on top of the `t` and a red dot at the
+  end of the `r`.~~ — **done.**
+- **"Recent" as its own section** (or surfaced per-section). → tracked in #43.
+- **Advanced placement** — button next to Settings, or tab-based (also §7). → #26.
 
 ## Data & maps
 
-- **Map of routes — a real map;** each route drawn where it actually goes.
-- **[data] ICE trains have no names** — data gap or formatting bug? (see Investigation).
-- **[data] Explore disconnections in Europe.**
-- **[data] Explore disconnections in Korea** — "really nothing"? try another source.
-- **[data] Explore downloading other country DBs / station lists.**
+- **Map of routes — a real map;** each route drawn where it actually goes. → #18 (+ `copilot/build-react-google-maps` in flight).
+- ~~**[data] ICE trains have no names** — data gap or formatting bug? (see Investigation).~~ — **done.**
+- **[data] Explore disconnections in Europe.** → #29.
+- **[data] Explore disconnections in Korea** — "really nothing"? try another source. → tracked in #44.
+- **[data] Explore downloading other country DBs / station lists.** → tracked in #45.
 
 ## Investigation (answer before building)
 
-- **Profile the API** to find the slow part (prereq for progressive load, §4).
-- **Why are the 3D views so slow?** They should be instant. Do they restart on tab
-  switch? (render trim is a separate item, §2).
-- **ICE trains have no names** — data gap or formatting bug?
-- **"Where to sit" is stale** — find the source and why it isn't updating (§3).
+- ~~**Profile the API** to find the slow part (prereq for progressive load, §4).~~ — **done.**
+- ~~**Why are the 3D views so slow?** They should be instant. Do they restart on tab
+  switch?~~ — **done** (render trim §2 landed; view-reset-on-touch is #20).
+- ~~**ICE trains have no names** — data gap or formatting bug?~~ — **done.**
+- ~~**"Where to sit" is stale** — find the source and why it isn't updating (§3).~~ — **resolved** (boarding/step-off now live, §3).
 - **Is live re-assessment actually working?** (§4).
-- **Disconnections** — Europe and Korea (also under Data & maps).
+- **Disconnections** — Europe (#29) and Korea (#44) (also under Data & maps).
 
 ## Compliance
 
-- **Confirm all API use is legal** — ToS audit across the upstream sources.
+- **Confirm all API use is legal** — ToS audit across the upstream sources. → #22.
 
 ---
 
 ## Suggested order
+
+_Waves 1–5 are largely done (see per-section statuses above); the remaining open work
+is batch prefetch + `CachingRepository` (§8), real station-walk / route map, and the
+deferred live-tracking / AR frontier._
 
 1. ~~Render fetched `viz_export` in Section/Levels/3D (§2)~~ — **done** (+live repo §9).
 2. ~~Station autocomplete + editable departure time (§1)~~ — **done**.

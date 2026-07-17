@@ -149,6 +149,26 @@ def is_connector(tags: Dict[str, str], levels: List[float]) -> bool:
     )
 
 
+def is_area_way(tags: Dict[str, str], node_ids: List[int]) -> bool:
+    """True iff a way encloses an AREA (a polygon) rather than tracing a line --
+    a footway plaza, an indoor room, a building part. Its node ring has no
+    'first floor -> last floor' direction, so interpolating a height along its
+    perimeter is meaningless: for a multi-level area it fabricates a sloping
+    ramp and a train of phantom up/down transitions (Karlsruhe Hbf's
+    room=elevator / building:part=elevator polygon 270880470, level=0;1, whose
+    13 boundary nodes interpolated end-to-end produced a non-monotonic z that
+    read as six spurious 'other' transitions). Detected from an explicit
+    area/indoor/building tag or a closed node ring; such an area is rendered
+    flat at a single representative level instead (see way_node_heights)."""
+    if tags.get("area") == "yes":
+        return True
+    if tags.get("indoor") in ("room", "area"):
+        return True
+    if "building" in tags or "building:part" in tags:
+        return True
+    return len(node_ids) >= 4 and node_ids[0] == node_ids[-1]
+
+
 def node_kind(tags: Dict[str, str]) -> str:
     """Vertical-circulation class of a *node* the path passes through. Real
     stations frequently map an elevator as a single `highway=elevator` node
@@ -239,6 +259,7 @@ def way_node_heights(
     node_ids: List[int], coords: Dict[int, Tuple[float, float]],
     levels: List[float], proj: Projector,
     node_levels: Optional[Dict[int, float]] = None,
+    is_area: bool = False,
 ) -> Dict[int, float]:
     """Per-node Z (metres) for one way. Flat if single-level; otherwise
     interpolated first->last along cumulative horizontal distance, so an
@@ -252,12 +273,19 @@ def way_node_heights(
     level=1;2 but its nodes run L2->L1). When the endpoint nodes carry their own
     single `level` tag (node_levels), we orient the interpolation to THOSE --
     the reliable per-node signal -- so the slope always matches the floors the
-    way actually connects."""
+    way actually connects.
+
+    is_area (see is_area_way) suppresses the interpolation entirely: a polygon's
+    boundary has no along-the-slope order, so a multi-level area is rendered flat
+    at its lowest level rather than fake-sloped around its perimeter -- the level
+    change then surfaces once, at the door where the path enters/leaves it,
+    instead of as a burst of phantom transitions."""
     present = [(n, coords[n]) for n in node_ids if n in coords]
     if not present:
         return {}
-    if len(levels) == 1 or len(present) == 1:
-        z = proj.z(levels[0])
+    multi_level_area = is_area and len(set(levels)) > 1
+    if len(levels) == 1 or len(present) == 1 or multi_level_area:
+        z = proj.z(min(levels) if multi_level_area else levels[0])
         return {n: z for n, _ in present}
 
     xy = [proj.xy(lat, lon) for _, (lat, lon) in present]
@@ -281,20 +309,50 @@ def way_node_heights(
 # way list; for per-hop heights we need the specific way each hop walked)
 # ---------------------------------------------------------------------------
 
+def _hop_way_rank(tags: Dict[str, str]) -> Tuple[int, int]:
+    """Preference among ways that both place a hop's two nodes adjacent. A hop
+    takes its height from the way way_for_hop returns, so when a real,
+    level-tagged path overlaps a tag-less geometry stub tracing the very same
+    nodes -- Stuttgart Hbf's level=1 concourse AREA (way 230821002) vs. the
+    empty-tagged 3-node ways laid over stretches of its boundary -- the tagged
+    one must win. Otherwise the stub, whose absent `level` defaults to ground
+    (parse_levels(None) -> [0.0]), pins those hops to z=0 and the path yo-yos
+    between floors, firing a phantom 'vertical' transition at every node where
+    the chosen way flips. Ordered: an explicit `level` tag first, then any
+    highway/railway tag (a mapped path over bare geometry). Higher wins."""
+    has_level = 1 if tags.get("level") not in (None, "") else 0
+    has_path = 1 if (tags.get("highway") or tags.get("railway")) else 0
+    return (has_level, has_path)
+
+
 def way_for_hop(a: int, b: int, way_cache, node_to_ways) -> Optional[int]:
     """The way whose node order places a and b adjacent (in a legal direction).
-    Used to pick which way's height model a path vertex takes."""
+    Used to pick which way's height model a path vertex takes. When several ways
+    qualify -- overlapping/duplicate geometry is common indoors -- the one with
+    the most reliable level information wins (see _hop_way_rank) rather than
+    whichever the set happens to yield first."""
+    best: Optional[int] = None
+    best_rank: Optional[Tuple[int, int]] = None
     for wid in node_to_ways.get(a, ()):
-        nodes = way_cache[wid]["nodes"]
-        direction = way_direction(way_cache[wid]["tags"])
+        info = way_cache[wid]
+        nodes = info["nodes"]
+        direction = way_direction(info["tags"])
+        adjacent = False
         for i, n in enumerate(nodes):
             if n != a:
                 continue
             if i + 1 < len(nodes) and nodes[i + 1] == b and direction >= 0:
-                return wid
+                adjacent = True
+                break
             if i - 1 >= 0 and nodes[i - 1] == b and direction <= 0:
-                return wid
-    return None
+                adjacent = True
+                break
+        if not adjacent:
+            continue
+        rank = _hop_way_rank(info["tags"] or {})
+        if best_rank is None or rank > best_rank:
+            best, best_rank = wid, rank
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +541,8 @@ def export(
         tags = info["tags"] or {}
         levels = parse_levels(tags.get("level"))
         levels_seen.update(levels)
-        heights = way_node_heights(info["nodes"], coords, levels, proj, node_levels)
+        heights = way_node_heights(info["nodes"], coords, levels, proj, node_levels,
+                                   is_area=is_area_way(tags, info["nodes"]))
         way_heights[wid] = heights
         pts = [[*proj.xy(*coords[n]), heights[n]] for n in info["nodes"] if n in coords]
         if len(pts) < 2:

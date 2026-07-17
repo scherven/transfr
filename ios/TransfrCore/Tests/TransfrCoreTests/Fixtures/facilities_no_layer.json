@@ -1,0 +1,10 @@
+{
+  "lat": 52.5251,
+  "lon": 13.3694,
+  "relation_id": 5688520,
+  "station": "Berlin, S Hauptbahnhof",
+  "category": "toilets",
+  "found": false,
+  "reason": "no_poi_layer",
+  "facilities": []
+}

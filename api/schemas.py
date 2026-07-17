@@ -60,6 +60,40 @@ class Journey(BaseModel):
     transfers: List[Transfer]
 
 
+# ---------------------------------------------------------------------------
+# Streaming assessment -- /assess
+#
+# `/journeys?assess=false` returns the itineraries instantly with `pending`
+# transfers; the client then streams each real verdict in by POSTing the
+# interchange fields it already holds (from the journey's legs) to /assess. The
+# request mirrors assess_transfer's inputs exactly; the response is the same
+# Transfer the enriched /journeys would have carried.
+# ---------------------------------------------------------------------------
+
+
+class AssessInterchange(BaseModel):
+    """One change of train to assess: the arrival end (of the incoming train) and
+    the departure end (of the onward train). `at_station` is a display fallback."""
+
+    at_station: Optional[str] = None
+    arr_lat: Optional[float] = None
+    arr_lon: Optional[float] = None
+    arr_platform: Optional[str] = None
+    arr_time: Optional[str] = None
+    dep_lat: Optional[float] = None
+    dep_lon: Optional[float] = None
+    dep_platform: Optional[str] = None
+    dep_time: Optional[str] = None
+
+
+class AssessRequest(BaseModel):
+    interchanges: List[AssessInterchange] = Field(default_factory=list)
+
+
+class AssessResponse(BaseModel):
+    transfers: List[Transfer]
+
+
 class JourneysResponse(BaseModel):
     origin: Place
     destination: Place
@@ -105,6 +139,131 @@ class StationPlatformsResponse(BaseModel):
     found: bool
     platforms: List[str] = Field(default_factory=list)
     reason: Optional[str] = None
+
+
+class StationWalkRow(BaseModel):
+    """One destination platform's walk FROM the chosen source platform (a row of
+    the /station-walk 'full station walk' tool). `found=False` (with `reason`) is
+    an honest 'these two don't connect' -- core/'s own reason
+    (platform_not_found / disconnected / exceeded_plausibility_bound) -- not an
+    error, so it renders as an unreachable row rather than failing the request."""
+
+    to_platform: str
+    found: bool
+    walk_time_s: Optional[float] = None
+    walk_distance_m: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class StationWalkResponse(BaseModel):
+    """Every OTHER platform's walk FROM one source platform at the station nearest
+    a coordinate -- the 'full station walk' advanced tool (one change of station,
+    not a journey). One find_shortest_path per platform, using the SAME settings a
+    transfer verdict uses (astar + stitch bridges per config), so a row's walk time
+    equals what a `/walk` between the same two refs would report. `results` is
+    sorted nearest-first: reachable rows by ascending walk distance, then the
+    unreachable ones. `found=False` at the top level (with `reason`) when no
+    station sits near the coordinate; individual unreachable platforms are
+    `found=False` rows inside a `found=True` response."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    from_platform: str
+    step_free: bool = False
+    found: bool
+    results: List[StationWalkRow] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+class StationHealthPair(BaseModel):
+    """One platform pair that does not plainly connect. `kind` is 'stitchable'
+    (a route exists only once synthetic stitch bridges are enabled) or 'island'
+    (no route found either way). Surfaced as a few worked examples of a station's
+    disconnects."""
+
+    from_platform: str
+    to_platform: str
+    kind: str
+
+
+class StationHealthResponse(BaseModel):
+    """A single station's platform-connectivity breakdown -- the Map-health tool's
+    per-station query (/station-health). Every unordered platform pair is bucketed
+    connected / stitchable / island by two `find_shortest_path` passes (plain, then
+    with stitch bridges); `connected`/`stitchable`/`island` are pair counts and the
+    matching `*_pct` are their share of the pairs evaluated. `sampled` is true when a
+    pathologically large station was down-sampled to bound the pair count (see
+    api/station_health.py). `examples` lists a few of the non-connected pairs.
+    `found=False` (with `reason`) when no station sits near the coordinate."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    found: bool
+    platform_count: int = 0
+    connected: int = 0
+    stitchable: int = 0
+    island: int = 0
+    connected_pct: float = 0.0
+    stitchable_pct: float = 0.0
+    island_pct: float = 0.0
+    sampled: bool = False
+    examples: List[StationHealthPair] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Nearest facility -- /facilities
+#
+# The POI layer (amenity/shop/... near a station) is NOT in the tag-scoped
+# transfr_eu DB; it comes from the optional `viz_export` details layer, which
+# needs a local planet extract (see api/facilities.py). So this endpoint follows
+# the same honest-degradation pattern as boarding guidance: when the layer isn't
+# producible on this host, `found=False` with a typed `reason` (`no_poi_layer`)
+# rather than a guess. The pure ranking (nearest-first, category-filtered) is
+# tested offline against a synthetic POI list.
+# ---------------------------------------------------------------------------
+
+
+class Facility(BaseModel):
+    """One mapped facility (a POI) near the station, ranked by straight-line
+    distance from the station centroid. `category` is the OSM bucket
+    (amenity/shop/tourism/office/leisure) and `subtype` the specific tag
+    (`toilets`, `cafe`, ...), mirroring the `viz_export` details shape. The
+    `nearest_platform`/`walk_*` fields are filled only when a `from_platform`
+    anchor was given and a routed walk to the facility's nearest platform
+    resolved -- otherwise `distance_m` (straight-line) is the only measure."""
+
+    name: Optional[str] = None
+    category: str
+    subtype: Optional[str] = None
+    level: Optional[str] = None
+    distance_m: float
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    nearest_platform: Optional[str] = None
+    walk_time_s: Optional[float] = None
+    walk_distance_m: Optional[float] = None
+
+
+class FacilitiesResponse(BaseModel):
+    """Facilities of one `category` near the station nearest a coordinate, nearest
+    first. `found` is True iff at least one was returned; otherwise `reason` says
+    why (`station_unresolved`, `unsupported_category`, `no_poi_layer` when the POI
+    source isn't available on this host, or `none_mapped` when the layer is present
+    but this station tags none of that category)."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    category: str
+    found: bool
+    reason: Optional[str] = None
+    facilities: List[Facility] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

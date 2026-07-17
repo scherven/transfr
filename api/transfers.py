@@ -40,6 +40,10 @@ FEASIBLE = "feasible"
 TIGHT = "tight"
 INFEASIBLE = "infeasible"
 UNKNOWN = "unknown"
+# Not a real verdict -- a placeholder for a transfer whose walkability hasn't been
+# computed yet. `/journeys?assess=false` returns these so the itinerary list can
+# render instantly; the client then streams each real verdict in via `/assess`.
+PENDING = "pending"
 
 # `unknown` reasons owned here (core/ contributes its own: platform_not_found,
 # disconnected, exceeded_plausibility_bound, no_coordinates_for_platform_nodes).

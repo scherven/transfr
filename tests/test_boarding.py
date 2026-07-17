@@ -183,6 +183,62 @@ def test_invalid_coach_and_seat():
 
 
 # ---------------------------------------------------------------------------
+# coach_at_offset -- the step-off offset -> coach lookup (the coach-naming crux)
+# ---------------------------------------------------------------------------
+
+def test_coach_at_offset_inside_each_coach():
+    # 8 coaches from the A-end: coach c spans ((c-1)*26.4, c*26.4). A point in the
+    # middle of each span resolves to that coach.
+    f = TrainFormation.uniform("t", num_coaches=8, coach_length_m=26.4)
+    for c in range(1, 9):
+        mid = (c - 0.5) * 26.4
+        assert f.coach_at_offset(mid) == c
+
+
+def test_coach_at_offset_boundary_resolves_to_earlier_coach():
+    # At the shared boundary 26.4 (coach 1 ends, coach 2 starts) the earlier
+    # coach -- the one that ends there -- wins, matching the containment scan.
+    f = TrainFormation.uniform("t", num_coaches=3, coach_length_m=26.4)
+    assert f.coach_at_offset(0.0) == 1              # exact A-end
+    assert f.coach_at_offset(26.4) == 1             # coach 1 / coach 2 boundary
+    assert f.coach_at_offset(52.8) == 2             # coach 2 / coach 3 boundary
+    assert f.coach_at_offset(79.2) == 3             # exact far end (last coach's end)
+
+
+def test_coach_at_offset_before_first_and_past_last_clamp_to_nearest():
+    f = TrainFormation.uniform("t", num_coaches=4, coach_length_m=26.4)
+    assert f.coach_at_offset(-10.0) == 1            # before coach 1 -> nearest is 1
+    assert f.coach_at_offset(1000.0) == 4           # past coach 4 -> nearest is 4
+
+
+def test_coach_at_offset_in_a_gap_picks_the_nearer_coach():
+    # 10 m couplings between coaches: coach 1 (0..26.4), coach 2 (36.4..62.8).
+    f = TrainFormation.uniform("t", num_coaches=3, coach_length_m=26.4, gap_m=10.0)
+    assert f.coach_at_offset(30.0) == 1             # 3.6 m past coach 1, 6.4 m before coach 2
+    assert f.coach_at_offset(34.0) == 2             # 7.6 m past coach 1, 2.4 m before coach 2
+    assert f.coach_at_offset(31.4) == 1             # equidistant (5 m) -> earlier coach breaks the tie
+
+
+def test_coach_at_offset_handles_unordered_and_lettered_spans():
+    # Spans given out of platform order, with letter ids (Colmar-style): the scan
+    # sorts by start offset, so the lookup is independent of dict order.
+    f = TrainFormation("t", coach_span_m={"C": (60.0, 90.0), "A": (0.0, 30.0), "B": (30.0, 60.0)})
+    assert f.coach_at_offset(10.0) == "A"
+    assert f.coach_at_offset(45.0) == "B"
+    assert f.coach_at_offset(75.0) == "C"
+    assert f.coach_at_offset(120.0) == "C"          # past the far end -> nearest
+
+
+def test_coach_at_offset_inverts_seat_offset():
+    # The two directions agree: a seat's offset resolves back to that seat's coach
+    # (seat offsets are strictly interior to their span, so containment is exact).
+    f = TrainFormation.uniform("t", num_coaches=8, coach_length_m=26.4, seats_per_coach=60)
+    for c in range(1, 9):
+        for s in (1, 30, 60):
+            assert f.coach_at_offset(f.seat_offset_m(c, s)) == c
+
+
+# ---------------------------------------------------------------------------
 # resolve_alighting_point -- the seat -> point crux (incl. the user's example)
 # ---------------------------------------------------------------------------
 

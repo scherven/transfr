@@ -9,6 +9,11 @@ public struct RootView: View {
     @State private var model: TripModel
     @State private var settings = SettingsStore()
     @State private var location = LocationManager()
+    /// Cold-launch animation gate. True on first creation of the shell (once per
+    /// app launch), flipped to false when the launch mark finishes — a plain
+    /// crossfade to InputView underneath. The app content is always present below
+    /// the overlay, so nothing here can block or gate the app if the mark fails.
+    @State private var showLaunch = true
 
     /// Inject any `JourneyRepository`. Defaults to the bundled sample tier so the
     /// app is runnable with no server (the API is still in progress).
@@ -23,7 +28,7 @@ public struct RootView: View {
                     switch route {
                     case .results:              ResultsView()
                     case .journey:              JourneyView()
-                    case .preparingWalks(let start): PreparingWalksView(startIndex: start)
+                    case .preparingWalks:       PreparingWalksView()
                     case .carousel(let start):  CarouselView(startIndex: start)
                     case .walk(let idx):        WalkView(transferIndex: idx)
                     case .ar(let idx):          ARView(transferIndex: idx)
@@ -43,7 +48,24 @@ public struct RootView: View {
         .environment(model)
         .environment(settings)
         .environment(location)
+        // Tell InputView the launch is playing, so it hides its own title until the
+        // flying mark lands on it (the mark is the sole wordmark during the fly).
+        .environment(\.isLaunching, showLaunch)
         .tint(Theme.accent)
+        // The launch overlay reads InputView's "transfr" title frame (published as
+        // a bounds anchor) so the finished mark can fly up and settle onto it —
+        // then a crossfade reveals the identical (blue) title underneath.
+        .overlayPreferenceValue(WordmarkAnchorKey.self) { anchor in
+            GeometryReader { proxy in
+                if showLaunch {
+                    LaunchView(targetRect: anchor.map { proxy[$0] }) {
+                        withAnimation(.easeOut(duration: 0.35)) { showLaunch = false }
+                    }
+                    .transition(.opacity)
+                }
+            }
+            .ignoresSafeArea()
+        }
         .preferredColorScheme(settings.theme.colorScheme)
     }
 }

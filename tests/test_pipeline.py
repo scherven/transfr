@@ -196,6 +196,67 @@ def test_enrich_memoizes_shared_change_across_journeys(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Progressive split: assess=false is pending + dbless; streamed == bundled
+# ---------------------------------------------------------------------------
+
+def test_enrich_assess_false_is_pending_without_db():
+    """The fast path: assess=false returns every transfer `pending` with no walk
+    and no DB touched (conn=None), so the itinerary list renders instantly."""
+    resp = enrich(conn=None, search_result=_search_result("de_munchen_hamburg"), assess=False)
+    assert resp.journeys
+    saw = False
+    for j in resp.journeys:
+        for t in j.transfers:
+            saw = True
+            assert t.verdict == "pending"
+            assert t.walk_time_s is None and t.walk_distance_m is None and t.relation_id is None
+            # still carries what the client needs to render + then stream:
+            assert t.layover_s is not None
+        if j.transfers:
+            assert j.verdict == "pending"
+    assert saw, "expected at least one interchange in this DACH corpus"
+
+
+def _interchange_reqs(journey_raw):
+    from api.transitous import interchanges as _ich
+    from api import schemas
+    reqs = []
+    for arrive, depart in _ich(journey_raw):
+        arr, dep = arrive.get("destination") or {}, depart.get("origin") or {}
+        reqs.append(schemas.AssessInterchange(
+            at_station=arr.get("name"),
+            arr_lat=arr.get("latitude"), arr_lon=arr.get("longitude"),
+            arr_platform=arrive.get("arrival_platform"), arr_time=arrive.get("arrival"),
+            dep_lat=dep.get("latitude"), dep_lon=dep.get("longitude"),
+            dep_platform=depart.get("departure_platform"), dep_time=depart.get("departure"),
+        ))
+    return reqs
+
+
+@DB
+def test_streamed_assess_matches_bundled_enrich():
+    """The progressive path must give the SAME verdicts as the bundled one:
+    assess_interchanges over the client-built requests reproduces what
+    enrich(assess=True) would have returned for each journey."""
+    import db
+    from api import schemas as S
+    from api.pipeline import assess_interchanges
+
+    conn = db.connect(connect_timeout=5)
+    raw = _search_result("de_munchen_hamburg")
+    bundled = enrich(conn, raw, assess=True)
+    for jb in bundled.journeys:
+        raw_j = next(x for x in raw["journeys"] if x["id"] == jb.id)
+        streamed = assess_interchanges(conn, _interchange_reqs(raw_j)).transfers
+        assert len(streamed) == len(jb.transfers)
+        for a, b in zip(jb.transfers, streamed):
+            assert (a.verdict, a.walk_time_s, a.walk_distance_m, a.relation_id, a.reason,
+                    a.arrival_platform, a.departure_platform, a.layover_s) == \
+                   (b.verdict, b.walk_time_s, b.walk_distance_m, b.relation_id, b.reason,
+                    b.arrival_platform, b.departure_platform, b.layover_s)
+
+
+# ---------------------------------------------------------------------------
 # DB-gated: real enrichment over a DACH fixture
 # ---------------------------------------------------------------------------
 

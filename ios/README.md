@@ -118,11 +118,19 @@ no secret in source. A `CachingRepository` decorator is the natural next layer f
 the offline unit-of-work (DESIGN.md §13.9).
 
 > **Running against the live API.** The scheme injects the base URL and key at run
-> time. The key is expanded from the gitignored secret at generation time, so before
-> `xcodegen generate` run `export TRANSFR_API_KEY=$(cat ../deploy/secrets/api_key)`.
-> The generated `.xcodeproj` is gitignored (the baked key never lands in git). For a
-> Simulator dev server on `http://localhost:5001`, `NSAllowsLocalNetworking` (also in
-> `project.yml`) lets ATS through; a tunnel URL is HTTPS and needs no exception.
+> time. The key is expanded from the gitignored secret at generation time, so
+> regenerate with **`./generate.sh`** (from `ios/`) rather than a bare `xcodegen
+> generate` — the wrapper sources `deploy/secrets/api_key` for you, so the scheme
+> never bakes the literal `${TRANSFR_API_KEY}` placeholder and 401s. The generated
+> `.xcodeproj` is gitignored (the baked key never lands in git). For a Simulator dev
+> server on `http://localhost:5001`, `NSAllowsLocalNetworking` (also in `project.yml`)
+> lets ATS through; a tunnel URL is HTTPS and needs no exception.
+>
+> **You rarely need to regenerate.** `TransfrUI` and `TransfrCore` are SwiftPM
+> packages, so Xcode picks up edits (and new/deleted files) under their `Sources/`
+> live — no regeneration. Only re-run `./generate.sh` after editing `project.yml`
+> or adding/removing a file under `ios/App/` (just `TransfrMain.swift`, `Info.plist`,
+> and the asset catalog).
 
 | File / dir | What |
 |---|---|

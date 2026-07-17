@@ -1,0 +1,28 @@
+{
+    "lat": 52.5251,
+    "lon": 13.3694,
+    "relation_id": 5688520,
+    "station": "Berlin, S Hauptbahnhof",
+    "found": true,
+    "platform_count": 14,
+    "connected": 89,
+    "stitchable": 1,
+    "island": 1,
+    "connected_pct": 97.8,
+    "stitchable_pct": 1.1,
+    "island_pct": 1.1,
+    "sampled": false,
+    "examples": [
+        {
+            "from_platform": "9",
+            "to_platform": "12",
+            "kind": "stitchable"
+        },
+        {
+            "from_platform": "2",
+            "to_platform": "15",
+            "kind": "island"
+        }
+    ],
+    "reason": null
+}

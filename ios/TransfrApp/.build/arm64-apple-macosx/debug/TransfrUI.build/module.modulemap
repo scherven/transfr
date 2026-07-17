@@ -1,4 +1,4 @@
 module TransfrUI {
-    header "/Users/simonchervenak/Documents/GitHub/transfr/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrUI.build/TransfrUI-Swift.h"
+    header "/private/tmp/claude-501/-Users-simonchervenak-Documents-GitHub-transfr/4c697f26-fb6a-4253-8cfb-c9b810ff4395/scratchpad/merge-work/ios/TransfrApp/.build/arm64-apple-macosx/debug/TransfrUI.build/TransfrUI-Swift.h"
     requires objc
 }

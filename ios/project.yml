@@ -33,7 +33,11 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: transfr
-        UILaunchScreen: {}
+        # Theme-aware launch background (matches Theme.paper light/dark) so the
+        # cold-launch screen never flashes white before SwiftUI paints — the fix
+        # for the dark-mode startup flicker. The colour lives in App/Assets.xcassets.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:
@@ -68,11 +72,11 @@ schemes:
       config: Debug
       # Injected into the running app (read by TransfrUI/AppConfig). The key is
       # NOT stored here: `${TRANSFR_API_KEY}` is expanded from the shell at
-      # `xcodegen generate` time, so export it from the gitignored secret first:
-      #     export TRANSFR_API_KEY=$(cat ../deploy/secrets/api_key)
-      #     xcodegen generate
-      # The generated .xcodeproj is gitignored, so the baked key never lands in
-      # git. Unset TRANSFR_API_URL or set TRANSFR_USE_SAMPLE=1 to run offline.
+      # `xcodegen generate` time. Regenerate with `./generate.sh` (NOT bare
+      # xcodegen) -- it sources the key from the gitignored secret so the scheme
+      # never bakes the literal `${TRANSFR_API_KEY}` and 401s. The generated
+      # .xcodeproj is gitignored, so the baked key never lands in git. Set
+      # TRANSFR_USE_SAMPLE=1 to run offline.
       environmentVariables:
         TRANSFR_API_URL: https://api.trans-fr.com
         TRANSFR_API_KEY: ${TRANSFR_API_KEY}

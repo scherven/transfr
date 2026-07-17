@@ -45,6 +45,11 @@ MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)
 # (each walk re-runs the platform search).
 MAX_WALKS_BATCH = _int("TRANSFR_MAX_WALKS_BATCH", 12)
 
+# Upper bound on interchanges assessed in one POST /assess. A journey has only a
+# handful of changes; the client streams by firing these per-transfer, so this is
+# a generous safety cap, not a normal batch size.
+MAX_ASSESS_BATCH = _int("TRANSFR_MAX_ASSESS_BATCH", 24)
+
 # CORS: comma-separated origins, or "*" for all (dev default). Irrelevant to the
 # native iOS client (CORS is a browser mechanism); tighten before any web surface.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("TRANSFR_CORS_ORIGINS", "*").split(",") if o.strip()]

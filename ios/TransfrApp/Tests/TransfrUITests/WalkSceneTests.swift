@@ -67,8 +67,8 @@ struct WalkSceneTests {
 
             try rasterize(SectionGeometryCanvas(scene: s),
                           size: CGSize(width: 360, height: 220), tag: "section_\(short)")
-            // A couple of the floors the walk visits.
-            for lvl in Array(Set(s.pathLevels)).prefix(2) {
+            // Every floor the walk visits (sorted, so the render set is stable).
+            for lvl in s.pathLevels {
                 try rasterize(PlanGeometryCanvas(scene: s, level: lvl),
                               size: CGSize(width: 360, height: 260), tag: "level\(lvl)_\(short)")
             }

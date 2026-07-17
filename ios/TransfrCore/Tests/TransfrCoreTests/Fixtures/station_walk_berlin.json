@@ -1,0 +1,40 @@
+{
+  "lat": 52.5251,
+  "lon": 13.3694,
+  "relation_id": 5688520,
+  "station": "Berlin, S Hauptbahnhof",
+  "from_platform": "1",
+  "step_free": false,
+  "found": true,
+  "results": [
+    {
+      "to_platform": "2",
+      "found": true,
+      "walk_time_s": 5.3,
+      "walk_distance_m": 7.4,
+      "reason": null
+    },
+    {
+      "to_platform": "4",
+      "found": true,
+      "walk_time_s": 81.6,
+      "walk_distance_m": 81.5,
+      "reason": null
+    },
+    {
+      "to_platform": "16",
+      "found": true,
+      "walk_time_s": 122.0,
+      "walk_distance_m": 107.0,
+      "reason": null
+    },
+    {
+      "to_platform": "99",
+      "found": false,
+      "walk_time_s": null,
+      "walk_distance_m": null,
+      "reason": "platform_not_found"
+    }
+  ],
+  "reason": null
+}

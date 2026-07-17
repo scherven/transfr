@@ -1,10 +1,15 @@
 import SwiftUI
 import Observation
 
-/// The user's preferences (DESIGN.md §6.8 / §7.9), persisted via `@AppStorage`.
+/// The user's preferences (DESIGN.md §6.8 / §7.9), persisted to `UserDefaults`.
+/// `@AppStorage` doesn't compose with `@Observable`, so each preference writes
+/// itself straight through on `didSet` — the store is its own persistence layer,
+/// so a change is durable the instant it happens (no `onDisappear`/`onChange`
+/// plumbing to forget). `load()` seeds the initial values in `init()`.
+///
 /// These are real and durable; whether each one yet *affects routing* is tracked
-/// in the repo-root `TODO.md` §6 (e.g. `stepFree` should ride on every walk request; the
-/// makeable cut-off should re-verdict client-side). The theme override is fully
+/// in the repo-root `TODO.md` §6 (e.g. `stepFree` rides every walk request; the
+/// makeable cut-off would re-verdict client-side). The theme override is fully
 /// wired to `.preferredColorScheme`.
 @MainActor
 @Observable
@@ -23,26 +28,37 @@ public final class SettingsStore {
     }
 
     // Getting around
-    public var stepFree = false
-    public var pace: Pace = .normal
-    public var preferEscalators = true
+    public var stepFree = false { didSet { write(stepFree, "stepFree") } }
+    public var pace: Pace = .normal { didSet { write(pace.rawValue, "pace") } }
+    public var preferEscalators = true { didSet { write(preferEscalators, "preferEscalators") } }
     // Making the connection
-    public var makeablePct = 70
-    public var bufferS = 60
+    public var makeablePct = 70 { didSet { write(makeablePct, "makeablePct") } }
+    public var bufferS = 60 { didSet { write(bufferS, "bufferS") } }
     // Appearance
-    public var theme: ThemeMode = .system
-    public var units: Units = .metric
+    public var theme: ThemeMode = .system { didSet { write(theme.rawValue, "theme") } }
+    public var units: Units = .metric { didSet { write(units.rawValue, "units") } }
     // On the move
-    public var liveActivity = true
-    public var autoARLeadS = 90   // 0 = off
+    public var liveActivity = true { didSet { write(liveActivity, "liveActivity") } }
+    public var autoARLeadS = 90 { didSet { write(autoARLeadS, "autoARLeadS") } }   // 0 = off
 
     public init() { load() }
 
-    // MARK: - Persistence (@AppStorage-style, but on the observable)
+    // MARK: - Persistence (write-through on didSet)
 
     private let d = UserDefaults.standard
+    /// Suppresses the `didSet` write-back while `load()` seeds values from disk,
+    /// so launch doesn't echo each just-read value straight back to `UserDefaults`.
+    private var isLoading = false
+
+    /// Persist one preference immediately. No-op while `load()` is running.
+    private func write(_ value: Any, _ key: String) {
+        guard !isLoading else { return }
+        d.set(value, forKey: key)
+    }
 
     private func load() {
+        isLoading = true
+        defer { isLoading = false }
         stepFree = d.bool(forKey: "stepFree")
         if let p = d.string(forKey: "pace").flatMap(Pace.init) { pace = p }
         preferEscalators = d.object(forKey: "preferEscalators") as? Bool ?? true
@@ -52,18 +68,6 @@ public final class SettingsStore {
         if let u = d.string(forKey: "units").flatMap(Units.init) { units = u }
         liveActivity = d.object(forKey: "liveActivity") as? Bool ?? true
         autoARLeadS = d.object(forKey: "autoARLeadS") as? Int ?? 90
-    }
-
-    public func persist() {
-        d.set(stepFree, forKey: "stepFree")
-        d.set(pace.rawValue, forKey: "pace")
-        d.set(preferEscalators, forKey: "preferEscalators")
-        d.set(makeablePct, forKey: "makeablePct")
-        d.set(bufferS, forKey: "bufferS")
-        d.set(theme.rawValue, forKey: "theme")
-        d.set(units.rawValue, forKey: "units")
-        d.set(liveActivity, forKey: "liveActivity")
-        d.set(autoARLeadS, forKey: "autoARLeadS")
     }
 
     /// Worked example for the makeable slider: how much walking is allowed on an

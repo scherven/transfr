@@ -87,23 +87,45 @@ public enum RouteLinkParser {
     /// can see the real endpoints. Pure host check — no network.
     public static func isShortLink(_ raw: String) -> Bool {
         guard let url = firstURL(in: raw), let host = url.host?.lowercased() else { return false }
-        return host.contains("goo.gl") || host == "g.co" || host.hasSuffix(".g.co")
+        return isGoogleShortHost(host)
+    }
+
+    /// A Google short-link host, matched by exact domain / dotted suffix rather than
+    /// substring so an attacker host (`evilgoo.gl.example.com`, `goo.gl.evil.com`)
+    /// can't be mistaken for one and expanded over the network.
+    private static func isGoogleShortHost(_ host: String) -> Bool {
+        host == "goo.gl" || host.hasSuffix(".goo.gl")
+            || host == "g.co" || host.hasSuffix(".g.co")
     }
 
     /// Parse an already-expanded link. Throws rather than returning a half-empty
     /// result so the caller can surface a precise message. Never touches the
     /// network — a short link throws `.shortLinkNeedsExpansion`.
     public static func parse(_ raw: String, timeZone: TimeZone = .current) throws -> ParsedRouteLink {
+        try parse(raw, timeZone: timeZone, depth: 0)
+    }
+
+    private static func parse(_ raw: String, timeZone: TimeZone, depth: Int) throws -> ParsedRouteLink {
         guard let url = firstURL(in: raw) else { throw ParseError.notAURL }
         guard let host = url.host?.lowercased() else { throw ParseError.notAURL }
 
-        if host.contains("goo.gl") || host == "g.co" || host.hasSuffix(".g.co") {
+        if isGoogleShortHost(host) {
             throw ParseError.shortLinkNeedsExpansion(url)
+        }
+
+        // Google consent / redirect interstitial (routine in the EU): the page we
+        // actually want is wrapped in a `continue=` (consent) or `q=` (`/url`
+        // bounce) param. Unwrap and re-parse it so a Maps link that lands on
+        // `consent.google.com` still resolves as Google instead of failing as an
+        // unrecognised host. `depth` guards against a pathological gateway loop.
+        if depth < 3, let inner = googleGatewayTarget(url, host: host) {
+            return try parse(inner, timeZone: timeZone, depth: depth + 1)
         }
 
         let path = url.path
         let isGoogle = host.contains("google.") && (path.contains("/maps") || path.contains("/dir")
-                        || queryValue(url, "origin") != nil || queryValue(url, "destination") != nil)
+                        || queryValue(url, "origin") != nil || queryValue(url, "destination") != nil
+                        || queryValue(url, "saddr") != nil || queryValue(url, "daddr") != nil)
         let isApple = host.contains("maps.apple.com")
                         || (host.contains("apple.com") && path.contains("map"))
         let isDB = host.hasSuffix("bahn.de") || host.contains(".bahn.de")
@@ -136,6 +158,12 @@ public enum RouteLinkParser {
         // 1) Maps-URLs API form: ?api=1&origin=…&destination=…&travelmode=…
         if let o = queryValue(url, "origin") { assign(o, &from, &fromCoord) }
         if let d = queryValue(url, "destination") { assign(d, &to, &toCoord) }
+
+        // 1b) Classic Maps directions form: ?saddr=…&daddr=…&dirflg=… — what the
+        //     Google Maps app's share sheet emits today (endpoints in the query,
+        //     not `/dir/` path segments; `saddr`/`daddr` rather than origin/dest).
+        if from == nil, fromCoord == nil, let s = queryValue(url, "saddr") { assign(s, &from, &fromCoord) }
+        if to == nil, toCoord == nil, let d = queryValue(url, "daddr") { assign(d, &to, &toCoord) }
 
         // 2) /maps/dir/<from>/<to>[/<waypoints…>]/@…/data=… path form.
         let segments = url.path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
@@ -205,6 +233,15 @@ public enum RouteLinkParser {
             case 4: return .flight
             default: break
             }
+        }
+        // Classic `dirflg` mode letter (may carry a suffix, e.g. `rBSTR` = transit
+        // with bus/subway/train sub-options), so key off the leading character.
+        switch queryValue(url, "dirflg")?.lowercased().first {
+        case "r": return .transit
+        case "w": return .walking
+        case "d": return .driving
+        case "b": return .cycling
+        default:  break
         }
         if url.absoluteString.contains("am=t") { return .transit }   // transit map layer
         return .unknown
@@ -331,6 +368,26 @@ public enum RouteLinkParser {
     private static func queryValue(_ url: URL, _ name: String) -> String? {
         URLComponents(url: url, resolvingAgainstBaseURL: false)?
             .queryItems?.first { $0.name == name }?.value?.nonBlank
+    }
+
+    /// The wrapped destination of a Google consent / redirect gateway
+    /// (`consent.google.com/…?continue=<real url>`, or a `google.com/url?q=<real
+    /// url>` bounce), or nil when `url` isn't one. Only unwraps to a host we already
+    /// parse, so it can't be used to smuggle in an arbitrary provider.
+    private static func googleGatewayTarget(_ url: URL, host: String) -> String? {
+        let isConsent = host.hasPrefix("consent.") && host.contains("google")
+        let isRedirect = host.contains("google.") && url.path == "/url"
+        guard isConsent || isRedirect else { return nil }
+        for key in ["continue", "url", "q", "dest"] {
+            guard let raw = queryValue(url, key), let inner = firstURL(in: raw),
+                  let innerHost = inner.host?.lowercased() else { continue }
+            if innerHost.contains("google.") || isGoogleShortHost(innerHost)
+                || innerHost == "bahn.de" || innerHost.hasSuffix(".bahn.de")
+                || innerHost == "apple.com" || innerHost.hasSuffix(".apple.com") {
+                return inner.absoluteString
+            }
+        }
+        return nil
     }
 
     /// Split a raw query/fragment string into a dict, percent-decoding values.

@@ -2,9 +2,10 @@ import SwiftUI
 
 /// Full settings — the prototype's `#s-settings` (§6.8), grouped: Getting around ·
 /// Making the connection · Appearance · On the move · Power tools · About. Every
-/// control is bound to `SettingsStore` and persisted; the Theme control drives
-/// `.preferredColorScheme` for real. Whether each preference yet affects routing
-/// is tracked in the repo-root `TODO.md` (§6).
+/// control is bound to `SettingsStore`, which persists each change on `didSet`, so
+/// this view carries no persistence lifecycle of its own; the Theme control drives
+/// `.preferredColorScheme` for real (via `RootView`). Whether each preference yet
+/// affects routing is tracked in the repo-root `TODO.md` (§6).
 struct SettingsView: View {
     @Environment(SettingsStore.self) private var s
 
@@ -13,12 +14,10 @@ struct SettingsView: View {
         ScrollView {
             VStack(spacing: 0) {
                 SectionHeader(text: "Getting around")
-                SettingRow(icon: "figure.walk", title: "Stairs-free routes",
-                           subtitle: "Route via lifts and ramps") {
+                SettingRow(icon: "figure.walk", title: "Stairs-free routes") {
                     TransfrToggle(isOn: $s.stepFree)
                 }.padding(.bottom, 8)
-                SettingStack(icon: "figure.walk.motion", title: "Walking pace",
-                             subtitle: "Assumed pace between platforms") {
+                SettingStack(icon: "figure.walk.motion", title: "Walking pace") {
                     SegmentedControl(options: SettingsStore.Pace.allCases, selection: $s.pace) { $0.label }
                 }.padding(.bottom, 8)
                 SettingRow(icon: "stairs", title: "Prefer escalators",
@@ -34,12 +33,10 @@ struct SettingsView: View {
                 }
 
                 SectionHeader(text: "Appearance")
-                SettingStack(icon: "moon.stars", title: "Theme",
-                             subtitle: "Light, dark, or system") {
+                SettingStack(icon: "moon.stars", title: "Theme") {
                     SegmentedControl(options: SettingsStore.ThemeMode.allCases, selection: $s.theme) { $0.label }
                 }.padding(.bottom, 8)
-                SettingStack(icon: "ruler", title: "Distance units",
-                             subtitle: "Shown on walks and platforms") {
+                SettingStack(icon: "ruler", title: "Distance units") {
                     SegmentedControl(options: SettingsStore.Units.allCases, selection: $s.units) { $0.label }
                 }
 
@@ -67,12 +64,9 @@ struct SettingsView: View {
             }
             .padding(20)
         }
-        .scrollBounceBehavior(.basedOnSize)
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: s.theme) { _, _ in s.persist() }
-        .onDisappear { s.persist() }
     }
 
     private var makeableCard: some View {
@@ -107,7 +101,7 @@ struct SettingsView: View {
                 }
                 .font(.system(size: 10.5)).foregroundStyle(Theme.ink3).padding(.top, 6)
 
-                (Text("On an 8-min connection, that's up to ")
+                (Text("On an 8 minute connection, that's up to ")
                  + Text(s.makeableExample).font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.ink)
                  + Text(" of walking before it's flagged."))
                     .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).padding(.top, 10)
