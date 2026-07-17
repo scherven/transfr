@@ -146,24 +146,6 @@
   .stopsub{font-size:11px;color:var(--ink3)}
   .plat{font-size:12px;font-weight:600}
 
-  /* ── Result card w/ mini-map ── */
-  .cards{display:flex;flex-direction:column;gap:12px}
-  .rcard{display:flex;gap:0;background:var(--panel);border-radius:16px;box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--line);overflow:hidden}
-  .rcard .body{flex:1;padding:14px 14px 13px;min-width:0}
-  .rcard .thumb{width:96px;flex:0 0 auto;border-left:1px solid var(--line2);background:var(--sea);position:relative}
-  .rcard .thumb svg{width:100%;height:100%;display:block}
-  .thumb .thumb-tag{position:absolute;left:6px;bottom:6px;font-size:9px;font-weight:600;color:var(--ink3);background:var(--panel);padding:1px 5px;border-radius:6px;box-shadow:0 0 0 1px var(--line2)}
-  .rc-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
-  .rc-times{font-size:17px;font-weight:700}
-  .rc-flow{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:9px}
-  .pill{font-size:10.5px;font-weight:600;padding:3px 7px;border-radius:20px;background:var(--panel2);color:var(--ink2);white-space:nowrap}
-  .pill.v-go{background:var(--go-soft);color:var(--go)} .pill.v-tight{background:var(--tight-soft);color:var(--tight)}
-  .pill.v-unknown{background:var(--nodata-soft);color:var(--nodata)}
-  .arw{color:var(--ink3);font-size:10px}
-  .rc-meta{display:flex;gap:12px;font-size:11.5px;color:var(--ink3);margin-top:10px}
-  .rc-meta b{color:var(--ink2);font-weight:600}
-  .best-tag{font-size:10px;font-weight:700;color:#fff;background:var(--accent);padding:2px 7px;border-radius:20px;margin-bottom:8px;display:inline-block}
-
   /* ── Input / location screen ── */
   .fieldcard{background:var(--panel);border-radius:16px;box-shadow:inset 0 0 0 1px var(--line);padding:4px 6px}
   .field{display:flex;align-items:center;gap:11px;padding:11px 8px}
@@ -219,6 +201,10 @@
   .dcard .dn{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--accent)}
   .dcard h4{margin:8px 0 6px;font-size:16px}
   .dcard p{margin:0;font-size:13px;color:var(--ink2)}
+  .dcard.decided{box-shadow:var(--shadow-sm),inset 0 0 0 1.5px var(--go)}
+  .dcard.decided .dn{color:var(--go)}
+  .dcard .ans{margin-top:10px;font-size:13px;color:var(--ink);display:flex;gap:8px;align-items:flex-start}
+  .dcard .ans .m{color:var(--go);flex:0 0 auto;font-weight:700}
 
   footer{padding:40px 0 72px;color:var(--ink3);font-size:12.5px;border-top:1px solid var(--line);margin-top:24px}
 
@@ -257,14 +243,16 @@
   <!-- 1 · THE MAP -->
   <section class="col">
     <div class="sec-head"><span class="sec-num">01</span><h2>The map</h2></div>
-    <p class="sec-sub">The whole connection at a glance: the line is the trains, the dots are your changes — coloured by whether you'll make them. Flip on “start from my location” to see the origin become a live location dot. Try the three real options for Hamburg → Stuttgart.</p>
+    <p class="sec-sub">The whole connection at a glance: the line is the trains, the dots are your changes — coloured by whether you'll make them. Flip on “start from my location” to see the origin become a live location dot. Switch searches to compare a German trip with a French/Swiss one — each real, each fitted to its own patch of Europe.</p>
 
     <div class="controls">
-      <div class="seg" id="routeseg" role="group" aria-label="Choose a connection">
-        <button data-i="0" aria-pressed="true">via Göttingen · Mannheim</button>
-        <button data-i="1" aria-pressed="false">via Frankfurt</button>
-        <button data-i="2" aria-pressed="false">via Kassel · Frankfurt</button>
+      <div class="seg" id="searchseg" role="group" aria-label="Choose a search">
+        <button data-i="0" aria-pressed="true">Hamburg → Stuttgart</button>
+        <button data-i="1" aria-pressed="false">Paris → Zürich</button>
       </div>
+    </div>
+    <div class="controls">
+      <div class="seg" id="routeseg" role="group" aria-label="Choose a connection"></div>
       <div class="toggle" id="loctoggle" role="button" tabindex="0" aria-pressed="true">
         <span class="switch"></span> Start from my location
       </div>
@@ -300,13 +288,16 @@
   <!-- 2 · WHERE THEY SHOW UP -->
   <section class="col">
     <div class="sec-head"><span class="sec-num">02</span><h2>Where they show up</h2></div>
-    <p class="sec-sub">The same renderer, three sizes. A thumbnail on every option so the list is scannable; the full map on the connection itself; and a live version that moves with you once you're travelling.</p>
+    <p class="sec-sub">The same renderer ships in exactly two places — and only two. It anchors the connection page you just saw, and it powers a live view that moves with you once you're travelling.</p>
 
     <div class="twoup">
       <div class="stack">
-        <div style="font-size:13px;font-weight:600;color:var(--ink3);letter-spacing:.04em;text-transform:uppercase">On the results list — a thumbnail per option</div>
-        <div class="cards" id="cards"></div>
-        <p class="note" style="font-size:13px">Each card carries its own mini-map. The eye sorts them before it reads a word — the Frankfurt option is visibly straighter, the Kassel option visibly bends west.</p>
+        <div style="font-size:13px;font-weight:600;color:var(--ink3);letter-spacing:.04em;text-transform:uppercase">On the connection — the full map</div>
+        <div class="note" style="font-size:13.5px">
+          <h4 style="margin:0 0 6px">Where a map earns a full screen</h4>
+          <p>The interactive map in §01 <b>is</b> the connection screen — a full-width paper map above the stop list, on every journey you open. That's its home surface.</p>
+          <p style="margin-top:10px">We weighed a mini-map thumbnail on each result card too, and <b>decided against it</b> (Decision B): a schematic that small stops carrying its information. Result cards stay text; the map appears only where it can actually be read.</p>
+        </div>
       </div>
 
       <div class="stack">
@@ -403,7 +394,7 @@
         <ul class="pluslist">
           <li><span class="m tick">✓</span> Matches the app exactly, light &amp; dark, offline.</li>
           <li><span class="m tick">✓</span> Free; no keys, no tile bill, no attribution bar.</li>
-          <li><span class="m tick">✓</span> Perfect for thumbnails — 30 tiny maps cost nothing.</li>
+          <li><span class="m tick">✓</span> Cheap to redraw — the live view and every connection, any size, free.</li>
           <li><span class="m cross">✗</span> Not zoomable to street level; it's a schematic, not a survey.</li>
         </ul>
       </div>
@@ -415,32 +406,33 @@
           <li><span class="m tick">✓</span> A true map: pan, zoom, streets, real geography.</li>
           <li><span class="m tick">✓</span> Free on iOS, no API key, first-party.</li>
           <li><span class="m cross">✗</span> Heavier; its look is Apple's, not ours.</li>
-          <li><span class="m cross">✗</span> Wants network; snapshots per card get expensive.</li>
+          <li><span class="m cross">✗</span> Wants network; offline use and repeated redraws get costly.</li>
         </ul>
       </div>
     </div>
-    <p class="note" style="margin-top:18px"><b>My recommendation:</b> ship the <b>paper map</b> everywhere first — it's consistent, cheap, and offline, which suits a transit app. If you want a true zoomable map on the single full-screen connection view, we add <b>MapKit there only</b> and keep the vector thumbnails on cards. Best of both, one screen at a time.</p>
+    <p class="note" style="margin-top:18px"><b>My recommendation:</b> ship the <b>paper map</b> on both surfaces first — it's consistent, cheap, and offline, which suits a transit app. If you want a true zoomable map on the full-screen connection view, we add <b>MapKit there only</b> and keep the paper map on the live view. Best of both, one screen at a time.</p>
   </section>
 
   <hr class="rule">
 
   <!-- 5 · DECISIONS -->
   <section class="col">
-    <div class="sec-head"><span class="sec-num">05</span><h2>Your call before I build</h2></div>
-    <p class="sec-sub">Three small decisions turn this into work. Tell me and I'll wire it into the SwiftUI app (this lives in <span class="mono" style="font-size:13px">agents/design/route-maps.html</span>, next to the app prototype).</p>
+    <div class="sec-head"><span class="sec-num">05</span><h2>Decisions</h2></div>
+    <p class="sec-sub">One is settled (marked ✓ below); the other two I still need your call on before wiring it into the SwiftUI app (this lives in <span class="mono" style="font-size:13px">agents/design/route-maps.html</span>, next to the app prototype).</p>
     <div class="decisions">
       <div class="dcard">
-        <div class="dn">Decision A</div>
+        <div class="dn">Decision A · Open</div>
         <h4>Map style</h4>
-        <p>Paper map everywhere, or paper thumbnails + MapKit on the full view? I recommend the latter.</p>
+        <p>Paper map on both surfaces, or paper on the live view + MapKit on the connection page? I lean to the latter — see §04.</p>
+      </div>
+      <div class="dcard decided">
+        <div class="dn">Decision B · Decided</div>
+        <h4>Where the map shows up</h4>
+        <p>A mini-map on every result card, or only where a map earns a full screen?</p>
+        <div class="ans"><span class="m">✓</span><span><b>The connection page and the live view</b> — the two screens it already ships on. No thumbnails on result cards.</span></div>
       </div>
       <div class="dcard">
-        <div class="dn">Decision B</div>
-        <h4>Thumbnails on cards</h4>
-        <p>Add the mini-map to every result card, or keep the map only on the connection &amp; live screens?</p>
-      </div>
-      <div class="dcard">
-        <div class="dn">Decision C</div>
+        <div class="dn">Decision C · Open</div>
         <h4>Location default</h4>
         <p>Default “From” to current location on first launch, or leave it opt-in behind a small button?</p>
       </div>
@@ -893,31 +885,49 @@
 ["Dortmund",7.47,51.51,2]]};
   // <<< END GENERATED
 
-  // ── Journeys (from sample_journeys.json) ─────────────────────────────────
-  const HH = {name:"Hamburg Hbf",lat:53.5528,lon:10.0067};
-  const STR= {name:"Stuttgart Hbf",lat:48.7838,lon:9.1815,arr:true};
-  const JOURNEYS = [
-    { via:"via Göttingen · Mannheim", dep:"08:34", arr:"13:49", dur:"5h 15m", changes:2, verdict:"tight",
-      stops:[ {...HH}, {name:"Göttingen",lat:51.5366,lon:9.9266,verdict:"feasible",plat:"7→8"},
-              {name:"Mannheim Hbf",lat:49.4794,lon:8.4693,verdict:"tight",plat:"4→5"}, {...STR,arrt:"13:49"} ] },
-    { via:"via Frankfurt", dep:"09:02", arr:"13:58", dur:"4h 56m", changes:1, verdict:"tight",
-      stops:[ {...HH}, {name:"Frankfurt (Main) Hbf",lat:50.1070,lon:8.6638,verdict:"tight",plat:"5→7"}, {...STR,arrt:"13:58"} ] },
-    { via:"via Kassel · Frankfurt", dep:"08:16", arr:"14:20", dur:"6h 04m", changes:2, verdict:"unknown",
-      stops:[ {...HH}, {name:"Kassel-Wilhelmshöhe",lat:51.3130,lon:9.4470,verdict:"feasible",plat:"2→2"},
-              {name:"Frankfurt (Main) Hbf",lat:50.1070,lon:8.6638,verdict:"unknown",plat:"—"}, {...STR,arrt:"14:20"} ] }
+  // ── Searches ─────────────────────────────────────────────────────────────
+  // Each search is a whole result set. The switcher (§01) swaps between them and
+  // every set fits its OWN union bbox (see useFrame): a German trip and a French/
+  // Swiss one each draw on their own patch of Europe (#18) — instead of one shared
+  // frame that would span Paris→Stuttgart and collapse every route to a squiggle.
+  // Real stations; times, platforms and verdicts are illustrative, same as before.
+  const HH  = {name:"Hamburg Hbf",lat:53.5528,lon:10.0067};
+  const STR = {name:"Stuttgart Hbf",lat:48.7838,lon:9.1815,arr:true};
+  const PGL = {name:"Paris Gare de Lyon",lat:48.8443,lon:2.3743};
+  const ZRH = {name:"Zürich HB",lat:47.3779,lon:8.5403,arr:true};
+  const SEARCHES = [
+    { id:"de", nav:"Hamburg → Stuttgart", journeys:[
+      { via:"via Göttingen · Mannheim", dep:"08:34", arr:"13:49", dur:"5h 15m", changes:2, verdict:"tight",
+        stops:[ {...HH}, {name:"Göttingen",lat:51.5366,lon:9.9266,verdict:"feasible",plat:"7→8"},
+                {name:"Mannheim Hbf",lat:49.4794,lon:8.4693,verdict:"tight",plat:"4→5"}, {...STR,arrt:"13:49"} ] },
+      { via:"via Frankfurt", dep:"09:02", arr:"13:58", dur:"4h 56m", changes:1, verdict:"tight",
+        stops:[ {...HH}, {name:"Frankfurt (Main) Hbf",lat:50.1070,lon:8.6638,verdict:"tight",plat:"5→7"}, {...STR,arrt:"13:58"} ] },
+      { via:"via Kassel · Frankfurt", dep:"08:16", arr:"14:20", dur:"6h 04m", changes:2, verdict:"unknown",
+        stops:[ {...HH}, {name:"Kassel-Wilhelmshöhe",lat:51.3130,lon:9.4470,verdict:"feasible",plat:"2→2"},
+                {name:"Frankfurt (Main) Hbf",lat:50.1070,lon:8.6638,verdict:"unknown",plat:"—"}, {...STR,arrt:"14:20"} ] }
+    ] },
+    { id:"fr", nav:"Paris → Zürich", journeys:[
+      // TGV Lyria runs Paris Gare de Lyon → Zürich HB direct (calling at Basel) in ~4h.
+      { via:"Direct · TGV Lyria", dep:"07:22", arr:"11:25", dur:"4h 03m", changes:0, verdict:"feasible",
+        stops:[ {...PGL}, {...ZRH,arrt:"11:25"} ] },
+      // …or change at Basel SBB onto a Swiss InterCity for Zürich.
+      { via:"via Basel SBB", dep:"08:22", arr:"12:56", dur:"4h 34m", changes:1, verdict:"tight",
+        stops:[ {...PGL}, {name:"Basel SBB",lat:47.5474,lon:7.5896,verdict:"tight",plat:"31→7"}, {...ZRH,arrt:"12:56"} ] }
+    ] }
   ];
 
   const VC = {feasible:"var(--go)",tight:"var(--tight)",unknown:"var(--nodata)"};
   const VL = {feasible:"comfortable",tight:"tight",unknown:"unknown"};
-  const short = n => n.replace(" Hbf","").replace(" (Main)","").replace("-Wilhelmshöhe","");
+  const short = n => n.replace(" Hbf","").replace(" (Main)","").replace("-Wilhelmshöhe","")
+                      .replace(" SBB","").replace(" HB","").replace("Paris Gare de Lyon","Paris");
 
   // ── Projection: equirectangular, cos(lat0) scaled, fit to the ROUTE ──────
   // x depends only on longitude and y only on latitude, which is what keeps the
   // graticule a plain grid of straight lines.
   //
-  // The fit is over the union of *every* journey on the page, not per-map: these
-  // three options exist to be compared ("via Göttingen" vs "via Frankfurt"), and
-  // that only works if they share one frame. One projection, drawn many times.
+  // The fit is over the union of every journey in the ACTIVE search, not per-map:
+  // a search's options exist to be compared ("via Göttingen" vs "via Frankfurt"),
+  // which only works if they share one frame. Switching search refits (useFrame).
   const K = Math.cos(51*Math.PI/180);
   const raw = (lat,lon) => ({x:lon*K, y:-lat});
 
@@ -951,7 +961,7 @@
     P.lonMin=P.lonAt(0); P.lonMax=P.lonAt(VBW); P.latMax=P.latAt(0); P.latMin=P.latAt(VBH);
     return P;
   }
-  const P = fitProjection(JOURNEYS.flatMap(j=>j.stops));
+  let P;   // set per active search by useFrame(), below
 
   const poly = (pts,close) => pts.map((p,i)=>(i?"L":"M")+p.x.toFixed(2)+" "+p.y.toFixed(2)).join(" ")+(close?" Z":"");
   // GEO arcs are flat lon,lat pairs
@@ -975,12 +985,17 @@
     return pts[pts.length-1];
   }
 
-  // ── Base layers shared by every map ──────────────────────────────────────
-  // Projected once: the projection is fixed for the page, so every map reuses
-  // these strings instead of reprojecting 7k points per render.
-  const landPath   = GEO.land.map(r=>polyFlat(r,true)).join(" ");
-  const coastPath  = GEO.coast.map(r=>polyFlat(r,false)).join(" ");
-  const borderPath = GEO.borders.map(r=>polyFlat(r,false)).join(" ");
+  // ── Base layers ──────────────────────────────────────────────────────────
+  // Reprojected whenever the frame changes: a new search fits its own union bbox,
+  // so P and these path strings are rebuilt by useFrame() and then reused across
+  // every map drawn in that frame (no reprojecting 7k points per render).
+  let landPath, coastPath, borderPath;
+  function useFrame(journeys){
+    P = fitProjection(journeys.flatMap(j=>j.stops));
+    landPath   = GEO.land.map(r=>polyFlat(r,true)).join(" ");
+    coastPath  = GEO.coast.map(r=>polyFlat(r,false)).join(" ");
+    borderPath = GEO.borders.map(r=>polyFlat(r,false)).join(" ");
+  }
 
   // Reference cities, thinned to fit: in-frame, ranked, and never on top of the
   // route. (This replaces a hardcoded "hide Hannover" — the clash it worked
@@ -1095,11 +1110,6 @@
     const stopPts = j.stops.map(s=>P(s.lat,s.lon));
     return svgEl(baseSVG({grat:true,cities:true,exclude,stopPts})+routeSVG(j,opts), "map");
   }
-  // mini map (card thumbnail)
-  function miniMap(j){
-    return svgEl(baseSVG({grat:false,borders:false,cities:false})+routeSVG(j,{mini:true,fromCurrent:false,labels:false}));
-  }
-
   // ── Bottom sheet (hero) ──────────────────────────────────────────────────
   function sheetHTML(j, fromCurrent){
     const bcls = j.verdict==="tight"?"b-tight":j.verdict==="unknown"?"b-unknown":"b-go";
@@ -1128,65 +1138,21 @@
       <div class="stoplist">${rows}</div>`;
   }
 
-  // ── Render hero ──────────────────────────────────────────────────────────
-  let curJ=0, fromCurrent=true;
-  const heroMap=document.getElementById("hero-map"),
-        heroSheet=document.getElementById("hero-sheet"),
-        heroNav=document.getElementById("hero-nav");
-  function renderHero(){
-    const j=JOURNEYS[curJ];
-    heroMap.innerHTML = fullMap(j,{mini:false,fromCurrent,youT:null,labels:true});
-    heroSheet.innerHTML = sheetHTML(j,fromCurrent);
-    heroNav.textContent = "Hamburg → Stuttgart · "+j.via.replace("via ","");
-  }
-  document.getElementById("routeseg").addEventListener("click",e=>{
-    const b=e.target.closest("button"); if(!b) return;
-    curJ=+b.dataset.i;
-    [...e.currentTarget.children].forEach(x=>x.setAttribute("aria-pressed", x===b));
-    renderHero();
-  });
-  const lt=document.getElementById("loctoggle");
-  function toggleLoc(){ fromCurrent=!fromCurrent; lt.setAttribute("aria-pressed",fromCurrent); renderHero(); }
-  lt.addEventListener("click",toggleLoc);
-  lt.addEventListener("keydown",e=>{ if(e.key===" "||e.key==="Enter"){e.preventDefault();toggleLoc();} });
+  // ── Live view + style fork: fixed Hamburg→Stuttgart demos ────────────────
+  // These illustrate the live-tracking and vector-vs-tiles CONCEPTS; they aren't
+  // part of the search switcher, so they're drawn once, up front, in the German
+  // frame. (The switcher below swaps the result set shown in §01.)
+  useFrame(SEARCHES[0].journeys);
 
-  // ── Render cards ─────────────────────────────────────────────────────────
-  const cardHTML = (j,i)=>{
-    const vcls = j.verdict==="tight"?"v-tight":j.verdict==="unknown"?"v-unknown":"v-go";
-    const tag = j.verdict==="tight"?"tight":j.verdict==="unknown"?"unknown":"all clear";
-    const flow = j.stops.map((st,k)=>{
-      if(k===0) return `<span class="pill">ICE</span>`;
-      const isLast=k===j.stops.length-1;
-      if(isLast) return `<span class="arw">→</span><span class="pill">${short(st.name)}</span>`;
-      const vc = st.verdict==="feasible"?"v-go":st.verdict==="tight"?"v-tight":"v-unknown";
-      return `<span class="arw">→</span><span class="pill ${vc}">${short(st.name)} ${st.plat}</span>`;
-    }).join("");
-    return `<div class="rcard">
-      <div class="body">
-        ${i===1?'<span class="best-tag">Best</span>':''}
-        <div class="rc-top"><span class="rc-times mono">${j.dep} → ${j.arr}</span>
-          <span class="badge ${j.verdict==='tight'?'b-tight':j.verdict==='unknown'?'b-unknown':'b-go'}">${j.verdict==='tight'?'▲ Tight':j.verdict==='unknown'?'? Unknown':'✓ Clear'}</span></div>
-        <div class="rc-flow">${flow}</div>
-        <div class="rc-meta"><span><b>${j.dur}</b></span><span>⇄ <b>${j.changes}</b></span><span style="margin-left:auto;color:var(--ink3)">${tag}</span></div>
-      </div>
-      <div class="thumb">${miniMap(j)}<span class="thumb-tag mono">${j.via.replace("via ","").split(" · ")[0]}</span></div>
-    </div>`;
-  };
-  // order to make the "best" (fastest, j2) first — mirrors ResultsView flagging idx 0
-  const order=[1,0,2];
-  document.getElementById("cards").innerHTML = order.map(i=>cardHTML(JOURNEYS[i],i)).join("");
-
-  // ── Live map ─────────────────────────────────────────────────────────────
   document.getElementById("live-map").innerHTML = (()=>{
-    const j=JOURNEYS[0];
+    const j=SEARCHES[0].journeys[0];
     const exclude=j.stops.map(s=>short(s.name));
     const stopPts=j.stops.map(s=>P(s.lat,s.lon));
     return svgEl(baseSVG({grat:true,cities:true,exclude,stopPts})+routeSVG(j,{fromCurrent:true,youT:0.42,labels:true}),"map");
   })();
 
-  // ── Style comparison: vector + mocked tiles ──────────────────────────────
   (function styleMaps(){
-    const j=JOURNEYS[0];
+    const j=SEARCHES[0].journeys[0];
     // vector (crop to a wide window; reuse full map)
     document.getElementById("style-vector").innerHTML =
       svgEl(baseSVG({grat:true,cities:true,exclude:j.stops.map(s=>short(s.name)),
@@ -1206,6 +1172,50 @@
     document.getElementById("style-tiles").innerHTML = svgEl(ts,"");
   })();
 
+  // ── §01 hero: the active search's result set ─────────────────────────────
+  // The connection seg picks an option WITHIN a search (they share that search's
+  // frame, so their shapes compare at a glance). The search seg swaps the whole
+  // set — and renderHero() refits the frame to it (useFrame).
+  let active=SEARCHES[0], curJ=0, fromCurrent=true;
+  const heroMap=document.getElementById("hero-map"),
+        heroSheet=document.getElementById("hero-sheet"),
+        heroNav=document.getElementById("hero-nav"),
+        searchSeg=document.getElementById("searchseg"),
+        routeSeg=document.getElementById("routeseg");
+
+  function renderConnSeg(){
+    routeSeg.innerHTML = active.journeys.map((j,i)=>
+      `<button data-i="${i}" aria-pressed="${i===curJ}">${j.via}</button>`).join("");
+  }
+  function renderHero(){
+    useFrame(active.journeys);                 // fit the frame to THIS search
+    const j=active.journeys[curJ];
+    heroMap.innerHTML = fullMap(j,{mini:false,fromCurrent,youT:null,labels:true});
+    heroSheet.innerHTML = sheetHTML(j,fromCurrent);
+    heroNav.textContent = active.nav + " · " + j.via.replace("via ","");
+  }
+  function setSearch(i){
+    active=SEARCHES[i]; curJ=0;
+    [...searchSeg.children].forEach((b,k)=>b.setAttribute("aria-pressed", k===i));
+    renderConnSeg();
+    renderHero();
+  }
+  searchSeg.addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    setSearch(+b.dataset.i);
+  });
+  routeSeg.addEventListener("click",e=>{
+    const b=e.target.closest("button"); if(!b) return;
+    curJ=+b.dataset.i;
+    [...routeSeg.children].forEach(x=>x.setAttribute("aria-pressed", x===b));
+    renderHero();
+  });
+  const lt=document.getElementById("loctoggle");
+  function toggleLoc(){ fromCurrent=!fromCurrent; lt.setAttribute("aria-pressed",fromCurrent); renderHero(); }
+  lt.addEventListener("click",toggleLoc);
+  lt.addEventListener("keydown",e=>{ if(e.key===" "||e.key==="Enter"){e.preventDefault();toggleLoc();} });
+
+  renderConnSeg();
   renderHero();
 
   // ── theme toggle ─────────────────────────────────────────────────────────
