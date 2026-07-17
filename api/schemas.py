@@ -168,6 +168,32 @@ class StationPlatformsResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class PlatformMarker(BaseModel):
+    """One platform's label at its real coordinate, from the feed harvest (see
+    core/dbgen/harvest_platform_labels.py). `n` is how many stop observations
+    backed it -- a confidence signal, higher = more sightings."""
+
+    track: str
+    lat: float
+    lon: float
+    n: int = 1
+
+
+class StationPlatformMarkersResponse(BaseModel):
+    """The feed's platform labels for the station nearest a coordinate, as map
+    markers -- the labels OSM lacks, placed at their real positions rather than
+    matched to OSM polygons. `found=False` (with `reason`) when no harvested
+    station is near, or `no_platform_labels` when the overlay isn't present on this
+    host (nobody has run the harvest) -- honest degradation, never an error."""
+
+    lat: float
+    lon: float
+    station: Optional[str] = None
+    found: bool
+    platforms: List[PlatformMarker] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
 class StationWalkRow(BaseModel):
     """One destination platform's walk FROM the chosen source platform (a row of
     the /station-walk 'full station walk' tool). `found=False` (with `reason`) is
