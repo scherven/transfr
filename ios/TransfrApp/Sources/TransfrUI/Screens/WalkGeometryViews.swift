@@ -320,42 +320,51 @@ struct IsoGeometryCanvas: View {
     let scene: WalkScene
     var browse: Bool = false
     @State private var yaw: Double = 0.5
-    @GestureState private var dragYaw: Double = 0
+    @GestureState private var twist: Double = 0
     @State private var zoom: CGFloat = 1
     @GestureState private var pinch: CGFloat = 1
+    @State private var pan: CGSize = .zero
+    @GestureState private var dragPan: CGSize = .zero
+    @State private var focusLevel: Int?
 
     var body: some View {
-        let liveYaw = yaw + dragYaw
-        let liveZoom = min(max(zoom * pinch, 0.6), 6)
+        let liveYaw = yaw + twist
+        let liveZoom = min(max(zoom * pinch, 0.5), 8)
+        let livePan = CGSize(width: pan.width + dragPan.width, height: pan.height + dragPan.height)
+        let focus = focusLevel
         Canvas { ctx, size in
-            let iso = IsoFit(scene: scene, size: size, angle: liveYaw, zoom: liveZoom, pad: 24)
+            let iso = IsoFit(scene: scene, size: size, angle: liveYaw, zoom: liveZoom, pan: livePan, pad: 24)
             drawLevelTabs(ctx, iso)
+            func alpha(_ lvl: Int) -> Double { focus == nil || focus == lvl ? 1 : 0.10 }
 
-            // Ways, drawn low floors first so upper floors overlay.
+            // Ways, drawn low floors first so upper floors overlay. A selected level
+            // dims the rest.
             let ways = scene.export.ways.sorted { wayLevel($0, scene) < wayLevel($1, scene) }
             for way in ways where way.points.count >= 2 {
                 if !browse && way.walkRelevant == false { continue }   // walk view: only the connectors it uses
+                let a = alpha(wayLevel(way, scene))
                 var p = Path()
                 p.move(to: iso.map(way.points[0]))
                 for pt in way.points.dropFirst() { p.addLine(to: iso.map(pt)) }
                 switch way.kind {
                 case "platform":
-                    ctx.stroke(p, with: .color(Theme.panel3), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+                    ctx.stroke(p, with: .color(Theme.panel3.opacity(a)), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
                 case "walkway":
-                    ctx.stroke(p, with: .color(Theme.ink3.opacity(0.28)), style: StrokeStyle(lineWidth: 1.5))
+                    ctx.stroke(p, with: .color(Theme.ink3.opacity(0.28 * a)), style: StrokeStyle(lineWidth: 1.5))
                 case "stairs", "escalator", "ramp", "elevator":
-                    ctx.stroke(p, with: .color(WalkConnector.color(way.kind).opacity(0.9)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    ctx.stroke(p, with: .color(WalkConnector.color(way.kind).opacity(0.9 * a)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                 default:
-                    ctx.stroke(p, with: .color(Theme.line2), style: StrokeStyle(lineWidth: 1))
+                    ctx.stroke(p, with: .color(Theme.line2.opacity(a)), style: StrokeStyle(lineWidth: 1))
                 }
             }
 
-            // Every platform the export carries, marked with its ref — not just
-            // the two walk endpoints. The server resolves a ref + floor for each
-            // platform and lifts its geometry onto that level, so they read as
-            // distinct, correctly-stacked slabs.
+            // Every platform the export carries, marked with its ref and lifted to
+            // its floor — not just the two the walk connects. Hidden on other floors
+            // when a level is isolated.
             for way in ways where way.kind == "platform" {
                 guard let ref = way.ref, !way.points.isEmpty else { continue }
+                let lvl = way.level ?? wayLevel(way, scene)
+                if focus != nil && focus != lvl { continue }
                 let n = CGFloat(way.points.count)
                 let c = Point3(
                     x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
@@ -383,36 +392,75 @@ struct IsoGeometryCanvas: View {
             endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
         }
         .contentShape(Rectangle())
+        // One-finger drag pans; pinch zooms; two-finger twist rotates. All three
+        // combine, the way a map does.
         .gesture(
             DragGesture(minimumDistance: 0)
-                .updating($dragYaw) { v, s, _ in s = v.translation.width / 90 }
-                .onEnded { yaw += $0.translation.width / 90 }
+                .updating($dragPan) { v, s, _ in s = v.translation }
+                .onEnded { pan.width += $0.translation.width; pan.height += $0.translation.height }
         )
         .simultaneousGesture(
             MagnificationGesture()
                 .updating($pinch) { v, s, _ in s = v }
-                .onEnded { zoom = min(max(zoom * $0, 0.6), 6) }
+                .onEnded { zoom = min(max(zoom * $0, 0.5), 8) }
         )
-        .overlay(alignment: .bottomTrailing) {
-            VStack(spacing: 6) {
-                zoomButton("plus") { zoom = min(zoom * 1.3, 6) }
-                zoomButton("minus") { zoom = max(zoom / 1.3, 0.6) }
-            }.padding(8)
-        }
+        .simultaneousGesture(
+            RotationGesture()
+                .updating($twist) { v, s, _ in s = v.radians }
+                .onEnded { yaw += $0.radians }
+        )
+        .overlay(alignment: .topTrailing) { controls }
+        .overlay(alignment: .bottom) { levelChips }
         .overlay(alignment: .bottomLeading) {
-            Label("drag · rotate    pinch · zoom", systemImage: "hand.draw")
-                .font(.system(size: 10)).foregroundStyle(Theme.ink3).padding(6)
+            Label("drag · pan   pinch · zoom   twist · rotate", systemImage: "hand.draw")
+                .font(.system(size: 9.5)).foregroundStyle(Theme.ink3).padding(6)
         }
     }
 
-    private func zoomButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
+    private var controls: some View {
+        VStack(spacing: 6) {
+            ctlButton("plus") { zoom = min(zoom * 1.3, 8) }
+            ctlButton("minus") { zoom = max(zoom / 1.3, 0.5) }
+            ctlButton("arrow.counterclockwise") { yaw = 0.5; zoom = 1; pan = .zero; focusLevel = nil }
+        }
+        .padding(8)
+    }
+    private func ctlButton(_ icon: String, _ action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: icon).font(.system(size: 13, weight: .semibold))
+            Image(systemName: icon).font(.system(size: 12, weight: .semibold))
                 .frame(width: 30, height: 30)
                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 9))
                 .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Theme.line, lineWidth: 1))
         }
         .foregroundStyle(Theme.ink2).buttonStyle(.plain)
+    }
+
+    /// Tap a floor to isolate it (others dim); tap again or "All" to restore.
+    @ViewBuilder
+    private var levelChips: some View {
+        if scene.levelsAsc.count > 1 {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    levelChip("All", on: focusLevel == nil) { focusLevel = nil }
+                    ForEach(scene.levelsAsc.reversed(), id: \.self) { lvl in
+                        levelChip(WalkScene.label(forLevel: lvl), on: focusLevel == lvl) {
+                            focusLevel = (focusLevel == lvl ? nil : lvl)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+            }
+            .padding(.bottom, 6)
+        }
+    }
+    private func levelChip(_ text: String, on: Bool, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text).font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(on ? Color.white : Theme.ink2)
+                .padding(.horizontal, 9).padding(.vertical, 5)
+                .background(RoundedRectangle(cornerRadius: 8).fill(on ? Theme.accent : Theme.panel2))
+        }
+        .buttonStyle(.plain)
     }
 
     /// Level reference tabs down the left edge (L+2 … L−2), each at its floor's
@@ -458,10 +506,12 @@ private struct IsoFit {
     let angle: Double
     let cx: CGFloat, cy: CGFloat, norm: CGFloat, floorHeight: CGFloat
     let scale: CGFloat, scx: CGFloat, scy: CGFloat, qcx: CGFloat, qcy: CGFloat
+    let pan: CGSize
     let levelUnit: CGFloat = 20
 
-    init(scene: WalkScene, size: CGSize, angle: Double, zoom: CGFloat, pad: CGFloat) {
+    init(scene: WalkScene, size: CGSize, angle: Double, zoom: CGFloat, pan: CGSize = .zero, pad: CGFloat) {
         self.angle = angle
+        self.pan = pan
         cx = (scene.minX + scene.maxX) / 2
         cy = (scene.minY + scene.maxY) / 2
         let diag = max((scene.maxX - scene.minX).magnitude, (scene.maxY - scene.minY).magnitude)
@@ -507,7 +557,8 @@ private struct IsoFit {
         let level = (CGFloat(p.z) / floorHeight)
         let q = Self.project(x: CGFloat(p.x), y: CGFloat(p.y), level: level,
                              cx: cx, cy: cy, norm: norm, angle: angle, levelUnit: levelUnit)
-        return CGPoint(x: scx + (q.x - qcx) * scale, y: scy + (q.y - qcy) * scale)
+        return CGPoint(x: scx + pan.width + (q.x - qcx) * scale,
+                       y: scy + pan.height + (q.y - qcy) * scale)
     }
 }
 
