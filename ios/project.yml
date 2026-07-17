@@ -33,7 +33,11 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: transfr
-        UILaunchScreen: {}
+        # Theme-aware launch background (matches Theme.paper light/dark) so the
+        # cold-launch screen never flashes white before SwiftUI paints — the fix
+        # for the dark-mode startup flicker. The colour lives in App/Assets.xcassets.
+        UILaunchScreen:
+          UIColorName: LaunchBackground
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UIApplicationSceneManifest:

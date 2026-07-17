@@ -83,35 +83,43 @@ struct JourneyCard: View {
     }
 
     private var flow: some View {
-        HStack(spacing: 6) {
+        // Pills wrap onto multiple rows (issue #19) instead of being crunched into
+        // one. Each arrow travels with its following node so a change never splits
+        // across a row break, and every pill stays on a single line.
+        FlowLayout(spacing: 6, lineSpacing: 6) {
             legPill(journey.legs.first(where: { $0.trainName != nil })?.trainName ?? "Train")
             ForEach(Array(journey.transfers.enumerated()), id: \.offset) { _, t in
-                Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Theme.ink3)
-                transferNode(t)
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(Theme.ink3)
+                    transferNode(t)
+                }
+                .fixedSize(horizontal: true, vertical: false)
             }
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func legPill(_ name: String) -> some View {
         Text(name)
             .font(.system(size: 12, weight: .semibold, design: .monospaced))
             .foregroundStyle(Theme.ink2)
+            .lineLimit(1)
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Capsule().fill(Theme.panel2))
+            .fixedSize(horizontal: true, vertical: false)
     }
 
     private func transferNode(_ t: Transfer) -> some View {
         let v = t.verdictKind
         let plat = "\(t.arrivalPlatform ?? "?")→\(t.departurePlatform ?? "?")"
         return HStack(spacing: 4) {
-            Text(shortStation(t.atStation ?? "")).font(.system(size: 12, weight: .semibold))
-            Text(plat).font(.system(size: 11, weight: .medium, design: .monospaced)).opacity(0.7)
+            Text(shortStation(t.atStation ?? "")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            Text(plat).font(.system(size: 11, weight: .medium, design: .monospaced)).opacity(0.7).lineLimit(1)
         }
         .foregroundStyle(v.color)
         .padding(.horizontal, 8).padding(.vertical, 5)
         .background(Capsule().fill(v.softColor))
+        .fixedSize(horizontal: true, vertical: false)
     }
 
     private var meta: some View {
