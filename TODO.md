@@ -172,11 +172,18 @@ Persisted and real, but several preferences are **not yet applied**:
 - 🟢 **Theme** — fully wired to `.preferredColorScheme`.
 - 🟢 **Step-free** — rides every `/walk` request: `WalkView` reads `settings.stepFree`
   into `WalkKey(transfer:stepFree:)` and re-keys its geometry fetch so the toggle
-  refetches the elevator-free variant. Still **not** applied to the verdict/journey
-  routing profile server-side (needs a step-free profile server-side).
-- 🔴 **Add a "no elevators" toggle → feed into routing.** core already has
-  `--no-elevators` / `avoid_elevators`; surface it as a setting and thread it into the
-  routing profile (pairs with step-free above). → tracked in #35.
+  refetches the elevator-free variant. The server-side profile it wanted now exists
+  (`/journeys?no_elevators=`, below); wiring the toggle to it is the open half.
+- 🟠 **Add a "no elevators" toggle → feed into routing.** (#35) **Server half done:**
+  `/journeys?no_elevators=` and `POST /assess {no_elevators}` thread core's
+  `avoid_elevators` through the whole verdict path (`enrich` → `assess_transfer` →
+  `resolve_walk` → core), profile-keyed in the resolve cache, and `reassess` keeps the
+  profile across a platform-change replan. **Client half open, needs a product call:**
+  `step_free` and `no_elevators` select the *same* core flag, so a second Settings
+  toggle would duplicate `stepFree` rather than pair with it — decide whether to wire
+  the existing toggle to `no_elevators` or add a distinct one. NB `SettingsView`'s
+  copy ("Stairs-free routes" / "Route via lifts and ramps") describes the *opposite*
+  of `avoid_elevators`; resolve that before feeding it into verdicts.
 - 🟠 **Makeable %** — doesn't re-verdict. Could recompute client-side from
   `layover_s`/`walk_time_s`, but **deferred as not-a-quick-win:** a safe re-verdict
   must not override the server's honest `unknown`/`infeasible` (and the boarding

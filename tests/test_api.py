@@ -145,6 +145,24 @@ def test_journeys_assess_param_defaults_true_and_passes_through(client, monkeypa
     assert seen["assess"] is False                     # progressive: pending, streamed later
 
 
+def test_journeys_no_elevators_threads_avoid_elevators(client, monkeypatch):
+    """The "no elevators" toggle (#35): `no_elevators` on /journeys must reach the
+    routing profile as core/'s avoid_elevators, so the walkability VERDICT (not
+    just the /walk geometry) is routed without lifts. Defaults false (lifts
+    allowed), so an ordinary search is unchanged."""
+    seen = {}
+
+    def _fake_plan(conn, origin, destination, when, max_journeys=5, **kw):
+        seen["avoid_elevators"] = kw.get("avoid_elevators")
+        return _canned_journeys()
+
+    monkeypatch.setattr(main, "plan_journeys", _fake_plan)
+    client.get("/journeys", params={"from": "A", "to": "B"})
+    assert seen["avoid_elevators"] is False
+    client.get("/journeys", params={"from": "A", "to": "B", "no_elevators": "true"})
+    assert seen["avoid_elevators"] is True
+
+
 # ---------------------------------------------------------------------------
 # /assess (streamed verdicts behind a fast /journeys?assess=false)
 # ---------------------------------------------------------------------------
@@ -171,6 +189,24 @@ def test_assess_empty_batch_is_ok(client, monkeypatch):
                         lambda *a, **k: schemas.AssessResponse(transfers=[]))
     r = client.post("/assess", json={"interchanges": []})
     assert r.status_code == 200 and r.json() == {"transfers": []}
+
+
+def test_assess_no_elevators_threads_avoid_elevators(client, monkeypatch):
+    """The streamed-verdict path must honour the same "no elevators" preference as
+    /journeys, so a progressive (assess=false) search's streamed verdicts match an
+    assess=true one. `no_elevators` on the request body -> avoid_elevators;
+    default false."""
+    seen = {}
+
+    def _fake(conn, interchanges, **kw):
+        seen["avoid_elevators"] = kw.get("avoid_elevators")
+        return schemas.AssessResponse(transfers=[])
+
+    monkeypatch.setattr(main, "assess_interchanges", _fake)
+    client.post("/assess", json={"interchanges": []})
+    assert seen["avoid_elevators"] is False
+    client.post("/assess", json={"interchanges": [], "no_elevators": True})
+    assert seen["avoid_elevators"] is True
 
 
 def test_assess_batch_too_large_is_413(client, monkeypatch):

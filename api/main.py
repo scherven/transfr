@@ -6,8 +6,12 @@ transfr HTTP API (FastAPI).
 Endpoints:
   GET  /health                                   liveness
   GET  /stations?q=                              station autocomplete (CSV-backed)
-  GET  /journeys?from=&to=&time=&max=            journeys, each change of train
-                                                 assessed for walkability (the product)
+  GET  /journeys?from=&to=&time=&max=&no_elevators=
+                                                 journeys, each change of train
+                                                 assessed for walkability (the product);
+                                                 no_elevators routes every transfer's
+                                                 VERDICT without lifts (core/'s
+                                                 avoid_elevators), not just /walk geometry
   GET  /transfer?lat=&lon=&from_platform=&to_platform=
                                                  debug: platform-to-platform walk at
                                                  the station nearest a coordinate
@@ -127,12 +131,18 @@ def get_journeys(
     max: int = Query(default=config.DEFAULT_MAX_JOURNEYS, ge=1, le=config.MAX_JOURNEYS_LIMIT),
     assess: bool = Query(default=True, description="assess each transfer's walkability; "
                          "false returns pending transfers instantly to be streamed via /assess"),
+    no_elevators: bool = Query(default=False, description="never route through a lift "
+                               "(core/'s avoid_elevators, i.e. the --no-elevators profile): "
+                               "affects each transfer's walkability VERDICT, not just the "
+                               "drawn geometry. Selects the same core/ profile `/walk`'s "
+                               "`step_free` does, but on the verdict path"),
     conn=Depends(get_conn),
 ):
     when = _parse_when(time)
     try:
         return plan_journeys(conn, from_, to, when, max_journeys=max,
-                             buffer_s=config.BUFFER_S, assess=assess)
+                             buffer_s=config.BUFFER_S, assess=assess,
+                             avoid_elevators=no_elevators)
     except ValueError as e:
         # unresolvable origin/destination name
         raise HTTPException(status_code=404, detail=str(e))
@@ -152,7 +162,8 @@ def post_assess(req: schemas.AssessRequest, conn=Depends(get_conn)):
             status_code=413,
             detail=f"too many interchanges: {len(req.interchanges)} > {config.MAX_ASSESS_BATCH}",
         )
-    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S)
+    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S,
+                               avoid_elevators=req.no_elevators)
 
 
 @app.get("/transfer", response_model=schemas.PlatformWalkResponse, dependencies=_PROTECTED)
