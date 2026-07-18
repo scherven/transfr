@@ -103,7 +103,64 @@ final class TripModelStreamingTests: XCTestCase {
         XCTAssertEqual(done.recomputedVerdict, .feasible)
 
         let calls = await repo.assessCalls
-        XCTAssertEqual(calls, 2, "one /assess fires per still-pending transfer")
+        XCTAssertEqual(calls, 1, "one /assess batches a whole journey's changes (both transfers), " +
+                       "not one request per transfer")
+    }
+
+    /// Returns the same pending journeys, but every `/assess` throws — the network
+    /// blip / server error / timeout that used to strand a transfer on `pending`
+    /// forever. Counts calls so the retry is observable.
+    actor FailingAssessRepo: JourneyRepository {
+        private(set) var assessCalls = 0
+        func journeys(from: String, to: String, when: Date?, assess: Bool,
+                      noElevators: Bool = false) async throws -> JourneysResponse {
+            let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+            return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
+        }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
+            assessCalls += 1
+            throw URLError(.timedOut)
+        }
+        func stations(query: String) async throws -> [StationSuggestion] { [] }
+        func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+            throw RepositoryError.notAvailable("platforms")
+        }
+        func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+            throw RepositoryError.notAvailable("stationWalk")
+        }
+        func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+            throw RepositoryError.notAvailable("facilities")
+        }
+        func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+            throw RepositoryError.notAvailable("stationHealth")
+        }
+        func walk(for key: WalkKey) async throws -> WalkResult {
+            WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
+                       toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)
+        }
+    }
+
+    /// THE resilience contract (the reported bug): when `/assess` keeps failing, the
+    /// transfers must NOT stay `pending` forever — the old behaviour, where the error
+    /// was swallowed by `try?`, nothing retried, and `pending` was the only loading
+    /// state. They retry, then settle on a TERMINAL `unknown` carrying
+    /// `assessFailedReason`, so the journey rolls up honestly and PreparingWalksView
+    /// can reach `allSettled` instead of spinning indefinitely.
+    @MainActor
+    func testFailedAssessSettlesTerminalRatherThanStuckPending() async throws {
+        let repo = FailingAssessRepo()
+        let model = TripModel(repository: repo)
+        await model.plan()
+
+        // No transfer is left pending — the whole point of the fix.
+        await waitUntil { model.journeys.first?.transfers.allSatisfy { !$0.verdictKind.isPending } ?? false }
+        let j = try XCTUnwrap(model.journeys.first)
+        XCTAssertTrue(j.transfers.allSatisfy { $0.verdictKind == .unknown(TripModel.assessFailedReason) },
+                      "a transfer whose /assess failed settles on a terminal unknown, not pending")
+        XCTAssertEqual(j.verdictKind, .unknown(nil), "and the journey rolls up to unknown, never a fake feasible")
+
+        let calls = await repo.assessCalls
+        XCTAssertGreaterThan(calls, 1, "the failing /assess is retried before giving up")
     }
 
     @MainActor
@@ -144,6 +201,161 @@ final class TripModelStreamingTests: XCTestCase {
         XCTAssertEqual(model.path.last, Route.journey)
         XCTAssertFalse(model.path.contains(.preparingWalks),
                        "Back from the timeline returns to results, not the transition")
+    }
+
+    // MARK: - Instant navigation (#17)
+
+    /// A `/journeys` the test can hold open, so the window between the tap and the
+    /// response — the one the results screen now has to draw — can be observed
+    /// rather than raced against. `waitUntilCalled()` returns once the fetch is in
+    /// flight; `open()` lets it return. Only the FIRST call is held; later ones
+    /// return at once, so a test can land a second search ahead of the first. Each
+    /// response is tagged with its query's origin, to tell the two apart.
+    actor GatedRepo: JourneyRepository {
+        private var gate: CheckedContinuation<Void, Never>?
+        private var enteredWaiter: CheckedContinuation<Void, Never>?
+        private var entered = false
+        private var calls = 0
+
+        func journeys(from: String, to: String, when: Date?, assess: Bool, noElevators: Bool = false) async throws -> JourneysResponse {
+            calls += 1
+            let held = calls == 1
+            entered = true
+            enteredWaiter?.resume(); enteredWaiter = nil
+            if held { await withCheckedContinuation { gate = $0 } }
+            let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+            return try dec.decode(JourneysResponse.self, from: Data(Self.json(origin: from).utf8))
+        }
+
+        /// Suspend until `journeys` has been entered.
+        func waitUntilCalled() async {
+            if entered { return }
+            await withCheckedContinuation { enteredWaiter = $0 }
+        }
+
+        func open() { gate?.resume(); gate = nil }
+
+        /// One direct journey (no transfers), so nothing streams and the test is
+        /// only about the fetch itself.
+        static func json(origin: String) -> String {
+            """
+            {"origin":{"name":"\(origin)"},"destination":{"name":"C"},
+             "departure_time":"2026-07-13T09:00:00Z",
+             "journeys":[{"id":"j1","num_changes":0,"verdict":"feasible","transfers":[],"legs":[
+                {"mode":"train","train_name":"ICE","cancelled":false,
+                 "origin":{"name":"\(origin)","latitude":53.5,"longitude":10.0},
+                 "destination":{"name":"C","latitude":48.78,"longitude":9.18},
+                 "departure":"2026-07-13T09:00:00Z","arrival":"2026-07-13T11:00:00Z"}]}]}
+            """
+        }
+
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
+        func stations(query: String) async throws -> [StationSuggestion] { [] }
+        func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+            throw RepositoryError.notAvailable("platforms")
+        }
+        func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+            throw RepositoryError.notAvailable("stationWalk")
+        }
+        func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+            throw RepositoryError.notAvailable("facilities")
+        }
+        func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+            throw RepositoryError.notAvailable("stationHealth")
+        }
+        func walk(for key: WalkKey) async throws -> WalkResult {
+            WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
+                       toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)
+        }
+    }
+
+    /// Every `/journeys` fails.
+    struct FailingRepo: JourneyRepository {
+        func journeys(from: String, to: String, when: Date?, assess: Bool, noElevators: Bool = false) async throws -> JourneysResponse {
+            throw URLError(.notConnectedToInternet)
+        }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
+        func stations(query: String) async throws -> [StationSuggestion] { [] }
+        func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+            throw RepositoryError.notAvailable("platforms")
+        }
+        func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+            throw RepositoryError.notAvailable("stationWalk")
+        }
+        func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+            throw RepositoryError.notAvailable("facilities")
+        }
+        func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+            throw RepositoryError.notAvailable("stationHealth")
+        }
+        func walk(for key: WalkKey) async throws -> WalkResult {
+            WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
+                       toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)
+        }
+    }
+
+    /// THE #17 CONTRACT: the tap is answered before the search returns. `plan()`
+    /// pushes `.results` on its synchronous prefix — while `/journeys` is still in
+    /// flight — so the user never waits on a frozen input screen.
+    @MainActor
+    func testPlanNavigatesToResultsBeforeJourneysLand() async throws {
+        let repo = GatedRepo()
+        let model = TripModel(repository: repo)
+
+        let planning = Task { await model.plan() }
+        await repo.waitUntilCalled()          // the /journeys await is now in flight
+
+        XCTAssertEqual(model.path, [.results], "nav must not wait on the fetch")
+        XCTAssertEqual(model.load, .loading)
+        XCTAssertTrue(model.journeys.isEmpty,
+                      "the empty window shows a skeleton — never fabricated journeys")
+
+        await repo.open()
+        await planning.value
+
+        XCTAssertEqual(model.path, [.results], "and it stays there once they land")
+        XCTAssertEqual(model.load, .loaded)
+        XCTAssertEqual(model.journeys.count, 1)
+    }
+
+    /// A search that fails AFTER the instant nav leaves the user on the results
+    /// screen, holding the error — not bounced back, and not stranded on a blank
+    /// list. Recovery (Try again / Change the search) is ResultsView's, and both
+    /// need exactly this state.
+    @MainActor
+    func testFailedFetchSurfacesOnResultsRatherThanBouncingBack() async throws {
+        let model = TripModel(repository: FailingRepo())
+        await model.plan()
+
+        XCTAssertEqual(model.path, [.results], "the error is shown where the user already is")
+        XCTAssertEqual(model.load, .failed("No connection to the planning service."))
+        XCTAssertTrue(model.journeys.isEmpty)
+    }
+
+    /// Instant nav means the user can be back on the input screen searching again
+    /// while the first fetch is still out. The slower, older response must not land
+    /// on top of the newer search's results.
+    @MainActor
+    func testStaleSearchDoesNotOverwriteANewerOne() async throws {
+        let repo = GatedRepo()
+        let model = TripModel(repository: repo)
+
+        model.origin = "OLD"
+        let first = Task { await model.plan() }
+        await repo.waitUntilCalled()          // first search held open
+
+        // The user goes back and searches again; this one is not held, so it lands.
+        model.origin = "NEW"
+        await model.plan()
+        XCTAssertEqual(model.response?.origin.name, "NEW")
+
+        // Now the original, superseded search finally returns.
+        await repo.open()
+        await first.value
+
+        XCTAssertEqual(model.response?.origin.name, "NEW",
+                       "a superseded search must not clobber the current results")
+        XCTAssertEqual(model.load, .loaded)
     }
 
     @MainActor

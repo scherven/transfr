@@ -20,11 +20,18 @@ struct RouteMapView: View {
     var mini: Bool = false
     /// Draw station labels (off for thumbnails).
     var showLabels: Bool = true
+    /// The journeys this map must stay **comparable** with; defaults to just this
+    /// one. Pass the whole result set when several maps sit side by side — the
+    /// frame is fitted to their union, so "via Göttingen" and "via Frankfurt" are
+    /// drawn at the same scale and can be read against each other. Fitting each
+    /// map to its own route would silently rescale them and destroy the comparison.
+    var fitTo: [Journey]? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let proj = MapProjection.germany
+        let proj = MapProjection(fitting: MapStop.stops(for: fitTo ?? [journey])
+                                             .map { (lat: $0.lat, lon: $0.lon) })
         Group {
             if youProgress != nil && !reduceMotion {
                 TimelineView(.animation) { tl in
@@ -87,46 +94,64 @@ private struct RouteMapRenderer {
         ctx.translateBy(x: (size.width - proj.vbw * s) / 2, y: (size.height - proj.vbh * s) / 2)
         ctx.scaleBy(x: s, y: s)
 
+        let stops = MapStop.stops(for: journey)
+        let pts = stops.map { proj.point($0.lat, $0.lon) }
         if !mini { drawGraticule(&ctx) }
         drawLand(&ctx)
-        drawRivers(&ctx)
-        if !mini { drawCities(&ctx) }
-        drawRoute(&ctx)
+        if !mini { drawCities(&ctx, stopPts: pts) }
+        drawRoute(&ctx, stops: stops, pts: pts)
     }
 
     // MARK: base layers
 
+    /// Derived from whatever the projection ended up framing, not hardcoded.
     private func drawGraticule(_ ctx: inout GraphicsContext) {
-        for lon in [7.0, 9, 11, 13, 15] {
-            let x = proj.point(48, lon).x
+        let dLon = MapProjection.gratStep(proj.lonMax - proj.lonMin)
+        var i = (proj.lonMin / dLon).rounded(.up)
+        while i * dLon <= proj.lonMax {
+            let x = proj.point(0, i * dLon).x
             var p = Path(); p.move(to: CGPoint(x: x, y: 0)); p.addLine(to: CGPoint(x: x, y: proj.vbh))
             ctx.stroke(p, with: .color(Theme.mapGrat), lineWidth: 0.4)
+            i += 1
         }
-        for lat in [48.0, 50, 52, 54] {
-            let y = proj.point(lat, 10).y
+        let dLat = MapProjection.gratStep(proj.latMax - proj.latMin)
+        var j = (proj.latMin / dLat).rounded(.up)
+        while j * dLat <= proj.latMax {
+            let y = proj.point(j * dLat, 0).y
             var p = Path(); p.move(to: CGPoint(x: 0, y: y)); p.addLine(to: CGPoint(x: proj.vbw, y: y))
             ctx.stroke(p, with: .color(Theme.mapGrat), lineWidth: 0.4)
+            j += 1
         }
     }
 
+    /// One filled landmass, then the shore and the borders stroked from arcs that
+    /// each appear exactly once. Stroking every country ring instead would draw
+    /// each border twice and render it darker than the coast.
     private func drawLand(_ ctx: inout GraphicsContext) {
-        let path = proj.path(DEGeo.outline, closed: true)
-        ctx.fill(path, with: .color(Theme.mapLand))
-        ctx.stroke(path, with: .color(Theme.mapCoast),
-                   style: StrokeStyle(lineWidth: 0.7, lineJoin: .round))
-    }
-
-    private func drawRivers(_ ctx: inout GraphicsContext) {
-        for river in [DEGeo.rhine, DEGeo.elbe] {
-            ctx.stroke(proj.path(river, closed: false), with: .color(Theme.mapRiver),
-                       style: StrokeStyle(lineWidth: 0.9, lineCap: .round))
+        let t = proj.rawTransform
+        ctx.fill(MapGeo.landRaw.applying(t), with: .color(Theme.mapLand))
+        if !mini {
+            ctx.stroke(MapGeo.borderRaw.applying(t), with: .color(Theme.mapBorder),
+                       style: StrokeStyle(lineWidth: 0.5, lineCap: .round, dash: [1.6, 1.3]))
         }
+        ctx.stroke(MapGeo.coastRaw.applying(t), with: .color(Theme.mapCoast),
+                   style: StrokeStyle(lineWidth: 0.7, lineCap: .round, lineJoin: .round))
     }
 
-    private func drawCities(_ ctx: inout GraphicsContext) {
-        let exclude = Set(MapStop.stops(for: journey).map { shortName($0.name) } + ["Hannover"])
-        for city in DEGeo.cities where !exclude.contains(city.name) {
+    /// Reference cities, thinned to fit: in-frame, ranked, and never on top of the
+    /// route. (This subsumes a hardcoded "hide Hannover" — the clash it worked
+    /// around is just a distance test.)
+    private func drawCities(_ ctx: inout GraphicsContext, stopPts: [CGPoint]) {
+        let exclude = Set(MapStop.stops(for: journey).map { shortName($0.name) })
+        var kept: [CGPoint] = []
+        for city in MapGeo.shared.cities.sorted(by: { $0.rank < $1.rank }) {
+            if kept.count >= 9 { break }
+            if exclude.contains(city.name) { continue }
             let p = proj.point(city.lat, city.lon)
+            guard p.x >= 3, p.x <= proj.vbw - 3, p.y >= 3, p.y <= proj.vbh - 3 else { continue }
+            if stopPts.contains(where: { hypot($0.x - p.x, $0.y - p.y) < 8 }) { continue }
+            if kept.contains(where: { hypot($0.x - p.x, $0.y - p.y) < 10 }) { continue }
+            kept.append(p)
             ctx.fill(Path(ellipseIn: CGRect(x: p.x - 0.9, y: p.y - 0.9, width: 1.8, height: 1.8)),
                      with: .color(Theme.mapCity))
             let right = p.x <= proj.vbw * 0.62
@@ -138,9 +163,7 @@ private struct RouteMapRenderer {
 
     // MARK: route overlay
 
-    private func drawRoute(_ ctx: inout GraphicsContext) {
-        let stops = MapStop.stops(for: journey)
-        let pts = stops.map { proj.point($0.lat, $0.lon) }
+    private func drawRoute(_ ctx: inout GraphicsContext, stops: [MapStop], pts: [CGPoint]) {
         guard pts.count >= 2 else { return }
 
         let line = path(pts)
@@ -198,10 +221,11 @@ private struct RouteMapRenderer {
     private func drawLabels(_ ctx: inout GraphicsContext, stops: [MapStop], pts: [CGPoint]) {
         let depTime = Fmt.time(journey.legs.first?.departure)
         let arrTime = Fmt.time(journey.legs.last?.arrival)
-        for (stop, p) in zip(stops, pts) {
-            let right = p.x <= proj.vbw * 0.58
-            let x = p.x + (right ? 3.4 : -3.4)
-            let anchor: UnitPoint = right ? .leading : .trailing
+        let layout = RouteLabelLayout.place(pts, vbw: proj.vbw, vbh: proj.vbh)
+        for ((stop, p), place) in zip(zip(stops, pts), layout) {
+            let x = p.x + (place.right ? 3.4 : -3.4)
+            let y = p.y + place.dy
+            let anchor: UnitPoint = place.right ? .leading : .trailing
             let name: String, sub: String, color: Color
             switch stop.kind {
             case .origin:
@@ -216,9 +240,9 @@ private struct RouteMapRenderer {
                 color = v.color
             }
             ctx.draw(Text(name).font(.system(size: 3.1, weight: .semibold)).foregroundColor(color),
-                     at: CGPoint(x: x, y: p.y - 1.3), anchor: anchor)
+                     at: CGPoint(x: x, y: y + RouteLabelLayout.nameDY), anchor: anchor)
             ctx.draw(Text(sub).font(.system(size: 2.5)).foregroundColor(Theme.ink3),
-                     at: CGPoint(x: x, y: p.y + 1.7), anchor: anchor)
+                     at: CGPoint(x: x, y: y + RouteLabelLayout.subDY), anchor: anchor)
         }
     }
 
@@ -257,6 +281,90 @@ private struct RouteMapRenderer {
     }
 }
 
+// MARK: - Label de-clutter
+
+/// Where one stop's label goes: which side of its dot, and the vertical shift it
+/// needed to clear its neighbours.
+struct RouteLabelPlacement: Equatable {
+    /// Text runs rightwards from the dot (a `.leading` anchor) when true.
+    let right: Bool
+    /// Shift from the dot in viewBox units — `0` when nothing collided, positive down.
+    let dy: Double
+}
+
+/// Keeps close stops' labels off each other.
+///
+/// Picking a side by x is not enough. The frame is fitted to the route (#18), so
+/// Paris→Basel→Zürich lands Basel at (76.3, 74.1) and Zürich at (88.0, 77.4) —
+/// 12 units apart and *both* past the split, so both labels hang to the left and
+/// Basel's sub-label prints on the same line as Zürich's name (0.08 units apart).
+/// Flipping one to the other side is no fix: Zürich's name would run off the
+/// 100-unit box from x=88. So labels stack instead — sorted top-to-bottom, each is
+/// pushed down just far enough to clear the last one placed on its own side. Stops
+/// that are already clear never move, and opposite sides never interact.
+///
+/// Pushing only ever downwards would walk a crowded stack off the bottom of the
+/// frame — a real shape, not a contrived one: one distant stop (Paris) sets the
+/// zoom and the rest (Basel, Zürich, Winterthur) pile against the far edge. So the
+/// stack is bounded at both ends — down from the top edge, then back up from the
+/// bottom — which spreads such a cluster around itself instead of off the map.
+///
+/// The same greedy shape as `drawCities`' distance thinning, and mirrored by
+/// `labelPlacements()` in agents/design/route-maps.html — the two must stay 1:1.
+enum RouteLabelLayout {
+    /// Fraction of the width past which a label flips to the left of its dot.
+    static let sideSplit: Double = 0.58
+
+    /// How far a label's ink reaches above and below its anchor. The HTML places its
+    /// two lines by baseline and Swift by centre, so these take the larger of the
+    /// two readings — they only bound the frame, so the roomier one is the safe one.
+    static let inkAbove: Double = 2.9
+    static let inkBelow: Double = 3.5
+
+    /// Where the two lines of one label sit relative to its anchor: the name above,
+    /// the sub below. `drawLabels` draws at these, and `blockH` is chosen against
+    /// their separation — keep them together.
+    static let nameDY: Double = -1.3
+    static let subDY: Double = 1.7
+
+    /// Centre-to-centre spacing forced between two stacked labels.
+    ///
+    /// Not merely "tall enough to not overlap". The two lines *within* one label are
+    /// `subDY - nameDY` (3.0) apart, so a spacing that only clears the ink would
+    /// leave neighbouring *blocks* closer together than one block's own lines — and
+    /// by proximity the sub-label would read as belonging to the stop below it. On a
+    /// transfer map that is worse than the overlap it replaces: it puts the wrong
+    /// platform and verdict on the wrong station. 8.4 leaves the gap between blocks
+    /// ~1.5× the gap inside one. `labelSpacingOutranksLineSpacing` pins this.
+    static let blockH: Double = 8.4
+
+    /// Placements for `pts`, returned in the same order.
+    static func place(_ pts: [CGPoint], vbw: Double, vbh: Double) -> [RouteLabelPlacement] {
+        let right = pts.map { Double($0.x) <= vbw * sideSplit }
+        var dy = [Double](repeating: 0, count: pts.count)
+        // Top-to-bottom, ties broken by index so this and the HTML agree exactly.
+        let order = pts.indices.sorted { pts[$0].y == pts[$1].y ? $0 < $1 : pts[$0].y < pts[$1].y }
+        for side in [true, false] {
+            let run = order.filter { right[$0] == side }
+            guard !run.isEmpty else { continue }
+            var y = run.map { Double(pts[$0].y) }
+            // Down from the top edge: each label clears the one above it.
+            y[0] = max(y[0], inkAbove)
+            for k in 1..<y.count { y[k] = max(y[k], y[k - 1] + blockH) }
+            // Then back up from the bottom edge, so a stack that ran off the frame is
+            // pulled onto it rather than left in the sea. A route with more labels
+            // than the frame can hold is out of room either way; this loses the top,
+            // which is the one nearest the edge it was already pushed from.
+            y[y.count - 1] = min(y[y.count - 1], vbh - inkBelow)
+            for k in stride(from: y.count - 2, through: 0, by: -1) {
+                y[k] = min(y[k], y[k + 1] - blockH)
+            }
+            for (k, i) in run.enumerated() { dy[i] = y[k] - Double(pts[i].y) }
+        }
+        return zip(right, dy).map { RouteLabelPlacement(right: $0, dy: $1) }
+    }
+}
+
 // MARK: - Stops
 
 /// One point on the drawn route, with the meaning that decides its marker.
@@ -272,6 +380,11 @@ struct MapStop {
     /// sits at `legs[i].destination` (== `legs[i+1].origin`). Stops whose `Place`
     /// carries no coordinate are dropped (can't be placed); the route still draws
     /// through whatever remains.
+    /// Every stop across a set of journeys — what a shared frame is fitted to.
+    static func stops(for journeys: [Journey]) -> [MapStop] {
+        journeys.flatMap { stops(for: $0) }
+    }
+
     static func stops(for journey: Journey) -> [MapStop] {
         guard let first = journey.legs.first, let last = journey.legs.last else { return [] }
         var out: [MapStop] = []
@@ -313,10 +426,10 @@ private extension Verdict {
 
 // MARK: - Projection
 
-/// Equirectangular projection scaled by cos(lat0), fit to Germany's bounds — the
-/// same maths as the signed-off HTML prototype, so the Swift map matches it. `x`
-/// depends only on longitude and `y` only on latitude, which is what makes the
-/// graticule a plain grid of straight lines.
+/// Equirectangular projection scaled by cos(lat0), fit to the **route** — the same
+/// maths as the signed-off HTML prototype, so the Swift map matches it. `x` depends
+/// only on longitude and `y` only on latitude, which is what makes the graticule a
+/// plain grid of straight lines.
 struct MapProjection {
     let vbw: Double
     let vbh: Double
@@ -326,20 +439,51 @@ struct MapProjection {
     private let scale: Double
     static let k = cos(51.0 * .pi / 180)
 
+    /// The smallest window we will ever show, in degrees of latitude (~122 km).
+    /// Two jobs: a short hop (Köln→Düsseldorf) gets context instead of absurd
+    /// magnification, and a route whose stops share a longitude — an ordinary
+    /// two-stop case — cannot divide by a zero span.
+    static let minSpan: Double = 1.1
+
     var aspect: Double { vbw / vbh }
 
-    init(outline: [(lat: Double, lon: Double)], vbw: Double = 100, pad: Double = 7) {
+    /// Fit `stops` into the fixed viewBox.
+    ///
+    /// The viewBox is a design constant, not derived from the data. Fitting the
+    /// *box* to the route instead would make a north-south route (Hamburg→
+    /// Stuttgart, bbox aspect 0.20) render as a ~41-unit sliver in a landscape
+    /// slot, and would change the map's shape from one journey to the next. So the
+    /// route's bbox is grown to the box's aspect and centred — no distortion, one
+    /// stable frame.
+    ///
+    /// Pass **every journey being compared**, not just the one being drawn: a list
+    /// of alternatives only reads if they share a frame (see `RouteMapView.fitTo`).
+    init(fitting stops: [(lat: Double, lon: Double)],
+         vbw: Double = 100, vbh: Double = 126.12, pad: Double = 12) {
         self.vbw = vbw
+        self.vbh = vbh
         self.pad = pad
+        let innerW = vbw - 2 * pad, innerH = vbh - 2 * pad
+        let aspect = innerW / innerH
+
         var minx = Double.greatestFiniteMagnitude, maxx = -Double.greatestFiniteMagnitude
         var miny = Double.greatestFiniteMagnitude, maxy = -Double.greatestFiniteMagnitude
-        for (la, lo) in outline {
+        for (la, lo) in stops {
             let x = lo * Self.k, y = -la
             minx = min(minx, x); maxx = max(maxx, x); miny = min(miny, y); maxy = max(maxy, y)
         }
-        rx0 = minx; ry0 = miny
-        scale = (vbw - 2 * pad) / (maxx - minx)
-        vbh = (maxy - miny) * scale + 2 * pad
+        if minx > maxx {   // nothing placeable — centre on Germany rather than NaN
+            minx = 10 * Self.k; maxx = minx; miny = -51; maxy = -51
+        }
+        let cx = (minx + maxx) / 2, cy = (miny + maxy) / 2
+        // Floor both spans *before* dividing: this is the zero-span guard.
+        var sx = max(maxx - minx, Self.minSpan * aspect)
+        var sy = max(maxy - miny, Self.minSpan)
+        // Grow the deficient axis so the route fills the frame without distortion.
+        if sx / sy < aspect { sx = sy * aspect } else { sy = sx / aspect }
+        scale = innerW / sx
+        rx0 = cx - sx / 2
+        ry0 = cy - sy / 2
     }
 
     func point(_ lat: Double, _ lon: Double) -> CGPoint {
@@ -347,40 +491,108 @@ struct MapProjection {
                 y: pad + (-lat - ry0) * scale)
     }
 
-    func path(_ coords: [(lat: Double, lon: Double)], closed: Bool) -> Path {
-        var p = Path()
-        p.addLines(coords.map { point($0.lat, $0.lon) })
-        if closed { p.closeSubpath() }
-        return p
+    /// raw (`x = lon·k`, `y = −lat`) → viewBox. The projection is only a uniform
+    /// scale plus a translate, which is what lets the 7k-point geography be drawn
+    /// through one affine transform instead of being re-projected per frame.
+    var rawTransform: CGAffineTransform {
+        CGAffineTransform(translationX: pad - rx0 * scale, y: pad - ry0 * scale)
+            .scaledBy(x: scale, y: scale)
     }
 
-    static let germany = MapProjection(outline: DEGeo.outline)
+    // Inverse, for deriving the graticule from whatever we ended up framing.
+    func lon(atX x: Double) -> Double { (rx0 + (x - pad) / scale) / Self.k }
+    func lat(atY y: Double) -> Double { -(ry0 + (y - pad) / scale) }
+    var lonMin: Double { lon(atX: 0) }
+    var lonMax: Double { lon(atX: vbw) }
+    var latMax: Double { lat(atY: 0) }
+    var latMin: Double { lat(atY: vbh) }
+
+    /// A "nice" graticule step for a span, in degrees. The old map hardcoded
+    /// lon 7…15 / lat 48…54, which draws lines through nothing the moment the
+    /// frame isn't Germany.
+    static func gratStep(_ span: Double) -> Double {
+        [0.5, 1, 2, 5, 10, 20].first { span / $0 <= 5 } ?? 30
+    }
 }
 
-// MARK: - Geography (schematic, [lat, lon])
+// MARK: - Geography
 
-/// A coarse but recognisable silhouette of Germany plus two rivers and reference
-/// cities, purely to ground the route. Not survey-grade — the route itself is
-/// exact (real leg coordinates); this is only the backdrop.
-enum DEGeo {
-    static let outline: [(lat: Double, lon: Double)] = [
-        (54.90,8.30),(54.83,9.45),(54.45,10.00),(54.30,11.10),(54.15,12.10),(54.35,13.10),(53.93,14.20),
-        (53.30,14.35),(52.80,14.14),(52.10,14.72),(51.55,14.75),(51.00,14.95),
-        (50.95,14.30),(50.65,14.00),(50.40,12.95),(50.20,12.20),(49.75,12.55),(49.30,12.60),(48.95,13.40),(48.58,13.50),
-        (48.35,13.00),(47.95,12.90),(47.70,12.20),(47.55,11.30),(47.45,10.90),(47.55,10.10),(47.55,9.75),
-        (47.65,9.20),(47.80,8.65),(47.55,7.85),(47.59,7.59),
-        (48.10,7.55),(48.75,8.00),(49.05,8.00),(49.10,6.85),(49.46,6.36),
-        (50.00,6.13),(50.32,6.02),(50.75,6.02),(51.05,5.87),(51.60,6.05),(51.83,6.10),(52.10,6.68),(52.45,7.06),(52.65,7.06),(53.18,7.19),
-        (53.68,7.15),(53.70,8.00),(53.90,8.13),(54.05,8.55),(54.45,8.60),(54.75,8.30),
-    ]
-    static let rhine: [(lat: Double, lon: Double)] = [
-        (47.59,7.59),(48.0,7.75),(48.6,7.85),(49.0,8.3),(49.5,8.45),(50.0,8.3),(50.4,7.62),(50.9,6.96),(51.4,6.72),(51.83,6.1),
-    ]
-    static let elbe: [(lat: Double, lon: Double)] = [
-        (53.55,10.0),(53.2,10.9),(52.9,11.6),(52.5,12.25),(51.85,12.9),(51.3,13.4),(51.05,13.74),
-    ]
-    static let cities: [(name: String, lat: Double, lon: Double)] = [
-        ("Berlin",52.52,13.40),("München",48.14,11.58),("Köln",50.94,6.96),("Leipzig",51.34,12.37),
-        ("Nürnberg",49.45,11.08),("Hannover",52.37,9.73),("Dresden",51.05,13.74),("Bremen",53.08,8.81),("Dortmund",51.51,7.47),
-    ]
+/// The vendored Europe outline: `design/europe-geo.json`, generated by
+/// `scripts/build_map_geo.py` from Natural Earth (public domain) and copied into
+/// this target's `Resources/` by the same script, so the two cannot drift.
+///
+/// Replaces a hand-typed silhouette of Germany *only*. The projection was fitted
+/// to that outline, so anything outside it landed off-canvas — Paris at x = −26.11
+/// on a 0…100 viewBox — while `api/stations.py` happily autocompletes 70,837
+/// stations across 43 countries (#18).
+///
+/// Bundled, not fetched: DESIGN.md §7 requires no run-time tiles, an installed
+/// region has to be self-contained. Hence a `Canvas`, not MapKit.
+///
+/// No rivers: a hand-drawn Elbe ran Hamburg → Dresden in `accent` at the *same*
+/// 16% alpha as the route's own glow, so it read as a second leg of the journey
+/// (#18 — "why is there a line to dresden").
+enum MapGeo {
+    struct Payload: Decodable {
+        let bbox: [Double]
+        /// Closed rings, filled as one path — every country is the same colour, so
+        /// the borders and enclaves inside the landmass are invisible.
+        let land: [[Double]]
+        /// Arcs owned by exactly one ring: the shore.
+        let coast: [[Double]]
+        /// Arcs owned by two rings: an internal border. Emitted once, so stroking
+        /// them can't double-darken (which is what stroking every country would do).
+        let borders: [[Double]]
+        let cities: [City]
+    }
+
+    /// `["Berlin", lon, lat, rank]` — a positional array, so it decodes unkeyed.
+    struct City: Decodable {
+        let name: String
+        let lon: Double
+        let lat: Double
+        /// 1 = recognisable from the country's shape alone, 2 = major hub. Lets a
+        /// crowded frame drop the second tier first.
+        let rank: Int
+
+        init(from decoder: Decoder) throws {
+            var c = try decoder.unkeyedContainer()
+            name = try c.decode(String.self)
+            lon = try c.decode(Double.self)
+            lat = try c.decode(Double.self)
+            rank = try c.decode(Int.self)
+        }
+    }
+
+    static let shared: Payload = {
+        guard let url = Bundle.module.url(forResource: "europe-geo", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let geo = try? JSONDecoder().decode(Payload.self, from: data)
+        else {
+            assertionFailure("europe-geo.json missing/!decodable — run scripts/build_map_geo.py")
+            return Payload(bbox: [], land: [], coast: [], borders: [], cities: [])
+        }
+        return geo
+    }()
+
+    // Built once, in *raw* projection space. Each map applies `rawTransform`
+    // rather than re-projecting every point — `LiveView` redraws these at 60fps.
+    static let landRaw   = rawPath(shared.land, closed: true)
+    static let coastRaw  = rawPath(shared.coast, closed: false)
+    static let borderRaw = rawPath(shared.borders, closed: false)
+
+    /// `arcs` are flat `lon,lat` pairs (GeoJSON axis order).
+    private static func rawPath(_ arcs: [[Double]], closed: Bool) -> Path {
+        var p = Path()
+        for flat in arcs where flat.count >= 4 {
+            var pts: [CGPoint] = []
+            pts.reserveCapacity(flat.count / 2)
+            for i in stride(from: 0, to: flat.count - 1, by: 2) {
+                pts.append(CGPoint(x: flat[i] * MapProjection.k, y: -flat[i + 1]))
+            }
+            p.addLines(pts)
+            if closed { p.closeSubpath() }
+        }
+        return p
+    }
 }

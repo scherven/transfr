@@ -136,6 +136,34 @@ A full Europe rebuild takes a few hours, dominated by the `etl.py` load
 (~73 M nodes / ~16 M ways) and the coordinate index. Everything after `etl.py`
 is resumable.
 
+**2e. Facility POI layer — optional.** Powers the "nearest facility" surface
+(`/facilities` and the `/facility-map` 3D station map). The journey, transfer and
+walk features do **not** need it — without it those two endpoints return
+`found=false` with `reason="no_poi_layer"` and the app shows an honest empty state.
+POIs (amenity / shop / tourism / office / leisure) are a large, orthogonal tag set,
+so they live in their own `pois` table rather than the tag-scoped core tables. A
+facility query is then a fast indexed lat/lon bbox `SELECT` (same no-PostGIS pattern
+as `station_points`) — never an `osmium` fork on the request path. `schema.sql`
+(step 2b) already created the empty table; fill it in two steps.
+
+Filter the Europe extract from 2a down to POI tags (the lighter path; the canonical
+full-planet path is `core/dbgen/extract_pois.sh`), then load it:
+
+```bash
+osmium tags-filter \
+  -o core/data/europe-pois.pbf -O \
+  core/data/europe-latest.osm.pbf \
+  "nwr/amenity" "nwr/shop" "nwr/tourism" "nwr/office" "nwr/leisure"
+
+PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_poi_index.py core/data/europe-pois.pbf
+```
+
+The loader is idempotent and interrupt-safe like the others (`--rebuild` to
+`TRUNCATE` first); it drops street-furniture noise (benches, parking, …) and stores
+one point per POI (a node's own coordinate, a POI-area way's centroid). It's
+independent of the core tables, so rebuild it on its own whenever the POI data
+refreshes — no need to touch `osm_nodes`/`osm_ways`.
+
 ### 3. Run the API server
 
 ```bash
@@ -148,10 +176,13 @@ Smoke-test it:
 curl 'localhost:5001/health'
 curl 'localhost:5001/journeys?from=Frankfurt&to=Z%C3%BCrich%20HB'
 curl 'localhost:5001/transfer?lat=48.0732&lon=7.3470&from_platform=A&to_platform=B'
+curl 'localhost:5001/facility-map?lat=52.525&lon=13.369&category=toilets'   # needs the POI layer (2e)
 ```
 
 `/journeys` connects a departure + arrival station to per-transfer verdicts;
-`/transfer` computes one platform-to-platform walk. The access controls (API key,
+`/transfer` computes one platform-to-platform walk; `/facility-map` returns a
+station drawn in 3D with every facility of a category pinned (`found=false`,
+`reason="no_poi_layer"` until step 2e is loaded). The access controls (API key,
 rate limit) are **off** unless configured, so local dev needs no key — see
 [Deployment](#deployment) to turn them on.
 

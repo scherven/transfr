@@ -40,6 +40,12 @@ struct InputView: View {
     @State private var stationLatLon: (lat: Double, lon: Double)?
     @State private var resolvedForStation = ""
     @State private var resolvingWalk = false
+    /// The paste door's pre-navigation work: expanding a short link and resolving
+    /// its endpoints, which happens while the user is still standing on this
+    /// screen. Local state, like `resolvingWalk` — deliberately not `model.load`,
+    /// which since #17 also covers the journeys fetch that runs *after* we've
+    /// navigated away (see `ctaBusy`).
+    @State private var resolvingLink = false
 
     /// Station-autocomplete state, shared across the From/To/Station fields — one
     /// focused field owns the suggestion list at a time. `.link` joins in so the
@@ -67,22 +73,7 @@ struct InputView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                // The brand wordmark — the SAME mark the launch animation lands, so
-                // the fly-up hand-off is pixel-identical. Its frame is the fly target,
-                // so we keep publishing the anchor (opacity doesn't change layout) but
-                // hold it invisible until the flying mark lands, then fade it in as the
-                // overlay fades out — a seamless swap of two identical marks.
-                Wordmark(height: 40)
-                    .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
-                    .opacity(isLaunching ? 0 : 1)
-                    // Snap (don't fade) at the hand-off: the title appears at full opacity
-                    // the instant the launch ends, so it's a solid floor under the identical
-                    // launch mark as the overlay fades out on top. Fading it in would instead
-                    // cross-dissolve two ~half-opaque copies of the mark — the composite only
-                    // ~75% opaque — which reads as a brief lightening of the blue (the flash).
-                    .animation(nil, value: isLaunching)
-                    .padding(.top, 4)
-
+                
                 SegmentedControl(options: Mode.allCases, selection: $mode) { $0.label }
 
                 switch mode {
@@ -135,6 +126,22 @@ struct InputView: View {
 
     private var header: some View {
         HStack {
+            // The brand wordmark — the SAME mark the launch animation lands, so
+            // the fly-up hand-off is pixel-identical. Its frame is the fly target,
+            // so we keep publishing the anchor (opacity doesn't change layout) but
+            // hold it invisible until the flying mark lands, then fade it in as the
+            // overlay fades out — a seamless swap of two identical marks.
+            Wordmark(height: 40)
+                .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
+                .opacity(isLaunching ? 0 : 1)
+                // Snap (don't fade) at the hand-off: the title appears at full opacity
+                // the instant the launch ends, so it's a solid floor under the identical
+                // launch mark as the overlay fades out on top. Fading it in would instead
+                // cross-dissolve two ~half-opaque copies of the mark — the composite only
+                // ~75% opaque — which reads as a brief lightening of the blue (the flash).
+                .animation(nil, value: isLaunching)
+                .padding(.top, 4)
+
             Spacer()
             NavigationLink(value: Route.advanced) {
                 Image(systemName: "shield.lefthalf.filled").foregroundStyle(Theme.ink2)
@@ -200,7 +207,7 @@ struct InputView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 12)
         } else {
-            fieldRow(dot: Theme.accent, label: "From", placeholder: "Hamburg Hbf",
+            fieldRow(dot: Theme.go, label: "From", placeholder: "Hamburg Hbf",
                      field: .from, text: origin) {
                 fromTrailing(active: false)
             }
@@ -638,8 +645,21 @@ struct InputView: View {
 
     private var ctaLabel: String { mode == .walk ? "Show walk" : "Find connections" }
 
-    /// The CTA shows a spinner while planning (type/paste) or resolving the walk.
-    private var ctaBusy: Bool { mode == .walk ? resolvingWalk : model.load == .loading }
+    /// The CTA shows a spinner only while work is happening *on this screen*.
+    ///
+    /// Since #17 a typed search navigates instantly and does its waiting on the
+    /// results screen, so there is nothing to spin for here — and gating on
+    /// `model.load == .loading` would actively hurt: pop back mid-search and the
+    /// CTA would sit disabled, unable to start the new search you came back to
+    /// make. The paste door still resolves its link before navigating, so it keeps
+    /// a spinner — its own, scoped to that hop.
+    private var ctaBusy: Bool {
+        switch mode {
+        case .walk:  return resolvingWalk
+        case .paste: return resolvingLink
+        case .type:  return false
+        }
+    }
 
     /// Whether the current mode has a query to submit. The fields ship empty now,
     /// so each mode gates on its own inputs — previously the shipped example values
@@ -664,7 +684,11 @@ struct InputView: View {
             Button {
                 switch mode {
                 case .walk:  Task { await showWalk() }
-                case .paste: Task { await model.planFromLink(link, avoidElevators: settings.avoidElevators) }
+                case .paste: Task {
+                    resolvingLink = true
+                    defer { resolvingLink = false }
+                    await model.planFromLink(link, avoidElevators: settings.avoidElevators)
+                }
                 case .type:  Task { await model.plan(avoidElevators: settings.avoidElevators) }
                 }
             } label: {

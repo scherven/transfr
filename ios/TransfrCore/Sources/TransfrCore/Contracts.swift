@@ -369,6 +369,34 @@ public struct FacilitiesResponse: Codable, Sendable {
     }
 }
 
+/// The whole station drawn in 3D with EVERY facility of a category pinned on it —
+/// the map-first "walk to nearest" surface (from `/facility-map`). `export` is a
+/// browse `viz_export` (all platforms, no single route) with each facility attached
+/// as a focus POI; `facilities` is the ranked list in the SAME order as
+/// `export.details`, so a tapped pin (`details[i]`) maps straight to its facility
+/// (`facilities[i]`). `found == false` (with `reason`) degrades exactly like
+/// `FacilitiesResponse` — `no_poi_layer`, `none_mapped`, `too_sparse`, etc. Mirrors
+/// `api/schemas.py:FacilityMapResponse`.
+public struct FacilityMapResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var relationId: Int?
+    public var station: String?
+    public var category: String
+    public var found: Bool
+    public var reason: String?
+    public var export: VizExport?
+    public var facilities: [Facility]
+
+    public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
+                category: String, found: Bool, reason: String? = nil,
+                export: VizExport? = nil, facilities: [Facility] = []) {
+        self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
+        self.category = category; self.found = found; self.reason = reason
+        self.export = export; self.facilities = facilities
+    }
+}
+
 // MARK: - Station connectivity health (/station-health) — mirrors api/schemas.py
 
 /// One platform pair that doesn't plainly connect — `kind` is "stitchable" (a
@@ -432,6 +460,27 @@ public struct StationHealthResponse: Codable, Sendable {
 /// a `Transfer` already carries, so a client forwards them verbatim. `stepFree`
 /// requests the elevator-free variant (a different route, hence a different walk
 /// time than the verdict's).
+/// A facility to draw in a walk's geometry — the "walk to nearest" focus. Its
+/// coordinate is already known to the client (it came from `/facilities`), so the
+/// server projects it into the export's local frame and appends it to the
+/// `details` layer flagged `focus`, with no planet extract needed. `level` is the
+/// OSM `level` tag as a string ("0", "−1") when known, so the POI is lifted to the
+/// right floor in the 3D model. Mirrors `api/schemas.py:WalkPOI`.
+public struct WalkPOI: Codable, Hashable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var name: String?
+    public var category: String
+    public var subtype: String?
+    public var level: String?
+
+    public init(lat: Double, lon: Double, name: String? = nil, category: String,
+                subtype: String? = nil, level: String? = nil) {
+        self.lat = lat; self.lon = lon; self.name = name
+        self.category = category; self.subtype = subtype; self.level = level
+    }
+}
+
 public struct WalkKey: Codable, Hashable, Sendable {
     public var relationId: Int
     public var fromPlatform: String
@@ -447,11 +496,15 @@ public struct WalkKey: Codable, Hashable, Sendable {
     public var fromLon: Double?
     public var toLat: Double?
     public var toLon: Double?
+    /// A facility to draw beside the walk (the "walk to nearest" door). When set,
+    /// the fetched geometry carries this POI in its `details` layer as the focus.
+    /// Part of the key, so a walk-with-facility caches apart from the plain walk.
+    public var poi: WalkPOI?
 
     public init(relationId: Int, fromPlatform: String, toPlatform: String,
                 stepFree: Bool = false, allPlatforms: Bool = false,
                 fromLat: Double? = nil, fromLon: Double? = nil,
-                toLat: Double? = nil, toLon: Double? = nil) {
+                toLat: Double? = nil, toLon: Double? = nil, poi: WalkPOI? = nil) {
         self.relationId = relationId
         self.fromPlatform = fromPlatform
         self.toPlatform = toPlatform
@@ -459,6 +512,7 @@ public struct WalkKey: Codable, Hashable, Sendable {
         self.allPlatforms = allPlatforms
         self.fromLat = fromLat; self.fromLon = fromLon
         self.toLat = toLat; self.toLon = toLon
+        self.poi = poi
     }
 
     /// Build the key straight from a `Transfer` (nil if it never resolved a

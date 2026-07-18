@@ -17,6 +17,8 @@ struct WalkLookupView: View {
     @State private var level = 0
     @State private var scene: WalkScene?
     @State private var loading = true
+    /// Guards the one-time initial mode choice (a facility walk opens in 3D).
+    @State private var didPickInitialMode = false
 
     enum Mode: String, CaseIterable, Identifiable { case section, levels, threeD
         var id: String { rawValue }
@@ -31,20 +33,34 @@ struct WalkLookupView: View {
     private var fromRef: String { lookup?.fromPlatform ?? "?" }
     private var toRef: String { lookup?.toPlatform ?? "?" }
 
+    private var isBrowse: Bool { lookup?.browse == true }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                factsRow
-                guidanceBox
-                modePicker
-                stage
-                turnByTurn
+                if isBrowse {
+                    facilityBrowseStage
+                } else {
+                    factsRow
+                    guidanceBox
+                    modePicker
+                    stage
+                    turnByTurn
+                }
             }
             .padding(20)
         }
         .background(Theme.paper.ignoresSafeArea())
         .navigationTitle(lookup?.station ?? "Walk").navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
+        // A "walk to nearest" lookup carries a facility — open straight into the 3D
+        // model so the platform and the POI are both in view (the door's whole point).
+        .onAppear {
+            if !didPickInitialMode {
+                didPickInitialMode = true
+                if lookup?.poi != nil { mode = .threeD }
+            }
+        }
         // Re-keyed on `avoidElevators` so flipping the preference refetches the
         // elevator-free variant (a different route, hence different geometry).
         .task(id: settings.avoidElevators) { await load() }
@@ -58,6 +74,10 @@ struct WalkLookupView: View {
     }
 
     private var subtitle: String {
+        if isBrowse {
+            let n = scene?.export.ways.filter { $0.kind == "platform" }.count ?? 0
+            return n > 0 ? "\(facilityName ?? "Facility") · \(n) platforms" : (facilityName ?? "Facility")
+        }
         var parts = ["Platform \(fromRef) → \(toRef)"]
         if let s = scene, s.found {
             parts.append(Fmt.distance(s.export.path.walkingDistanceMeters, imperial: imperial))
@@ -174,9 +194,54 @@ struct WalkLookupView: View {
             }
         case .threeD:
             Panel(padding: 12) {
-                stageBox(height: 260) { canvas(for: .threeD) }
+                VStack(spacing: 10) {
+                    stageBox(height: 260) { canvas(for: .threeD) }
+                    threeDLegend
+                }
             }
         }
+    }
+
+    /// The 3D view's legend. Browsing a facility shows the station-map key with the
+    /// facility named; a facility walk names it beside the path; a plain walk labels
+    /// the path and the vertical circulation.
+    @ViewBuilder private var threeDLegend: some View {
+        if isBrowse {
+            legend([("Platform", Theme.panel3), ("Stairs", Theme.stair),
+                    ("Lift", Theme.elev), (facilityName ?? "Facility", Theme.poi)])
+        } else if let facilityName {
+            legend([("Your path", Theme.accent), ("Platform", Theme.panel3), (facilityName, Theme.poi)])
+        } else {
+            legend([("Your path", Theme.accent), ("Platform", Theme.panel3),
+                    ("Stairs", Theme.stair), ("Lift", Theme.elev)])
+        }
+    }
+
+    /// The tapped facility on the whole-station 3D map: a caption naming it, the
+    /// browse model with the POI pinned, and the station-map legend. No walk facts —
+    /// a facility is a place to find, not a timed route.
+    @ViewBuilder private var facilityBrowseStage: some View {
+        infoBox(icon: "mappin.circle.fill", tint: Theme.poi, bg: Theme.poiSoft,
+                lead: (facilityName ?? "This facility") + " ",
+                body: "is pinned on \(lookup?.station ?? "the station"). Drag to rotate, pinch to zoom, tap a floor to isolate it.")
+        Panel(padding: 12) {
+            VStack(spacing: 10) {
+                stageBox(height: 340) {
+                    if let scene { IsoGeometryCanvas(scene: scene, browse: true) }
+                    else { SchematicLookupCanvas(from: fromRef, to: toRef) }
+                }
+                threeDLegend
+            }
+        }
+    }
+
+    /// A short, human label for the walk's facility (name, else tidied subtype,
+    /// else category), or nil for a plain platform-to-platform lookup.
+    private var facilityName: String? {
+        guard let poi = lookup?.poi else { return nil }
+        return poi.name
+            ?? poi.subtype?.replacingOccurrences(of: "_", with: " ").capitalized
+            ?? poi.category.capitalized
     }
 
     /// Real geometry once loaded; the schematic fallback otherwise.
@@ -206,9 +271,10 @@ struct WalkLookupView: View {
 
     @ViewBuilder
     private var levelPicker: some View {
-        if let scene, scene.levelsAsc.count > 1 {
+        // `pathLevels`, not `levelsAsc` — see WalkView.levelPicker (#53).
+        if let scene, scene.pathLevels.count > 1 {
             Picker("Level", selection: $level) {
-                ForEach(scene.levelsAsc.reversed(), id: \.self) { lvl in
+                ForEach(scene.pathLevels.reversed(), id: \.self) { lvl in
                     Text(levelPickerLabel(lvl, scene)).tag(lvl)
                 }
             }.pickerStyle(.segmented)
@@ -271,12 +337,13 @@ struct WalkLookupView: View {
         guard let lk = lookup, lk.relationId != 0 else { scene = nil; return }
         let key = WalkKey(relationId: lk.relationId, fromPlatform: lk.fromPlatform,
                           toPlatform: lk.toPlatform, stepFree: settings.avoidElevators,
+                          allPlatforms: lk.browse,
                           fromLat: lk.fromLat, fromLon: lk.fromLon,
-                          toLat: lk.toLat, toLon: lk.toLon)
+                          toLat: lk.toLat, toLon: lk.toLon, poi: lk.poi)
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s
-            level = s.levelsAsc.contains(s.startLevel) ? s.startLevel : (s.levelsAsc.first ?? 0)
+            level = s.pathLevels.contains(s.startLevel) ? s.startLevel : (s.pathLevels.first ?? 0)
         } else {
             scene = nil
         }

@@ -58,6 +58,245 @@ struct WalkSceneTests {
         #expect(s.turnByTurn().count >= 3)
     }
 
+    // MARK: - Issue #53: the level view's framing, picker and honesty
+
+    /// The picker must offer exactly the floors the path visits — no blank tabs.
+    ///
+    /// `levelsAsc` is the union of levels over every *context* way the search
+    /// touched, so on Dortmund 11→4 it tabs L−2: the walk never goes there, and the
+    /// canvas (which draws the path) had nothing of *your route* to show. Both
+    /// pickers now read `pathLevels`.
+    @Test func pickerOffersOnlyFloorsThePathVisits() throws {
+        let dortmund = try Self.scene("viz_dortmund_11_4")
+        // The bug, pinned: the old source really does offer a floor the path misses.
+        #expect(dortmund.levelsAsc.contains(-2))
+        #expect(dortmund.pathLevels == [-1, 0, 1])
+        #expect(!dortmund.pathLevels.contains(-2), "L−2 would render a routeless panel")
+        // Every floor the picker offers has route geometry to draw.
+        for lvl in dortmund.pathLevels {
+            #expect(dortmund.routeBounds(level: lvl) != nil, "L\(lvl) has no route to frame")
+        }
+        #expect(dortmund.routeBounds(level: -2) == nil)
+
+        // Berlin's picker was already honest (levels_present == the path's floors);
+        // it must stay that way.
+        let berlin = try Self.scene("viz_berlin_1_16")
+        #expect(berlin.pathLevels == [-2, -1, 0, 1, 2])
+        for lvl in berlin.pathLevels { #expect(berlin.routeBounds(level: lvl) != nil) }
+    }
+
+    /// Each floor is framed on its OWN route, not the whole scene's box.
+    ///
+    /// The scene box spans every context way — 510 × 814 m on Berlin — so framing
+    /// every floor on it drew each route at well under 1% of the canvas. Own-framing
+    /// must put a real fraction of the canvas under every floor's route.
+    @Test func eachLevelIsFramedOnItsOwnRoute() throws {
+        for name in ["viz_berlin_1_16", "viz_dortmund_11_4"] {
+            let s = try Self.scene(name)
+            let scene = s.worldBounds
+            for lvl in s.pathLevels {
+                let route = try #require(s.routeBounds(level: lvl))
+                // The floor's own box is a strict subset of the scene's, and on these
+                // fixtures a *much* smaller one — that gap is the reclaimed canvas.
+                #expect(route.width <= scene.width && route.height <= scene.height)
+                // The framing is per-level, so two floors must not share a frame.
+                for other in s.pathLevels where other != lvl {
+                    let b = try #require(s.routeBounds(level: other))
+                    #expect(route != b, "L\(lvl) and L\(other) share a frame")
+                }
+            }
+        }
+    }
+
+    /// An unclassified `vertical` change must not draw as a lift.
+    ///
+    /// `WalkConnector.color`'s default arm returned `Theme.elev` — the exact orange
+    /// the legend spends on "Lift" — so Dortmund's three `vertical` transitions drew
+    /// as three elevators that don't exist. It's a gap, so it gets `Theme.nodata`.
+    @Test func unclassifiedLevelChangeIsNotAnElevator() throws {
+        #expect(WalkConnector.color("vertical") != Theme.elev)
+        #expect(WalkConnector.color("vertical") == Theme.nodata)
+        #expect(!WalkConnector.isMapped("vertical"))
+        // The kinds the map *does* record keep their own colours.
+        #expect(WalkConnector.color("elevator") == Theme.elev)
+        #expect(WalkConnector.color("lift") == Theme.elev)
+        #expect(WalkConnector.color("stairs") == Theme.stair)
+        #expect(WalkConnector.color("escalator") == Theme.esc)
+        #expect(WalkConnector.isMapped("stairs") && WalkConnector.isMapped("escalator"))
+
+        // Dortmund is the case that shipped wrong: 3 of its 4 changes are `vertical`.
+        let d = try Self.scene("viz_dortmund_11_4")
+        let unmapped = d.transitions.filter { !WalkConnector.isMapped($0.kind) }
+        #expect(unmapped.count == 3)
+        #expect(unmapped.allSatisfy { WalkConnector.color($0.kind) == Theme.nodata })
+    }
+
+    /// The card's level line must read like a person wrote it — and must never name
+    /// a mode the map doesn't record.
+    @Test func levelNoteNamesOnlyWhatTheMapRecords() throws {
+        // Dortmund shipped as "4 level changes — level change + stairs." — the
+        // renderer reading its own enum out loud.
+        let d = try Self.scene("viz_dortmund_11_4")
+        let dn = LevelNote.make(d.transitions)
+        #expect(dn.text == "4 level changes — 1 by stairs, 3 the map doesn't name.")
+        #expect(!dn.text.contains("level change +"))
+        #expect(!dn.text.lowercased().contains("elevator"), "no lift is mapped here")
+
+        // Berlin is four escalators and nothing else.
+        let b = try Self.scene("viz_berlin_1_16")
+        let bn = LevelNote.make(b.transitions)
+        #expect(bn.text == "4 level changes, all by escalator.")
+        #expect(bn.tint == Theme.esc)
+
+        // No transitions at all is the one genuinely step-free case.
+        let flat = LevelNote.make([])
+        #expect(flat.text.contains("Step-free"))
+        #expect(flat.icon == "checkmark")
+        #expect(flat.tint == Theme.go)
+
+        // Every change unclassified: say so, don't pick a mode.
+        let z = Point3(x: 0, y: 0, z: 0)
+        let vertical = [VizExport.Transition(kind: "vertical", wayId: nil, nodeId: nil, from: z, to: z),
+                        VizExport.Transition(kind: "vertical", wayId: nil, nodeId: nil, from: z, to: z)]
+        let vn = LevelNote.make(vertical)
+        #expect(vn.text == "2 level changes — the map doesn't record stairs or a lift.")
+        #expect(vn.tint == Theme.nodata)
+        #expect(vn.icon == "questionmark.circle")
+    }
+
+    /// The 3D's floors must stay clearly stacked — "exploded floors" is the feature.
+    ///
+    /// `levelUnit` was a constant 20 while the thing it tracks (the iso-projected
+    /// footprint) is data- and angle-dependent, so Berlin's −2/−1/0 fused into one
+    /// plate (#53). It now scales with the footprint, but lifts by ~a third of it
+    /// (not the old full clearance) so risers aren't stretched — floors deliberately
+    /// *overlap*, yet each must still sit distinctly above the one below. Projected
+    /// through the real `IsoFit`, not the formula: every floor's plate is lifted
+    /// above the floor below by a readable fraction of a plate's depth, at any orbit.
+    @Test func exploded3DFloorsDoNotFuse() throws {
+        let s = try Self.scene("viz_berlin_1_16")
+        let size = CGSize(width: 360, height: 300)
+        // Frame on the walk box (what the 3D uses in walk mode); the plates are
+        // measured over the *same* box, so the stacking test tracks what's on screen.
+        let box = try #require(s.walkFramingBox)
+        for angle in [0.0, 0.5, 1.0, 2.2, 3.9] {
+            let iso = IsoFit(scene: s, box: box, size: size, angle: angle, zoom: 1, pad: 24)
+            // The screen-y band a floor's plate occupies, from the framing box.
+            func plateY(_ level: Int) -> (lo: CGFloat, hi: CGFloat) {
+                var lo = CGFloat.greatestFiniteMagnitude, hi = -CGFloat.greatestFiniteMagnitude
+                for x in [box.minX, box.maxX] {
+                    for y in [box.minY, box.maxY] {
+                        let p = iso.map(Point3(x: Float(x), y: Float(y),
+                                               z: Float(CGFloat(level) * s.floorHeight)))
+                        lo = min(lo, p.y); hi = max(hi, p.y)
+                    }
+                }
+                return (lo, hi)
+            }
+            // Screen-y grows downward, so the upper floor sits at smaller y. Each
+            // floor's whole plate must be shifted up from the one below (stacked, not
+            // fused) by a clear fraction of a plate's depth — the plates now overlap,
+            // but a one-floor lift is never so small the floors read as one.
+            for level in s.levelsAsc.dropLast() {
+                let lower = plateY(level), upper = plateY(level + 1)
+                let depth = lower.hi - lower.lo             // one plate's screen-y span
+                let lift  = lower.lo - upper.lo             // how far the upper floor rises
+                #expect(upper.hi < lower.hi && upper.lo < lower.lo,
+                        "angle \(angle): L\(level+1) not stacked above L\(level)")
+                #expect(lift >= 0.25 * depth,
+                        "angle \(angle): L\(level+1) lift \(lift) < ¼ of plate depth \(depth) — floors nearly fused")
+            }
+        }
+    }
+
+    /// The 3D must frame the WALK, not the whole station — the Berlin 1→16 "stick".
+    ///
+    /// The scene box spans every context way — ~510 × 814 m on Berlin, partly a
+    /// spurious platform-1 fragment ~500 m south of everything — so framing the 3D on
+    /// it crushed the ~57 × 55 m walk into a near-vertical line (its iso X-span fell
+    /// to ~5 % of the canvas). Walk mode now frames the path's own XY box, grown by a
+    /// margin, so the walk spreads across the canvas; browse (station map) mode still
+    /// frames the whole station.
+    @Test func threeDFramesTheWalkNotTheWholeStation() throws {
+        let s = try Self.scene("viz_berlin_1_16")
+        let size = CGSize(width: 340, height: 360)   // the app's 3D viewport shape
+
+        // Fraction of the canvas width the projected path spans, under a given frame.
+        func pathXFraction(box: CGRect) -> CGFloat {
+            let iso = IsoFit(scene: s, box: box, size: size, angle: 0.5, zoom: 1, pad: 24)
+            let xs = s.pathPoints.map { iso.map($0).x }
+            return (xs.max()! - xs.min()!) / size.width
+        }
+
+        // The walk really is a sliver of the whole-station box — that's the bug.
+        let walkBox = try #require(s.walkFramingBox)
+        #expect(walkBox.width < 0.4 * s.worldBounds.width && walkBox.height < 0.4 * s.worldBounds.height,
+                "the walk box should be a small part of the whole-station box")
+
+        let sceneFrac = pathXFraction(box: s.worldBounds)   // old / browse framing
+        let walkFrac  = pathXFraction(box: walkBox)          // the fix
+        #expect(sceneFrac < 0.12, "whole-scene framing should crush the walk, got \(sceneFrac)")
+        #expect(walkFrac > 0.20, "walk framing left it a stick at \(walkFrac) of canvas width")
+        #expect(walkFrac > 3 * sceneFrac, "the fix should widen the walk several-fold")
+
+        // Browse mode frames the whole station: the scene's own bounding corners (at
+        // every level) all land inside the canvas — nothing clipped — and they fill
+        // it, which the tight walk box never could.
+        let browse = IsoFit(scene: s, box: s.worldBounds, size: size, angle: 0.5, zoom: 1, pad: 24)
+        let corners = [s.minX, s.maxX].flatMap { x in [s.minY, s.maxY].flatMap { y in
+            s.levelsAsc.map { browse.map(Point3(x: Float(x), y: Float(y),
+                                                z: Float(CGFloat($0) * s.floorHeight))) }
+        } }
+        let cxs = corners.map(\.x), cys = corners.map(\.y)
+        #expect(cxs.min()! >= -0.5 && cxs.max()! <= size.width + 0.5, "station clipped horizontally in browse")
+        #expect(cys.min()! >= -0.5 && cys.max()! <= size.height + 0.5, "station clipped vertically in browse")
+        #expect((cxs.max()! - cxs.min()!) > 0.5 * size.width || (cys.max()! - cys.min()!) > 0.5 * size.height,
+                "browse should fill the frame with the whole station")
+    }
+
+    // MARK: - Facility map (every category POI pinned)
+
+    /// The scene surfaces EVERY facility, lifts each to its floor, and frames them.
+    ///
+    /// The fixture is a real `/facility-map` browse export of Berlin Hbf with four
+    /// `focus` toilets attached across floors (L−1, L0, L1) — exactly what the map
+    /// fetches. Every POI must be a flagged detail, sit at its own floor, and lie
+    /// inside the scene's XY box so no pin is ever drawn just off the canvas.
+    @Test func facilityMapExposesAndFramesEveryPOI() throws {
+        let s = try Self.scene("viz_berlin_facility")
+
+        let pois = s.export.details.filter { $0.kind == "poi" }
+        #expect(pois.count == 4)
+        #expect(pois.allSatisfy { $0.focus == true && $0.xyz != nil })
+        #expect(pois.allSatisfy { $0.subtype == "toilets" })
+
+        // Spread across floors, each lifted to its own level (not flattened).
+        let levels = Set(pois.compactMap { $0.xyz.map { s.level(of: $0.z) } })
+        #expect(levels.contains(-1) && levels.contains(0) && levels.contains(1))
+
+        // Every pin is framed inside the box the projection is fit to.
+        for xyz in pois.compactMap(\.xyz) {
+            #expect(CGFloat(xyz.x) >= s.minX && CGFloat(xyz.x) <= s.maxX)
+            #expect(CGFloat(xyz.y) >= s.minY && CGFloat(xyz.y) <= s.maxY)
+        }
+        // The first focus POI is the scene's `focusPOI` (drives the walk view label).
+        #expect(s.focusPOI?.focus == true)
+    }
+
+    /// A plain walk (no facility) has no POI details — the flag is opt-in.
+    @Test func plainWalkHasNoFacilityPOIs() throws {
+        #expect(try Self.scene("viz_berlin_1_16").focusPOI == nil)
+        #expect(try Self.scene("viz_berlin_1_16").export.details.allSatisfy { $0.focus != true })
+        #expect(try Self.scene("viz_dortmund_11_4").focusPOI == nil)
+    }
+
+    /// The map 3D rasterises with a selected pin (all pins + selection run, no crash).
+    @Test func facilityMapCanvasRasterises() throws {
+        let s = try Self.scene("viz_berlin_facility")
+        try rasterize(IsoGeometryCanvas(scene: s, browse: true, animated: false, selectedPOI: 1),
+                      size: CGSize(width: 360, height: 340), tag: "iso_facility_map_berlin")
+    }
+
     // MARK: - The canvases actually rasterise (projection runs, no NaNs/crash)
 
     @Test func rendersAllThreeCanvases() throws {
@@ -67,25 +306,43 @@ struct WalkSceneTests {
 
             try rasterize(SectionGeometryCanvas(scene: s),
                           size: CGSize(width: 360, height: 220), tag: "section_\(short)")
-            // Every floor the walk visits (sorted, so the render set is stable).
+            // Every floor the picker can offer (sorted, so the render set is stable).
             for lvl in s.pathLevels {
                 try rasterize(PlanGeometryCanvas(scene: s, level: lvl),
                               size: CGSize(width: 360, height: 260), tag: "level\(lvl)_\(short)")
             }
-            try rasterize(IsoGeometryCanvas(scene: s),
+            // The floors only `levelsAsc` believed in — no longer offered by the
+            // picker (#53), but the canvas must still survive being asked.
+            for lvl in s.levelsAsc where !s.pathLevels.contains(lvl) {
+                try rasterize(PlanGeometryCanvas(scene: s, level: lvl),
+                              size: CGSize(width: 360, height: 260), tag: "ghosttab\(lvl)_\(short)")
+            }
+            try rasterize(IsoGeometryCanvas(scene: s, animated: false),
                           size: CGSize(width: 360, height: 300), tag: "iso_\(short)")
         }
     }
 
     /// Render a view to a PNG, assert it produced real pixels, and print the path.
-    private func rasterize(_ view: some View, size: CGSize, tag: String) throws {
+    ///
+    /// Writes to `$WALK_RENDER_DIR` when set (pass it through xcodebuild as
+    /// `TEST_RUNNER_WALK_RENDER_DIR=…`), else the test process's temp dir — which
+    /// the simulator wipes after the run, so anything you want to *look* at needs
+    /// the env var.
+    @discardableResult
+    private func rasterize(_ view: some View, size: CGSize, tag: String) throws -> URL {
         let renderer = ImageRenderer(content: view.frame(width: size.width, height: size.height))
         renderer.scale = 2
         let image = try #require(renderer.uiImage, "\(tag): ImageRenderer produced no image")
         let data = try #require(image.pngData(), "\(tag): no PNG data")
         #expect(data.count > 1000, "\(tag): suspiciously small render (\(data.count) bytes)")
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("walkrender_\(tag).png")
+        var dir = FileManager.default.temporaryDirectory
+        if let custom = ProcessInfo.processInfo.environment["WALK_RENDER_DIR"], !custom.isEmpty {
+            dir = URL(fileURLWithPath: custom, isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let url = dir.appendingPathComponent("walkrender_\(tag).png")
         try data.write(to: url)
         print("RENDER_PNG: \(url.path)")
+        return url
     }
 }

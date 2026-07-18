@@ -46,6 +46,20 @@ public enum Theme {
     public static let esc   = dyn(0x0EA5A5, 0x2DD4BF)
     public static let elev  = dyn(0xE0663A, 0xFB8A5C)
 
+    /// The connector kinds softened ~18 % toward the panel — the "Recessed" 3D
+    /// treatment, so the shaped risers on the exploded model inform without
+    /// out-shouting the route. Derived from the base + panel hex above, so they
+    /// can't drift out of sync with the tokens they soften.
+    public static let stairSoft = dyn(mix(0x8B5CF6, 0xFFFFFF, 0.18), mix(0xA78BFA, 0x131A28, 0.18))
+    public static let escSoft   = dyn(mix(0x0EA5A5, 0xFFFFFF, 0.18), mix(0x2DD4BF, 0x131A28, 0.18))
+    public static let elevSoft  = dyn(mix(0xE0663A, 0xFFFFFF, 0.18), mix(0xFB8A5C, 0x131A28, 0.18))
+
+    // Facility marker — the "walk to nearest" POI drawn on the station geometry.
+    // A warm rose, deliberately clear of the route (accent blue), the start dot
+    // (go green) and every connector hue above, so a facility never reads as one.
+    public static let poi     = dyn(0xD8437E, 0xFF7EB6)
+    public static let poiSoft = dynA(0xD8437E, 0.12, 0xFF7EB6, 0.16)
+
     // Route-map surfaces (the vector "paper map" — RouteMapView). Sea is the map
     // backdrop, land the country silhouette; both are picked to read as a soft
     // raised shape over the panel, in either appearance.
@@ -53,13 +67,24 @@ public enum Theme {
     public static let mapLand  = dyn(0xDFE6F0, 0x182134)
     public static let mapCoast = dynA(0x0E1626, 0.16, 0xFFFFFF, 0.15)
     public static let mapGrat  = dynA(0x0E1626, 0.055, 0xFFFFFF, 0.05)
-    public static let mapRiver = dynA(0x0A63F0, 0.16, 0x4EA6FF, 0.20)
+    /// Internal country borders. Softer than the coast: the shore is a real edge
+    /// of the land, a border is an annotation on it.
+    public static let mapBorder = dynA(0x0E1626, 0.22, 0xFFFFFF, 0.18)
     public static let mapCity  = dyn(0xAEB7C7, 0x3A465C)
 
     public static let radius: CGFloat = 22
     public static let mono  = Font.system(.body, design: .monospaced)
 
     // MARK: - Dynamic color helpers
+
+    /// Blend two packed 0xRRGGBB values, `t` of the way from `a` to `b`.
+    static func mix(_ a: UInt32, _ b: UInt32, _ t: Double) -> UInt32 {
+        func chan(_ shift: UInt32) -> UInt32 {
+            let av = Double((a >> shift) & 0xFF), bv = Double((b >> shift) & 0xFF)
+            return UInt32((av + (bv - av) * t).rounded()) & 0xFF
+        }
+        return (chan(16) << 16) | (chan(8) << 8) | chan(0)
+    }
 
     static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
         Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light) })

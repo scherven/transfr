@@ -22,7 +22,7 @@ Endpoints:
                                                  the 'full station walk' tool: from one
                                                  source platform, the walk to every other
                                                  platform at the nearest station,
-                                                 nearest-first (one pathfind each)
+                                                 in platform-ref order (one pathfind each)
   GET  /facilities?lat=&lon=&category=           facilities (POIs) of a category near a
                                                  station, nearest first; degrades to a
                                                  typed reason when the POI layer is absent
@@ -55,7 +55,7 @@ from search_context import list_platform_refs
 from api import config, platform_labels, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
-from api.facilities import build_facilities
+from api.facilities import build_facilities, build_facility_map
 from api.pipeline import assess_interchanges, plan_journeys
 from api.security import limiter, require_api_key
 from api.station_health import build_station_health
@@ -71,8 +71,23 @@ _WALK_CACHE_CONTROL = "public, max-age=86400"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_pool()  # best-effort; deferred to first request if the DB is down
+    if config.OSM_STATION_INDEX:
+        _load_osm_station_index()
     yield
     close_pool()
+
+
+def _load_osm_station_index() -> None:
+    """Best-effort: fold the deployed OSM station names into the autocomplete
+    index at startup. A DB that's down here just leaves the CSV index in place
+    (same posture as init_pool) -- it must never stop the app from booting."""
+    try:
+        with connection() as conn:
+            added = stations.load_osm_stations(conn)
+        print(f"[api] OSM station index: +{added} stations", flush=True)
+    except Exception as e:  # noqa: BLE001 -- degrade to CSV-only, never crash startup
+        print(f"[api] OSM station index unavailable, using CSV only: "
+              f"{type(e).__name__}: {e}", flush=True)
 
 
 app = FastAPI(title="transfr", version="0.1.0", lifespan=lifespan)
@@ -259,7 +274,7 @@ def get_station_walk(
 ):
     """The 'full station walk' advanced tool: from one source platform, the real
     walk to every OTHER platform at the station nearest (lat, lon), one pathfind
-    each, sorted nearest-first. Honest degradation: an unreachable platform is a
+    each, in platform-ref order. Honest degradation: an unreachable platform is a
     `found=False` row with core/'s reason; a coordinate with no station near it
     returns a top-level `found=False`. `step_free` routes elevator-free."""
     return build_station_walk(conn, lat, lon, from_platform, step_free)
@@ -283,6 +298,22 @@ def get_facilities(
     return build_facilities(conn, lat, lon, category, from_platform=from_platform)
 
 
+@app.get("/facility-map", response_model=schemas.FacilityMapResponse, dependencies=_PROTECTED)
+def get_facility_map(
+    lat: float,
+    lon: float,
+    category: str = Query(min_length=1, description="facility category, e.g. toilets/coffee/atm"),
+    conn=Depends(get_conn),
+):
+    """The whole station in 3D with EVERY facility of `category` pinned on it -- the
+    map-first "walk to nearest" surface. One round trip: a browse `viz_export` (all
+    platforms, no single route) with each facility attached as a focus POI, plus the
+    matching ranked `facilities` list in the same order, so a tapped pin maps back to
+    its row. Degrades to `found=False` with a typed `reason` (`no_poi_layer`,
+    `none_mapped`, ...) exactly like `/facilities`."""
+    return build_facility_map(conn, lat, lon, category)
+
+
 @app.get("/station-health", response_model=schemas.StationHealthResponse, dependencies=_PROTECTED)
 def get_station_health(lat: float, lon: float, conn=Depends(get_conn)):
     """One station's platform-connectivity breakdown for the Map-health tool: the
@@ -302,14 +333,28 @@ def get_walk(
     to_platform: str = Query(min_length=1, description="departure platform ref"),
     step_free: bool = Query(default=False, description="route without elevators"),
     all_platforms: bool = Query(default=False, description="station-map mode: include every platform"),
+    poi_lat: Optional[float] = Query(default=None, description="'walk to nearest' focus facility latitude"),
+    poi_lon: Optional[float] = Query(default=None, description="'walk to nearest' focus facility longitude"),
+    poi_category: Optional[str] = Query(default=None, description="focus facility OSM category (amenity/shop/...)"),
+    poi_subtype: Optional[str] = Query(default=None, description="focus facility OSM subtype (toilets/cafe/...)"),
+    poi_name: Optional[str] = Query(default=None, description="focus facility display name"),
+    poi_level: Optional[str] = Query(default=None, description="focus facility OSM level tag"),
     conn=Depends(get_conn),
 ):
     """One transfer's drawable walk geometry (the `viz_export` document). Keyed by
     the triple a Transfer already carries, so the client just forwards them. The
-    result is deterministic given the DB, hence cacheable."""
+    result is deterministic given the DB, hence cacheable.
+
+    The optional `poi_*` params carry a chosen facility (the 'walk to nearest'
+    door): its already-known coordinate is projected into the export's details
+    layer as the focus, so the 3D model draws the facility beside the platform."""
+    poi = None
+    if poi_lat is not None and poi_lon is not None and poi_category:
+        poi = schemas.WalkPOI(lat=poi_lat, lon=poi_lon, name=poi_name,
+                              category=poi_category, subtype=poi_subtype, level=poi_level)
     key = schemas.WalkKey(relation_id=relation_id, from_platform=from_platform,
                           to_platform=to_platform, step_free=step_free,
-                          all_platforms=all_platforms)
+                          all_platforms=all_platforms, poi=poi)
     result = build_walk(conn, key)
     if result.ok:
         response.headers["Cache-Control"] = _WALK_CACHE_CONTROL
