@@ -73,22 +73,7 @@ struct InputView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                // The brand wordmark — the SAME mark the launch animation lands, so
-                // the fly-up hand-off is pixel-identical. Its frame is the fly target,
-                // so we keep publishing the anchor (opacity doesn't change layout) but
-                // hold it invisible until the flying mark lands, then fade it in as the
-                // overlay fades out — a seamless swap of two identical marks.
-                Wordmark(height: 40)
-                    .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
-                    .opacity(isLaunching ? 0 : 1)
-                    // Snap (don't fade) at the hand-off: the title appears at full opacity
-                    // the instant the launch ends, so it's a solid floor under the identical
-                    // launch mark as the overlay fades out on top. Fading it in would instead
-                    // cross-dissolve two ~half-opaque copies of the mark — the composite only
-                    // ~75% opaque — which reads as a brief lightening of the blue (the flash).
-                    .animation(nil, value: isLaunching)
-                    .padding(.top, 4)
-
+                
                 SegmentedControl(options: Mode.allCases, selection: $mode) { $0.label }
 
                 switch mode {
@@ -141,6 +126,22 @@ struct InputView: View {
 
     private var header: some View {
         HStack {
+            // The brand wordmark — the SAME mark the launch animation lands, so
+            // the fly-up hand-off is pixel-identical. Its frame is the fly target,
+            // so we keep publishing the anchor (opacity doesn't change layout) but
+            // hold it invisible until the flying mark lands, then fade it in as the
+            // overlay fades out — a seamless swap of two identical marks.
+            Wordmark(height: 40)
+                .anchorPreference(key: WordmarkAnchorKey.self, value: .bounds) { $0 }
+                .opacity(isLaunching ? 0 : 1)
+                // Snap (don't fade) at the hand-off: the title appears at full opacity
+                // the instant the launch ends, so it's a solid floor under the identical
+                // launch mark as the overlay fades out on top. Fading it in would instead
+                // cross-dissolve two ~half-opaque copies of the mark — the composite only
+                // ~75% opaque — which reads as a brief lightening of the blue (the flash).
+                .animation(nil, value: isLaunching)
+                .padding(.top, 4)
+
             Spacer()
             NavigationLink(value: Route.advanced) {
                 Image(systemName: "shield.lefthalf.filled").foregroundStyle(Theme.ink2)
@@ -206,7 +207,7 @@ struct InputView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 12)
         } else {
-            fieldRow(dot: Theme.accent, label: "From", placeholder: "Hamburg Hbf",
+            fieldRow(dot: Theme.go, label: "From", placeholder: "Hamburg Hbf",
                      field: .from, text: origin) {
                 fromTrailing(active: false)
             }

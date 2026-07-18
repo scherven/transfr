@@ -27,9 +27,9 @@ DB = pytest.mark.skipif(
 )
 
 
-def _key(relation_id=5688517, from_p="1", to_p="16", step_free=False):
+def _key(relation_id=5688517, from_p="1", to_p="16", step_free=False, poi=None):
     return schemas.WalkKey(relation_id=relation_id, from_platform=from_p,
-                           to_platform=to_p, step_free=step_free)
+                           to_platform=to_p, step_free=step_free, poi=poi)
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +60,29 @@ def test_build_walk_forwards_settings_matching_the_verdict(monkeypatch):
     assert captured["stitch"] == config.STITCH_BRIDGES
     assert captured["details"] is False
     assert captured["avoid_elevators"] is True
+
+
+def test_build_walk_without_poi_attaches_nothing(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(walks, "export",
+                        lambda *a, **k: captured.update(k) or {"path": {"found": True}})
+    build_walk(conn=None, key=_key())
+    assert captured["attach_pois"] is None       # a plain transfer walk carries no POI
+
+
+def test_build_walk_forwards_the_chosen_facility_as_a_focus_poi(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(walks, "export",
+                        lambda *a, **k: captured.update(k) or {"path": {"found": True}})
+    poi = schemas.WalkPOI(lat=52.5, lon=13.37, name="WC", category="amenity",
+                          subtype="toilets", level="0")
+    build_walk(conn=None, key=_key(poi=poi))
+    # The 'walk to nearest' facility rides in as attach_pois, shaped for
+    # viz_export.detail_entry (level -> level_raw), so it's projected + flagged focus.
+    assert captured["attach_pois"] == [{
+        "lat": 52.5, "lon": 13.37, "name": "WC",
+        "category": "amenity", "subtype": "toilets", "level_raw": "0",
+    }]
 
 
 def test_build_walk_system_exit_becomes_no_geometry(monkeypatch):
@@ -120,3 +143,33 @@ def test_build_walk_real_berlin_matches_verdict_walk():
     # so it is allowed to differ -- just assert it still resolves.
     sf = build_walk(conn, _key(relation_id=5688517, from_p="1", to_p="16", step_free=True))
     assert sf.ok is True and sf.export["path"]["found"] is True
+
+
+@DB
+def test_build_walk_attaches_a_focus_poi_to_the_real_export():
+    """The 'walk to nearest' door: a chosen facility, projected into the real
+    Berlin export's details layer as the focus -- no planet extract needed. Its
+    coordinate must land near the walk's geometry (a station-footprint POI), and
+    it's the only detail on an otherwise details-free transfer walk."""
+    import db
+
+    conn = db.connect(connect_timeout=5)
+
+    # A point inside Berlin Hbf (near the origin the export centres on).
+    poi = schemas.WalkPOI(lat=52.5250, lon=13.3690, name="WC", category="amenity",
+                          subtype="toilets", level="0")
+    r = build_walk(conn, _key(relation_id=5688517, from_p="1", to_p="16", poi=poi))
+    assert r.ok is True
+    details = r.export["details"]
+    assert len(details) == 1                       # exactly the one chosen facility
+    d = details[0]
+    assert d["focus"] is True and d["kind"] == "poi"
+    assert d["subtype"] == "toilets" and d["name"] == "WC"
+    assert "xyz" in d and len(d["xyz"]) == 3
+    assert r.export["meta"]["has_details"] is True and r.export["meta"]["n_details"] == 1
+    # The POI sits within the drawn scene's footprint, not off in null space.
+    bbox = r.export["meta"]["bbox"]
+    x, y, _ = d["xyz"]
+    margin = 60.0
+    assert bbox["min_x"] - margin <= x <= bbox["max_x"] + margin
+    assert bbox["min_y"] - margin <= y <= bbox["max_y"] + margin

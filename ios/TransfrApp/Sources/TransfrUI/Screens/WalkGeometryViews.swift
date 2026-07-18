@@ -20,9 +20,15 @@ struct WalkScene {
     let endRef: String
     let startLevel: Int
     let endLevel: Int
-    /// World XY bounds over ways + path — shared by every view so switching level
-    /// (or rotating the 3D) never rescales the scene under you.
+    /// World XY bounds over ways + path (+ the focus facility) — shared by every
+    /// view so switching level (or rotating the 3D) never rescales the scene.
     let minX: CGFloat, maxX: CGFloat, minY: CGFloat, maxY: CGFloat
+    /// The optional details layer (facilities/landmarks) the export carries.
+    let details: [VizExport.Detail]
+    /// The one facility the user chose in "walk to nearest", drawn emphasised
+    /// beside the destination platform. The server flags it `focus`; absent that
+    /// (older exports) fall back to the nearest point POI. `nil` on a plain walk.
+    let focusPOI: VizExport.Detail?
 
     init(_ e: VizExport) {
         export = e
@@ -30,6 +36,10 @@ struct WalkScene {
         pathPoints = e.path.points ?? []
         transitions = e.path.transitions ?? []
         found = e.path.found
+
+        details = e.details
+        let pois = e.details.filter { $0.kind == "poi" && $0.xyz != nil }
+        focusPOI = pois.first { $0.focus == true } ?? pois.min { $0.dist < $1.dist }
 
         let fh = floorHeight
         func lvl(_ z: Float) -> Int { Int((CGFloat(z) / fh).rounded()) }
@@ -55,6 +65,11 @@ struct WalkScene {
         }
         for w in e.ways { for p in w.points { extend(p) } }
         for p in pathPoints { extend(p) }
+        // Frame the chosen facility too, so it can never sit just off the canvas.
+        if let f = focusPOI {
+            if let c = f.xyz { extend(c) }
+            for p in f.outline ?? [] { extend(p) }
+        }
         if lo.x > hi.x { lo = .zero; hi = CGPoint(x: 1, y: 1) }  // empty guard
         minX = lo.x; maxX = hi.x; minY = lo.y; maxY = hi.y
     }
@@ -663,6 +678,13 @@ struct IsoGeometryCanvas: View {
     /// pass `false` for one deterministic, animation-free frame (`reduceMotion` is a
     /// read-only environment value and can't be forced through `.environment`).
     var animated: Bool = true
+    /// Index (into `scene.export.details`) of the pin drawn emphasised + always
+    /// labelled — the tapped facility on the map. `nil` on the walk views.
+    var selectedPOI: Int? = nil
+    /// Tapping a facility pin reports its `details` index. When set, a near-zero
+    /// drag is treated as a tap and hit-tested against the pins. `nil` = pins are
+    /// display-only (the walk views).
+    var onSelectPOI: ((Int) -> Void)? = nil
     @State private var yaw: Double = 0.5
     @GestureState private var twist: Double = 0
     @State private var zoom: CGFloat = 1
@@ -671,6 +693,9 @@ struct IsoGeometryCanvas: View {
     @GestureState private var dragPan: CGSize = .zero
     @State private var focusLevel: Int?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Live canvas size, mirrored from a background reader so the tap handler can
+    /// rebuild the projection to hit-test pins.
+    @State private var canvasSize: CGSize = .zero
 
     var body: some View {
         let liveYaw = yaw + twist
@@ -696,12 +721,24 @@ struct IsoGeometryCanvas: View {
             }
         }
         .contentShape(Rectangle())
+        .background(GeometryReader { geo in
+            Color.clear
+                .onAppear { canvasSize = geo.size }
+                .onChange(of: geo.size) { _, s in canvasSize = s }
+        })
         // One-finger drag pans; pinch zooms; two-finger twist rotates. All three
-        // combine, the way a map does.
+        // combine, the way a map does. A near-still press is a tap: on the map it
+        // selects the facility pin under your finger.
         .gesture(
             DragGesture(minimumDistance: 0)
                 .updating($dragPan) { v, s, _ in s = v.translation }
-                .onEnded { pan.width += $0.translation.width; pan.height += $0.translation.height }
+                .onEnded { v in
+                    if let onSelectPOI, hypot(v.translation.width, v.translation.height) < 8 {
+                        if let i = poiHit(at: v.location) { onSelectPOI(i) }
+                    } else {
+                        pan.width += v.translation.width; pan.height += v.translation.height
+                    }
+                }
         )
         .simultaneousGesture(
             MagnificationGesture()
@@ -785,24 +822,73 @@ struct IsoGeometryCanvas: View {
         }
 
         // Route + its level changes (walk mode only; browse shows the station).
-        guard !browse else { return }
-        guard scene.found, scene.pathPoints.count >= 2 else {
-            if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
-            return
+        if !browse {
+            if scene.found, scene.pathPoints.count >= 2 {
+                let pts = scene.pathPoints
+                var route = Path()
+                route.move(to: iso.map(pts[0]))
+                for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
+                // Recessed treatment: the route is the hero — a touch heavier, with a soft glow.
+                var glow = ctx
+                glow.addFilter(.shadow(color: Theme.accent.opacity(0.55), radius: 4))
+                glow.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+                for t in scene.transitions {   // the stair / escalator / lift you actually ride
+                    connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1)
+                }
+                endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
+                endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
+            } else if !scene.found {
+                drawUnavailable(ctx, size, "Platforms not connected")
+            }
         }
-        let pts = scene.pathPoints
-        var route = Path()
-        route.move(to: iso.map(pts[0]))
-        for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
-        // Recessed treatment: the route is the hero — a touch heavier, with a soft glow.
-        var glow = ctx
-        glow.addFilter(.shadow(color: Theme.accent.opacity(0.55), radius: 4))
-        glow.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
-        for t in scene.transitions {   // the stair / escalator / lift you actually ride
-            connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1)
+
+        // Facilities, drawn last so they read on top. The map draws every POI the
+        // export carries as a labelled pin; a walk view draws its single focus POI
+        // plus a dashed leg from where the walk ends. Pins isolated-away are hidden.
+        let poiIdx = scene.export.details.indices.filter {
+            let d = scene.export.details[$0]
+            return d.kind == "poi" && d.xyz != nil
+                && (focus == nil || focus == scene.level(of: d.xyz!.z))
         }
-        endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
-        endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
+        if !poiIdx.isEmpty {
+            // Walk view: a dashed leg to the single focus POI.
+            if !browse, scene.found, let end = scene.pathPoints.last,
+               let fp = scene.focusPOI, let xyz = fp.xyz,
+               focus == nil || focus == scene.level(of: xyz.z) {
+                var leg = Path(); leg.move(to: iso.map(end)); leg.addLine(to: iso.map(xyz))
+                ctx.stroke(leg, with: .color(Theme.poi.opacity(0.7)),
+                           style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [2.5, 3.5]))
+            }
+            // Selected pin last, so it wins the top spot and its label the space.
+            var placed: [CGRect] = []
+            for i in poiIdx.sorted(by: { ($0 == selectedPOI ? 1 : 0) < ($1 == selectedPOI ? 1 : 0) }) {
+                let d = scene.export.details[i]
+                poiPin(ctx, at: iso.map(d.xyz!), label: facilityLabel(d), tint: Theme.poi,
+                       size: size, selected: i == selectedPOI, placed: &placed)
+            }
+        }
+    }
+
+    /// The `details` index of the facility pin nearest a tap (within a finger-sized
+    /// radius), or nil. Rebuilds the current projection from the committed
+    /// yaw/zoom/pan and skips pins on an isolated-away floor.
+    private func poiHit(at tap: CGPoint) -> Int? {
+        guard canvasSize.width > 1 else { return nil }
+        let box = (browse ? nil : scene.walkFramingBox) ?? scene.worldBounds
+        let iso = IsoFit(scene: scene, box: box, size: canvasSize, angle: yaw,
+                         zoom: min(max(zoom, 0.5), 8), pan: pan, pad: 24)
+        let focus = focusLevel
+        var best: Int?
+        var bestD: CGFloat = 32 * 32   // ~32pt tap radius, squared
+        for i in scene.export.details.indices {
+            let d = scene.export.details[i]
+            guard d.kind == "poi", let xyz = d.xyz else { continue }
+            if let f = focus, f != scene.level(of: xyz.z) { continue }
+            let q = iso.map(xyz)
+            let dd = (q.x - tap.x) * (q.x - tap.x) + (q.y - tap.y) * (q.y - tap.y)
+            if dd < bestD { bestD = dd; best = i }
+        }
+        return best
     }
 
     private var controls: some View {
@@ -1067,6 +1153,61 @@ private func platformTag(_ ctx: GraphicsContext, _ p: CGPoint, _ ref: String) {
     ctx.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.panel))
     ctx.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.line), lineWidth: 1)
     ctx.draw(text, at: p, anchor: .center)
+}
+
+/// The short human label for a facility marker: its name, else a tidied subtype
+/// ("toilets" → "Toilets"), else the OSM category. Clipped so a long shop name
+/// can't run off the model.
+private func facilityLabel(_ d: VizExport.Detail) -> String {
+    let raw = d.name
+        ?? d.subtype?.replacingOccurrences(of: "_", with: " ").capitalized
+        ?? d.category.capitalized
+    return raw.count > 24 ? String(raw.prefix(23)) + "…" : raw
+}
+
+/// A facility pin on the 3D model: a haloed dot at its floor plus a label pill.
+/// The `selected` pin is larger, ringed, and always labelled (on top); the rest
+/// label only where a slot is free (`placed` accumulates every dot and label box),
+/// so a dense category reads as pins with the legible ones named rather than a wall
+/// of overlapping text. Labels sit above the dot, flip below to dodge, and clamp to
+/// the canvas.
+private func poiPin(_ ctx: GraphicsContext, at p: CGPoint, label: String, tint: Color,
+                    size: CGSize, selected: Bool, placed: inout [CGRect]) {
+    let r: CGFloat = selected ? 8 : 5.5
+    ctx.fill(Path(ellipseIn: CGRect(x: p.x - r - 2.5, y: p.y - r - 2.5, width: 2*r + 5, height: 2*r + 5)),
+             with: .color(Theme.paper))
+    ctx.fill(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)), with: .color(tint))
+    if selected {
+        ctx.stroke(Path(ellipseIn: CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r)),
+                   with: .color(Theme.paper), lineWidth: 2)
+    }
+    ctx.fill(Path(ellipseIn: CGRect(x: p.x - 2, y: p.y - 2, width: 4, height: 4)), with: .color(Theme.paper))
+    placed.append(CGRect(x: p.x - r, y: p.y - r, width: 2*r, height: 2*r))
+
+    var text = ctx.resolve(Text(label).font(.system(size: selected ? 11 : 9.5, weight: .bold)))
+    text.shading = .color(.white)
+    let ts = text.measure(in: CGSize(width: 200, height: 40))
+    let w = ts.width + 11, h = ts.height + 5
+    let gap = r + 4
+    func slot(above: Bool) -> CGRect {
+        let cy = above ? p.y - gap - h / 2 : p.y + gap + h / 2
+        let cx = min(max(p.x, w / 2 + 3), size.width - w / 2 - 3)
+        return CGRect(x: cx - w / 2, y: cy - h / 2, width: w, height: h)
+    }
+    func free(_ rr: CGRect) -> Bool {
+        rr.minY >= 2 && rr.maxY <= size.height - 2
+            && !placed.contains { $0.insetBy(dx: -2, dy: -2).intersects(rr) }
+    }
+    let above = slot(above: true), below = slot(above: false)
+    let box: CGRect?
+    if selected { box = above.minY >= 2 ? above : below }   // always labelled, on top
+    else if free(above) { box = above }
+    else if free(below) { box = below }
+    else { box = nil }                                       // no room: just the dot
+    guard let box else { return }
+    placed.append(box)
+    ctx.fill(Path(roundedRect: box, cornerRadius: h / 2), with: .color(tint))
+    ctx.draw(text, at: CGPoint(x: box.midX, y: box.midY), anchor: .center)
 }
 
 // MARK: - Paired transition marks (#53)

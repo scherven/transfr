@@ -386,6 +386,38 @@ def _extract_detail_pbf(bbox_lonlat: Tuple[float, float, float, float]) -> str:
     return out
 
 
+def detail_entry(proj: "Projector", feat: Dict, path_xy: List[Tuple[float, float]]) -> Dict:
+    """Project one gathered feature (a building or a POI) into a `details` entry:
+    its geometry in local-ENU metres plus its distance from the walked path.
+
+    Pure -- no DB, no osmium -- so the planet-gathered `details` layer and an
+    explicitly-attached facility POI (the 'walk to nearest' focus) share exactly
+    one projection, and it is unit-testable offline. A feature carrying a truthy
+    `focus` flag emits `"focus": true`, so the renderer can tell the one facility
+    the user chose from the surrounding context."""
+    z = proj.z(parse_levels(feat.get("level_raw"))[0])
+    if feat["kind"] == "building":
+        pts = [[*proj.xy(la, lo), z] for la, lo in feat["outline"]]
+        cx = sum(p[0] for p in pts) / len(pts)
+        cy = sum(p[1] for p in pts) / len(pts)
+        geom = {"points": [[round(v, 2) for v in p] for p in pts]}
+    else:  # poi: a point, plus its real footprint when mapped as an area
+        x, y = proj.xy(feat["lat"], feat["lon"])
+        cx, cy = x, y
+        geom = {"xyz": [round(x, 2), round(y, 2), round(z, 2)]}
+        if feat.get("outline"):
+            opts = [[*proj.xy(la, lo), z] for la, lo in feat["outline"]]
+            geom["outline"] = [[round(v, 2) for v in p] for p in opts]
+    dist = min(math.hypot(cx - px, cy - py) for px, py in path_xy)
+    entry = {
+        "kind": feat["kind"], "category": feat["category"], "subtype": feat.get("subtype"),
+        "name": feat.get("name"), "dist": round(dist, 1), **geom,
+    }
+    if feat.get("focus"):
+        entry["focus"] = True
+    return entry
+
+
 def gather_details(bbox_lonlat: Tuple[float, float, float, float]) -> List[Dict]:
     """Buildings + POIs (shops/amenities/tourism/offices/leisure) in the bbox,
     in lat/lon, from the local planet extract. Buildings and way-POIs carry
@@ -447,10 +479,19 @@ def export(
     details: bool = False, detail_radius_m: float = DEFAULT_DETAIL_RADIUS_M,
     stitch: bool = False, avoid_elevators: bool = False,
     all_platforms: bool = False,
+    attach_pois: Optional[List[Dict]] = None,
 ) -> Dict:
     """Resolve the path, gather context ways, project to metres, return the
     renderer JSON as a dict. `all_platforms` (station-map / browse mode) also
-    pulls in every platform at the station, not just the ones the walk touched."""
+    pulls in every platform at the station, not just the ones the walk touched.
+
+    `attach_pois` is the 'walk to nearest' seam: a list of already-known POIs
+    (each `{lat, lon, category, subtype?, name?, level_raw?}` -- their coordinates
+    came from `/facilities`) projected straight into the `details` layer and
+    flagged `focus`, so the specific facility the user tapped is drawn in the 3D
+    model. Unlike the `details=True` layer it needs NO planet extract, so it works
+    on any host; and it's always kept (never radius-clipped), because the user
+    chose it."""
     with conn.cursor() as cur:
         name = _station_name(cur, relation_id)
         ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch,
@@ -702,38 +743,32 @@ def export(
     # Optional details layer: buildings + POIs (landmarks/stores) around the
     # station, each tagged with its distance from the path so the renderer's
     # slider can reveal them progressively. Placed at ground unless level-tagged.
+    #
+    # Two sources feed it: the `details=True` planet-extract sweep (radius-clipped
+    # context), and `attach_pois` -- specific facilities the caller already located
+    # (the 'walk to nearest' focus), projected the same way but always kept and
+    # flagged `focus`. Both share `detail_entry`.
     details_json = []
-    if details:
+    if details or attach_pois:
         r = min(detail_radius_m, MAX_DETAIL_RADIUS_M)
-        lats = [la for la, _ in local]
-        lons = [lo for _, lo in local]
-        dlat = r / 111_320.0
-        dlon = r / (111_320.0 * max(0.1, math.cos(math.radians(lat0))))
-        feats = gather_details((min(lons) - dlon, min(lats) - dlat,
-                                max(lons) + dlon, max(lats) + dlat))
         path_xy = [(p[0], p[1]) for p in path_json.get("points", [])] or [(0.0, 0.0)]
-        for f in feats:
-            z = proj.z(parse_levels(f.get("level_raw"))[0])
-            if f["kind"] == "building":
-                pts = [[*proj.xy(la, lo), z] for la, lo in f["outline"]]
-                cx = sum(p[0] for p in pts) / len(pts)
-                cy = sum(p[1] for p in pts) / len(pts)
-                geom = {"points": [[round(v, 2) for v in p] for p in pts]}
-            else:  # poi: a point, plus its real footprint when mapped as an area
-                x, y = proj.xy(f["lat"], f["lon"])
-                cx, cy = x, y
-                geom = {"xyz": [round(x, 2), round(y, 2), round(z, 2)]}
-                if f.get("outline"):
-                    opts = [[*proj.xy(la, lo), z] for la, lo in f["outline"]]
-                    geom["outline"] = [[round(v, 2) for v in p] for p in opts]
-            dist = min(math.hypot(cx - px, cy - py) for px, py in path_xy)
-            if dist > r:
-                continue
-            details_json.append({
-                "kind": f["kind"], "category": f["category"], "subtype": f["subtype"],
-                "name": f["name"], "dist": round(dist, 1), **geom,
-            })
-        details_json.sort(key=lambda d: d["dist"])
+        if details:
+            lats = [la for la, _ in local]
+            lons = [lo for _, lo in local]
+            dlat = r / 111_320.0
+            dlon = r / (111_320.0 * max(0.1, math.cos(math.radians(lat0))))
+            gathered = [detail_entry(proj, f, path_xy)
+                        for f in gather_details((min(lons) - dlon, min(lats) - dlat,
+                                                 max(lons) + dlon, max(lats) + dlat))]
+            # The gathered context layer is revealed nearest-first by the slider.
+            details_json.extend(sorted((e for e in gathered if e["dist"] <= r),
+                                       key=lambda d: d["dist"]))
+        # Attached facilities keep their INPUT order (never sorted): the client
+        # renders them as pins and maps a tapped pin back to the facility at the
+        # same index, so `details[i]` must stay aligned with `attach_pois[i]`.
+        for poi in (attach_pois or []):
+            details_json.append(detail_entry(proj, {**poi, "kind": "poi", "focus": True}, path_xy))
+            levels_seen.add(parse_levels(poi.get("level_raw"))[0])
 
     return {
         "meta": {

@@ -135,6 +135,21 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
+    /// GET /facility-map?lat=&lon=&category= — the whole station in 3D with every
+    /// facility of a category pinned (a browse `viz_export` + the ranked list, in one
+    /// round trip). Degrades to `found == false` with a typed `reason` like
+    /// `facilities(...)` when the POI layer isn't available on the host.
+    public func facilityMap(lat: Double, lon: Double, category: String) async throws -> FacilityMapResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("facility-map"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lon", value: String(lon)),
+            URLQueryItem(name: "category", value: category),
+        ]
+        return try await get(comps?.url)
+    }
+
     /// GET /station-health?lat=&lon= — one station's platform-connectivity
     /// breakdown (connected / stitchable / island over every platform pair), for
     /// the Map-health tool's per-station query. Resolves the station nearest the
@@ -152,17 +167,29 @@ public struct TransfrClient: Sendable {
     /// GET /walk?relation_id=&from_platform=&to_platform=&step_free= — one
     /// transfer's drawable walk geometry (the `viz_export` document). Keyed by the
     /// triple a `Transfer` already carries, so callers forward them verbatim.
+    /// `poi` (the "walk to nearest" facility) rides along as `poi_*` params so the
+    /// server draws it into the geometry's details layer as the focus.
     public func walk(relationId: Int, from: String, to: String,
-                     stepFree: Bool = false, allPlatforms: Bool = false) async throws -> WalkResult {
+                     stepFree: Bool = false, allPlatforms: Bool = false,
+                     poi: WalkPOI? = nil) async throws -> WalkResult {
         var comps = URLComponents(url: baseURL.appendingPathComponent("walk"),
                                   resolvingAgainstBaseURL: false)
-        comps?.queryItems = [
+        var items = [
             URLQueryItem(name: "relation_id", value: String(relationId)),
             URLQueryItem(name: "from_platform", value: from),
             URLQueryItem(name: "to_platform", value: to),
             URLQueryItem(name: "step_free", value: stepFree ? "true" : "false"),
             URLQueryItem(name: "all_platforms", value: allPlatforms ? "true" : "false"),
         ]
+        if let poi {
+            items.append(URLQueryItem(name: "poi_lat", value: String(poi.lat)))
+            items.append(URLQueryItem(name: "poi_lon", value: String(poi.lon)))
+            items.append(URLQueryItem(name: "poi_category", value: poi.category))
+            if let s = poi.subtype { items.append(URLQueryItem(name: "poi_subtype", value: s)) }
+            if let n = poi.name { items.append(URLQueryItem(name: "poi_name", value: n)) }
+            if let l = poi.level { items.append(URLQueryItem(name: "poi_level", value: l)) }
+        }
+        comps?.queryItems = items
         return try await get(comps?.url)
     }
 

@@ -71,10 +71,20 @@ public final class TripModel {
         public var relationId: Int
         public var fromPlatform: String
         public var toPlatform: String
+        /// The facility this walk leads to (the "walk to nearest" door), drawn into
+        /// the geometry beside the destination platform. `nil` for a plain
+        /// platform-to-platform lookup.
+        public var poi: WalkPOI?
+        /// Browse the whole station (every platform, no single route) rather than a
+        /// two-platform walk — how a tapped facility is shown, so it reads on the
+        /// full station map with the POI pinned regardless of which platform it's by.
+        public var browse: Bool
 
-        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String) {
+        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String,
+                    poi: WalkPOI? = nil, browse: Bool = false) {
             self.station = station; self.relationId = relationId
             self.fromPlatform = fromPlatform; self.toPlatform = toPlatform
+            self.poi = poi; self.browse = browse
         }
     }
     public var walkLookup: WalkLookup?
@@ -250,6 +260,14 @@ public final class TripModel {
         try? await repo.facilities(lat: lat, lon: lon, category: category)
     }
 
+    /// The whole station in 3D with every facility of a category pinned (the
+    /// map-first Nearest-facility surface). Fails soft to nil on a transport error;
+    /// a resolved-but-empty or POI-layer-absent result comes back as a
+    /// `FacilityMapResponse` with `found == false` and a typed `reason`.
+    public func facilityMap(lat: Double, lon: Double, category: String) async -> FacilityMapResponse? {
+        try? await repo.facilityMap(lat: lat, lon: lon, category: category)
+    }
+
     /// Resolve a coordinate to its station's platform-connectivity health (the
     /// Map-health per-station query). Fails soft to nil — the diagnostic panel then
     /// shows nothing rather than surfacing an error.
@@ -293,35 +311,97 @@ public final class TripModel {
     public func streamVerdicts() {
         guard let resp = response else { return }
         verdictTask?.cancel()
-        var work: [(j: Int, t: Int, ic: AssessInterchange)] = []
+        // Batch per journey, NOT per transfer. The heavy part of `/assess` is
+        // building the station SearchContext, and the server shares one resolve
+        // cache across a request's interchanges — so sending a whole itinerary's
+        // changes in ONE request both fires far fewer requests (≤ one per journey
+        // instead of one per transfer) and lets that cache actually hit. The old
+        // per-transfer fan-out was what stranded walks on big journey sets (e.g.
+        // Hamburg→Salzburg, 12+ transfers): a dozen concurrent requests hit
+        // URLSession's per-host cap, each rebuilt the context cold, and any that
+        // timed out left their transfer `pending` forever. Each item keeps its
+        // transfer index so the batched reply splices back into the right row.
+        var work: [(j: Int, items: [(t: Int, ic: AssessInterchange)])] = []
         for (j, journey) in resp.journeys.enumerated() {
             let ics = Self.interchanges(of: journey)
-            for (t, transfer) in journey.transfers.enumerated() where transfer.verdictKind.isPending {
-                if t < ics.count { work.append((j, t, ics[t])) }
+            let items = journey.transfers.enumerated().compactMap {
+                (t, transfer) -> (t: Int, ic: AssessInterchange)? in
+                guard transfer.verdictKind.isPending, t < ics.count else { return nil }
+                return (t, ics[t])
             }
+            if !items.isEmpty { work.append((j, items)) }
         }
         guard !work.isEmpty else { return }
         verdictTask = Task { [weak self] in await self?.runVerdictStream(work) }
     }
 
-    private func runVerdictStream(_ work: [(j: Int, t: Int, ic: AssessInterchange)]) async {
+    private func runVerdictStream(_ work: [(j: Int, items: [(t: Int, ic: AssessInterchange)])]) async {
         let repo = self.repo
         let noElevators = plannedAvoidElevators   // the search's profile, not the live setting
-        await withTaskGroup(of: (Int, Int, Transfer?).self) { group in
-            for item in work {
-                let (j, t, ic) = (item.j, item.t, item.ic)
-                group.addTask { (j, t, (try? await repo.assess([ic], noElevators: noElevators))?.first) }
+        await withTaskGroup(of: (j: Int, indices: [Int], transfers: [Transfer]?).self) { group in
+            for (j, items) in work {
+                group.addTask {
+                    let assessed = await Self.assessWithRetry(
+                        items.map(\.ic), repo: repo, noElevators: noElevators)
+                    return (j, items.map(\.t), assessed)
+                }
             }
-            for await (j, t, transfer) in group {
+            for await (j, indices, assessed) in group {
                 if Task.isCancelled { return }
-                guard let transfer, var resp = response,
-                      j < resp.journeys.count, t < resp.journeys[j].transfers.count else { continue }
-                resp.journeys[j].transfers[t] = transfer
-                // Re-roll the journey verdict now one transfer is known.
+                guard var resp = response, j < resp.journeys.count else { continue }
+                for (k, t) in indices.enumerated() where t < resp.journeys[j].transfers.count {
+                    if let assessed {
+                        resp.journeys[j].transfers[t] = assessed[k]
+                    } else {
+                        // Every `/assess` attempt for this journey failed. Give each
+                        // still-pending row a TERMINAL verdict in place — `unknown`,
+                        // never a fabricated feasible — so it stops loading, the
+                        // journey rolls up honestly, and PreparingWalksView can reach
+                        // `allSettled`. `pending` is purely transient (Verdict.swift):
+                        // nothing else would ever clear it, so without this a single
+                        // failed request strands that walk forever.
+                        resp.journeys[j].transfers[t].verdict = "unknown"
+                        resp.journeys[j].transfers[t].reason = Self.assessFailedReason
+                    }
+                }
+                // Re-roll the journey verdict now this itinerary's transfers are known.
                 resp.journeys[j].verdict = resp.journeys[j].transfers.map(\.verdictKind).rolledUp().raw
                 response = resp
             }
         }
+    }
+
+    /// Reason attached to a transfer whose verdict couldn't be fetched after
+    /// retries — distinct from the server's own `unknown` reasons (e.g.
+    /// `no_platform_data`) so the UI can say "couldn't check" rather than falsely
+    /// "no platform data here" (see `JourneyView`).
+    static let assessFailedReason = "assessment_unavailable"
+
+    /// Assess one journey's interchanges in a single request, retrying briefly
+    /// before giving up. Returns one transfer per interchange (in request order) on
+    /// success, or `nil` if every attempt failed — the caller then writes a terminal
+    /// verdict so no transfer is left `pending` forever. `nonisolated static`, with
+    /// `repo` passed in, so it runs on the task-group child off the main actor (like
+    /// the original per-transfer call did) rather than hopping back for each request.
+    private nonisolated static func assessWithRetry(_ ics: [AssessInterchange], repo: JourneyRepository,
+                                                    noElevators: Bool) async -> [Transfer]? {
+        let maxAttempts = 3
+        for attempt in 0..<maxAttempts {
+            if Task.isCancelled { return nil }
+            // Require one transfer back per interchange: a short/empty reply is as
+            // useless as a thrown error (it would splice a nil), so treat it as a
+            // failed attempt and retry rather than stranding the row.
+            if let transfers = try? await repo.assess(ics, noElevators: noElevators),
+               transfers.count == ics.count {
+                return transfers
+            }
+            if attempt < maxAttempts - 1 {
+                // 0.4s, 0.8s — brief backoff to ride out a transient blip or a
+                // moment of server contention without hammering.
+                try? await Task.sleep(nanoseconds: 400_000_000 << UInt64(attempt))
+            }
+        }
+        return nil
     }
 
     /// The changes of train of a journey, as the interchange requests `/assess`

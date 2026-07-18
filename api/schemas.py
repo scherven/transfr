@@ -273,6 +273,29 @@ class FacilitiesResponse(BaseModel):
     facilities: List[Facility] = Field(default_factory=list)
 
 
+class FacilityMapResponse(BaseModel):
+    """The whole station drawn in 3D with EVERY facility of a category pinned on it
+    -- the map-first "walk to nearest" surface. One round trip: `export` is a browse
+    `viz_export` (all platforms, no single route) with each facility attached as a
+    focus POI, and `facilities` is the matching ranked list, in the SAME order as
+    `export.details` so the client maps a tapped pin (details[i]) back to its
+    facility (facilities[i]). Each facility carries a cheap `nearest_platform`
+    anchor (nearest centroid, no pathfind) so a tapped pin can open its walk.
+    Degrades like `/facilities`: `found=False` with a typed `reason`
+    (`station_unresolved`, `unsupported_category`, `no_poi_layer`, `none_mapped`,
+    or `too_sparse` when the station has too few platforms to draw)."""
+
+    lat: float
+    lon: float
+    relation_id: Optional[int] = None
+    station: Optional[str] = None
+    category: str
+    found: bool
+    reason: Optional[str] = None
+    export: Optional[Dict[str, Any]] = None
+    facilities: List[Facility] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Walk geometry (viz_export) delivery -- /walk and /walks
 #
@@ -282,6 +305,22 @@ class FacilitiesResponse(BaseModel):
 # exact triple assess_transfer already resolves on every Transfer -- relation_id
 # + arrival_platform + departure_platform -- so the client just echoes those.
 # ---------------------------------------------------------------------------
+
+
+class WalkPOI(BaseModel):
+    """A specific facility to highlight in a walk's geometry -- the 'walk to
+    nearest' focus. Its coordinate is already known to the caller (it came from
+    `/facilities`), so the walk builder projects it into the export's local frame
+    and appends it to the `details` layer flagged `focus`, with NO planet extract
+    needed. `level` is the OSM `level` tag as a string ("0", "-1", ...) when known,
+    so the POI is lifted to the right floor in the 3D model."""
+
+    lat: float
+    lon: float
+    name: Optional[str] = None
+    category: str
+    subtype: Optional[str] = None
+    level: Optional[str] = None
 
 
 class WalkKey(BaseModel):
@@ -297,6 +336,10 @@ class WalkKey(BaseModel):
     # Station-map (browse) mode: include every platform at the station, not just
     # the ones the walked corridor touched.
     all_platforms: bool = False
+    # A facility to draw in the walk's geometry (the 'walk to nearest' door): the
+    # tapped POI, projected into the details layer as the focus. None for a plain
+    # transfer walk.
+    poi: Optional[WalkPOI] = None
 
 
 class BoardingGuidance(BaseModel):

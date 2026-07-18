@@ -183,6 +183,49 @@ def test_hop_way_rank_orders_level_then_path_then_bare():
     assert vx._hop_way_rank({"level": "0"}) > vx._hop_way_rank({})
 
 
+# --- detail_entry: projecting a POI/building into the details layer ----------
+
+def test_detail_entry_projects_poi_at_origin():
+    proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
+    feat = {"kind": "poi", "category": "amenity", "subtype": "toilets",
+            "name": "WC", "level_raw": "0", "lat": 48.0, "lon": 7.0}
+    e = vx.detail_entry(proj, feat, path_xy=[(0.0, 0.0)])
+    assert e["kind"] == "poi" and e["category"] == "amenity" and e["subtype"] == "toilets"
+    assert e["name"] == "WC"
+    assert e["xyz"] == [0.0, 0.0, 0.0]        # the origin projects to the origin
+    assert "focus" not in e                    # not flagged unless asked
+
+
+def test_detail_entry_lifts_poi_to_its_level_and_flags_focus():
+    proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
+    feat = {"kind": "poi", "category": "shop", "subtype": "coffee", "name": "Cafe",
+            "level_raw": "1", "lat": 48.0, "lon": 7.0, "focus": True}
+    e = vx.detail_entry(proj, feat, path_xy=[(0.0, 0.0)])
+    assert e["xyz"][2] == 4.0                  # level 1 * 4 m floor height
+    assert e["focus"] is True                  # the chosen facility is marked
+
+
+def test_detail_entry_measures_distance_to_the_nearest_path_point():
+    proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
+    # A POI 10 m east of origin (lon delta); the path passes right by the origin
+    # and also far away -- the nearest point wins.
+    dlon = 10.0 / proj.m_per_deg_lon
+    feat = {"kind": "poi", "category": "amenity", "subtype": "atm",
+            "name": None, "level_raw": None, "lat": 48.0, "lon": 7.0 + dlon}
+    e = vx.detail_entry(proj, feat, path_xy=[(0.0, 0.0), (500.0, 500.0)])
+    assert abs(e["dist"] - 10.0) < 0.1
+
+
+def test_detail_entry_building_uses_outline_centroid():
+    proj = vx.Projector(48.0, 7.0, floor_height_m=4.0)
+    feat = {"kind": "building", "category": "building", "subtype": "train_station",
+            "name": "Hbf", "level_raw": None,
+            "outline": [(48.0, 7.0), (48.0, 7.001), (48.001, 7.001), (48.001, 7.0)]}
+    e = vx.detail_entry(proj, feat, path_xy=[(0.0, 0.0)])
+    assert "points" in e and "xyz" not in e     # a building carries an outline, not a point
+    assert len(e["points"]) == 4
+
+
 def test_way_for_hop_prefers_level_tagged_over_untagged_stub():
     # Two ways place nodes 10 and 11 adjacent: a level=1 concourse AREA and a
     # tag-less stub laid over the same pair (the Stuttgart Hbf pattern). The
