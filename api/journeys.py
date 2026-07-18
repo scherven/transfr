@@ -28,7 +28,7 @@ def _get_session() -> requests.Session:
         _session = requests.Session()
         _session.headers.update({
             "Accept": "application/json",
-            "User-Agent": "transfr/0.1 (https://github.com/simonchervenak/transfr)",
+            "User-Agent": "transfr/0.1 (https://github.com/scherven/transfr)",
         })
     return _session
 

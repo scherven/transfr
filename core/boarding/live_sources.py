@@ -37,7 +37,7 @@ import requests
 from seat import PlatformGeometry
 from formation_model import CoachPlacement, NormalizedFormation, PlatformSectorMap
 
-_UA = "transfr/0.1 (+https://github.com/simonchervenak/transfr) data-process"
+_UA = "transfr/0.1 (+https://github.com/scherven/transfr) data-process"
 _TIMEOUT = 15
 
 DERF_BASE = "https://dbf.finalrewind.org"
