@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// Data sources & licences — the prototype's `#s-about` (§6.11). A required page,
@@ -23,7 +24,8 @@ struct AttributionsView: View {
 
                 SectionHeader(text: "Data sources")
                 source("OpenStreetMap", "Base map, platforms, walkways, levels, facilities. © OpenStreetMap contributors, ODbL. openstreetmap.org/copyright")
-                source("Transitous · MOTIS", "Journeys, live delays and platform assignments, via the open Transitous routing service (MOTIS). Community open data.")
+                source("Transitous · MOTIS", "Journeys, live delays and platform assignments, via the open Transitous routing service (MOTIS). Community open data.",
+                       link: "https://transitous.org/sources/")
                 source("Deutsche Bahn · IRIS", "Real-time platform and track changes for German stations, via DB's public IRIS feed.")
                 source("Coach-formation providers", "Train coach order & sector maps from the operators' formation APIs (DB Wagenreihung and equivalents), where published.")
                 source("trainline-eu/stations", "Station names, and the English city aliases (info:en) that let you search stations in English. © trainline-eu/stations contributors, ODbL. github.com/trainline-eu/stations")
@@ -44,11 +46,17 @@ struct AttributionsView: View {
         .navigationTitle("Attributions").navigationBarTitleDisplayMode(.inline)
     }
 
-    private func source(_ name: String, _ detail: String) -> some View {
+    private func source(_ name: String, _ detail: String, link: String? = nil) -> some View {
         SetCard {
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
                 Text(detail).font(.system(size: 11.5)).foregroundStyle(Theme.ink3).lineSpacing(2)
+                // A tappable source link where the licence/terms ask for one — e.g.
+                // Transitous requires a visible link to its sources page.
+                if let link = link, let url = URL(string: link) {
+                    Link(link, destination: url)
+                        .font(.system(size: 11.5, weight: .medium)).foregroundStyle(Theme.accent)
+                }
             }
         }
     }
