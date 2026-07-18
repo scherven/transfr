@@ -16,7 +16,7 @@ struct RouteMapView: View {
     var fromCurrent: Bool = false
     /// 0…1 position along the route for the live "you" dot; nil on planning maps.
     var youProgress: Double? = nil
-    /// Thumbnail mode: no graticule / cities / labels, chunkier marks.
+    /// Thumbnail mode: no graticule / labels, chunkier marks.
     var mini: Bool = false
     /// Draw station labels (off for thumbnails).
     var showLabels: Bool = true
@@ -98,7 +98,6 @@ private struct RouteMapRenderer {
         let pts = stops.map { proj.point($0.lat, $0.lon) }
         if !mini { drawGraticule(&ctx) }
         drawLand(&ctx)
-        if !mini { drawCities(&ctx, stopPts: pts) }
         drawRoute(&ctx, stops: stops, pts: pts)
     }
 
@@ -136,29 +135,6 @@ private struct RouteMapRenderer {
         }
         ctx.stroke(MapGeo.coastRaw.applying(t), with: .color(Theme.mapCoast),
                    style: StrokeStyle(lineWidth: 0.7, lineCap: .round, lineJoin: .round))
-    }
-
-    /// Reference cities, thinned to fit: in-frame, ranked, and never on top of the
-    /// route. (This subsumes a hardcoded "hide Hannover" — the clash it worked
-    /// around is just a distance test.)
-    private func drawCities(_ ctx: inout GraphicsContext, stopPts: [CGPoint]) {
-        let exclude = Set(MapStop.stops(for: journey).map { shortName($0.name) })
-        var kept: [CGPoint] = []
-        for city in MapGeo.shared.cities.sorted(by: { $0.rank < $1.rank }) {
-            if kept.count >= 9 { break }
-            if exclude.contains(city.name) { continue }
-            let p = proj.point(city.lat, city.lon)
-            guard p.x >= 3, p.x <= proj.vbw - 3, p.y >= 3, p.y <= proj.vbh - 3 else { continue }
-            if stopPts.contains(where: { hypot($0.x - p.x, $0.y - p.y) < 8 }) { continue }
-            if kept.contains(where: { hypot($0.x - p.x, $0.y - p.y) < 10 }) { continue }
-            kept.append(p)
-            ctx.fill(Path(ellipseIn: CGRect(x: p.x - 0.9, y: p.y - 0.9, width: 1.8, height: 1.8)),
-                     with: .color(Theme.mapCity))
-            let right = p.x <= proj.vbw * 0.62
-            ctx.draw(Text(city.name).font(.system(size: 2.7)).foregroundColor(Theme.mapCity),
-                     at: CGPoint(x: p.x + (right ? 2.2 : -2.2), y: p.y + 0.9),
-                     anchor: right ? .leading : .trailing)
-        }
     }
 
     // MARK: route overlay
@@ -309,8 +285,8 @@ struct RouteLabelPlacement: Equatable {
 /// stack is bounded at both ends — down from the top edge, then back up from the
 /// bottom — which spreads such a cluster around itself instead of off the map.
 ///
-/// The same greedy shape as `drawCities`' distance thinning, and mirrored by
-/// `labelPlacements()` in agents/design/route-maps.html — the two must stay 1:1.
+/// Mirrored by `labelPlacements()` in agents/design/route-maps.html — the two
+/// renderers must stay 1:1.
 enum RouteLabelLayout {
     /// Fraction of the width past which a label flips to the left of its dot.
     static let sideSplit: Double = 0.58
