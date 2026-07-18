@@ -71,6 +71,12 @@ public final class TripModel {
         public var relationId: Int
         public var fromPlatform: String
         public var toPlatform: String
+        // Feed coordinates for platforms OSM doesn't ref (overlay tracks), so the
+        // walk still routes via the WalkKey / core Tier-3 fallback. nil = OSM ref.
+        public var fromLat: Double?
+        public var fromLon: Double?
+        public var toLat: Double?
+        public var toLon: Double?
         /// The facility this walk leads to (the "walk to nearest" door), drawn into
         /// the geometry beside the destination platform. `nil` for a plain
         /// platform-to-platform lookup.
@@ -81,9 +87,13 @@ public final class TripModel {
         public var browse: Bool
 
         public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String,
+                    fromCoord: (lat: Double, lon: Double)? = nil,
+                    toCoord: (lat: Double, lon: Double)? = nil,
                     poi: WalkPOI? = nil, browse: Bool = false) {
             self.station = station; self.relationId = relationId
             self.fromPlatform = fromPlatform; self.toPlatform = toPlatform
+            self.fromLat = fromCoord?.lat; self.fromLon = fromCoord?.lon
+            self.toLat = toCoord?.lat; self.toLon = toCoord?.lon
             self.poi = poi; self.browse = browse
         }
     }
@@ -242,6 +252,13 @@ public final class TripModel {
     /// then keeps its free-form platform fields.
     public func stationPlatforms(lat: Double, lon: Double) async -> StationPlatformsResponse? {
         try? await repo.platforms(lat: lat, lon: lon)
+    }
+
+    /// The feed's platform-number labels (the ones OSM lacks) for the station-map
+    /// overlay. Fails soft to nil on a transport error; a resolved-but-unavailable
+    /// overlay comes back as a response with `found == false` and a typed `reason`.
+    public func stationPlatformMarkers(lat: Double, lon: Double) async -> StationPlatformMarkersResponse? {
+        try? await repo.platformMarkers(lat: lat, lon: lon)
     }
 
     /// The "full station walk" from one source platform: the real walk to every

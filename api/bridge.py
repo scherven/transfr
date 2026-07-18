@@ -119,3 +119,41 @@ def map_track_to_ref(track: Optional[str]) -> Optional[str]:
         return None
     stripped = _TRACK_PREFIX_RE.sub("", ref).strip()
     return stripped or ref
+
+
+# The real platform sign a traveller reads lives on a stop_position / railway=stop
+# NODE tagged with the public track number. When a feed labels the platform with a
+# code OSM doesn't carry (Koeln Hbf's DELFI "84-91" for public tracks 1-11), the
+# journey's own coordinate still sits on the right platform, so the nearest such
+# node recovers the number to show. Radius must exceed the platform half-length --
+# these stop nodes sit at one point along a 400 m platform, so the journey
+# coordinate can be ~70 m away (measured at Koeln) -- hence a generous default.
+_DISPLAY_LABEL_RADIUS_M = 160.0
+
+
+def nearest_platform_label(cur, lat: float, lon: float,
+                           radius_m: float = _DISPLAY_LABEL_RADIUS_M) -> Optional[str]:
+    """The public track number of the heavy-rail platform nearest (lat, lon), for
+    DISPLAY only -- recovering the real Gleis a feed mislabelled. Nearest numbered
+    stop_position/railway=stop node within `radius_m`, excluding tram/subway stops
+    (those renumber independently). None when none is near. This is a signage
+    lookup, deliberately separate from routing, which anchors on walkable geometry
+    (see core/ Tier 3); it is never used to resolve a path."""
+    if lat is None or lon is None:
+        return None
+    min_lat, max_lat, min_lon, max_lon = _bbox(lat, lon, radius_m)
+    cur.execute(
+        "SELECT tags->>'ref' AS ref, lat, lon FROM osm_nodes "
+        "WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s "
+        "  AND (tags->>'railway' IN ('stop','stop_position') "
+        "       OR tags->>'public_transport' = 'stop_position') "
+        "  AND tags->>'railway' IS DISTINCT FROM 'tram_stop' "
+        "  AND tags->>'ref' ~ '^[0-9]+$'",
+        (min_lat, max_lat, min_lon, max_lon),
+    )
+    best_ref, best_d = None, radius_m
+    for row in cur.fetchall():
+        d = haversine_meters(lat, lon, row["lat"], row["lon"])
+        if d <= best_d:
+            best_ref, best_d = row["ref"], d
+    return best_ref

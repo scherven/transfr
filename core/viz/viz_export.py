@@ -479,11 +479,19 @@ def export(
     details: bool = False, detail_radius_m: float = DEFAULT_DETAIL_RADIUS_M,
     stitch: bool = False, avoid_elevators: bool = False,
     all_platforms: bool = False,
+    from_coord: Optional[Tuple[float, float]] = None,
+    to_coord: Optional[Tuple[float, float]] = None,
     attach_pois: Optional[List[Dict]] = None,
 ) -> Dict:
     """Resolve the path, gather context ways, project to metres, return the
     renderer JSON as a dict. `all_platforms` (station-map / browse mode) also
     pulls in every platform at the station, not just the ones the walk touched.
+
+    from_coord / to_coord are the platforms' real (lat, lon), used only as the
+    last-resort anchor when a ref resolves to no OSM platform here (a feed whose
+    label OSM doesn't carry -- see SearchContext Tier 3). Passing them keeps the
+    drawn geometry in step with the verdict, which resolves the same way; omitting
+    them (the default) is byte-for-byte unchanged.
 
     `attach_pois` is the 'walk to nearest' seam: a list of already-known POIs
     (each `{lat, lon, category, subtype?, name?, level_raw?}` -- their coordinates
@@ -495,7 +503,8 @@ def export(
     with conn.cursor() as cur:
         name = _station_name(cur, relation_id)
         ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch,
-                            avoid_elevators=avoid_elevators)
+                            avoid_elevators=avoid_elevators,
+                            from_coord=from_coord, to_coord=to_coord)
         result = ctx.error if ctx.error is not None else ALGORITHMS[algorithm](ctx)
         # Browse mode: add EVERY platform at the station (resolved by ref -- the
         # same indexed lookup the search uses for its endpoints, so it's fast),

@@ -34,7 +34,7 @@ struct StationWalkView: View {
     /// station text (editing the name reverts to needing a fresh pick).
     private var platforms: [String] {
         guard resolvedForStation == station.trimmingCharacters(in: .whitespaces),
-              let refs = resolved?.platforms, !refs.isEmpty else { return [] }
+              let refs = resolved?.allPlatforms, !refs.isEmpty else { return [] }
         return refs
     }
 

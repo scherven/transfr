@@ -20,7 +20,7 @@ from graph import haversine_meters
 from ground_truth import find_shortest_path
 
 from api import config
-from api.bridge import map_track_to_ref, resolve_station_candidates
+from api.bridge import map_track_to_ref, nearest_platform_label, resolve_station_candidates
 
 # Safety margin on top of the raw walk: a transfer that is walkable only with
 # zero seconds to spare is "tight", not "feasible".
@@ -92,6 +92,12 @@ class TransferAssessment:
     station_name: Optional[str] = None
     arrival_platform: Optional[str] = None
     departure_platform: Optional[str] = None
+    # The real platform sign, recovered by coordinate, when the feed's label above
+    # is an internal code OSM doesn't carry (Koeln Hbf "89" -> actual "7"). None
+    # when the feed label already is the real one -- so a non-None value is exactly
+    # the signal to show "platform <actual>" with the feed's code as a hint.
+    arrival_platform_actual: Optional[str] = None
+    departure_platform_actual: Optional[str] = None
 
 
 @dataclass
@@ -110,6 +116,10 @@ class WalkResolution:
     station_name: Optional[str] = None
     arrival_platform: Optional[str] = None
     departure_platform: Optional[str] = None
+    # Real platform sign recovered by coordinate when the feed's label is an
+    # internal code (see TransferAssessment). None unless it differs from the feed.
+    arrival_platform_actual: Optional[str] = None
+    departure_platform_actual: Optional[str] = None
 
 
 def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
@@ -140,6 +150,27 @@ def classify(walk_time_s: Optional[float], layover_s: Optional[float],
     if layover_s < walk_time_s + buffer_s:
         return TIGHT
     return FEASIBLE
+
+
+def _recover_display_labels(conn, res: "WalkResolution", result: dict,
+                            arr_lat, arr_lon, arr_ref, dep_lat, dep_lon, dep_ref) -> None:
+    """Fill res.{arrival,departure}_platform_actual with the real platform sign
+    for any end the pathfinder resolved by coordinate (result['source_by_coord'] /
+    ['target_by_coord']) -- i.e. where the feed's label is an internal code. A
+    recovered label identical to the feed ref is dropped (nothing to hint).
+    Best-effort: a failed lookup leaves the field None, so the UI just shows the
+    feed's label as today."""
+    if not (result.get("source_by_coord") or result.get("target_by_coord")):
+        return
+    with conn.cursor() as cur:
+        if result.get("source_by_coord"):
+            actual = nearest_platform_label(cur, arr_lat, arr_lon)
+            if actual and actual != arr_ref:
+                res.arrival_platform_actual = actual
+        if result.get("target_by_coord"):
+            actual = nearest_platform_label(cur, dep_lat, dep_lon)
+            if actual and actual != dep_ref:
+                res.departure_platform_actual = actual
 
 
 def resolve_walk(
@@ -209,7 +240,14 @@ def resolve_walk(
     first_reason = None
     saw_implausible = False
     for cand in candidates:
-        result = find_shortest_path(conn, cand.relation_id, arr_ref, dep_ref, **kwargs)
+        # Pass the stops' own coordinates as a last-resort anchor: at a station
+        # whose feed labels platforms with codes OSM doesn't carry (e.g. Koeln
+        # Hbf's DELFI "84-91" vs public tracks 1-11), the ref resolves to nothing
+        # and core/ snaps these coordinates to the real platform instead of
+        # reporting platform_not_found. No effect where the ref already resolves.
+        result = find_shortest_path(conn, cand.relation_id, arr_ref, dep_ref,
+                                    from_coord=(arr_lat, arr_lon), to_coord=(dep_lat, dep_lon),
+                                    **kwargs)
         if result.get("found"):
             walk_m = result["walking_distance_meters"]
             if walk_is_implausible(walk_m, gap_m):
@@ -224,6 +262,12 @@ def resolve_walk(
             res.walk_time_s = result["walking_time_seconds"]
             res.walk_distance_m = walk_m
             res.reason = None
+            # For any end the pathfinder resolved by coordinate (its feed ref
+            # matched no OSM platform here), recover the real platform sign to
+            # display -- keeping arr_ref/dep_ref (the feed's code) as-is for
+            # routing and as the hint. Only set when it actually differs.
+            _recover_display_labels(conn, res, result,
+                                    arr_lat, arr_lon, arr_ref, dep_lat, dep_lon, dep_ref)
             return res
         if first_reason is None:
             first_reason = result.get("reason", "not_found")
@@ -300,6 +344,8 @@ def assess_transfer(
         verdict=UNKNOWN, layover_s=lay,
         relation_id=r.relation_id, station_name=r.station_name,
         arrival_platform=r.arrival_platform, departure_platform=r.departure_platform,
+        arrival_platform_actual=r.arrival_platform_actual,
+        departure_platform_actual=r.departure_platform_actual,
         walk_time_s=r.walk_time_s, walk_distance_m=r.walk_distance_m,
     )
     if r.walk_time_s is None:
