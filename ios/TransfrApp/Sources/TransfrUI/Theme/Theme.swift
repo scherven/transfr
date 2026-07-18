@@ -62,7 +62,6 @@ public enum Theme {
     /// Internal country borders. Softer than the coast: the shore is a real edge
     /// of the land, a border is an annotation on it.
     public static let mapBorder = dynA(0x0E1626, 0.22, 0xFFFFFF, 0.18)
-    public static let mapCity  = dyn(0xAEB7C7, 0x3A465C)
 
     public static let radius: CGFloat = 22
     public static let mono  = Font.system(.body, design: .monospaced)
