@@ -15,15 +15,23 @@ final class TripModelStreamingTests: XCTestCase {
     actor StubRepo: JourneyRepository {
         let assessDelayNs: UInt64
         private(set) var assessCalls = 0
+        // #35/#36 regression: record the search profile actually threaded to the
+        // network so we can prove plan()'s captured values reach the /assess stream.
+        private(set) var lastJourneysNoElevators: Bool?
+        private(set) var lastAssessNoElevators: Bool?
+        private(set) var lastAssessBufferS: Int?
         init(assessDelayNs: UInt64 = 0) { self.assessDelayNs = assessDelayNs }
 
         func journeys(from: String, to: String, when: Date?, assess: Bool,
                       noElevators: Bool = false, bufferS: Int? = nil) async throws -> JourneysResponse {
+            lastJourneysNoElevators = noElevators
             let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
             return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
         }
         func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) async throws -> [Transfer] {
             assessCalls += 1
+            lastAssessNoElevators = noElevators
+            lastAssessBufferS = bufferS
             if assessDelayNs > 0 { try? await Task.sleep(nanoseconds: assessDelayNs) }
             return interchanges.map {
                 Transfer(atStation: $0.atStation, relationId: 42,
@@ -105,6 +113,27 @@ final class TripModelStreamingTests: XCTestCase {
         let calls = await repo.assessCalls
         XCTAssertEqual(calls, 1, "one /assess batches a whole journey's changes (both transfers), " +
                        "not one request per transfer")
+    }
+
+    /// #35 regression (+ #36 buffer): `plan(avoidElevators:bufferS:)` must capture
+    /// the search profile so the streamed `/assess` re-verdict runs under the SAME
+    /// profile as the search. Before the fix `plannedAvoidElevators` was declared
+    /// but never assigned, so a stairs-free search silently re-verdicted WITH lifts.
+    @MainActor
+    func testSearchProfileIsCapturedForStreamedAssess() async throws {
+        let repo = StubRepo()
+        let model = TripModel(repository: repo)
+        await model.plan(avoidElevators: true, bufferS: 300)
+        await waitUntil { model.journeys.first?.transfers.allSatisfy { !$0.verdictKind.isPending } ?? false }
+
+        let journeysNoElev = await repo.lastJourneysNoElevators
+        let assessNoElev = await repo.lastAssessNoElevators
+        let assessBuffer = await repo.lastAssessBufferS
+        XCTAssertEqual(journeysNoElev, true, "the initial /journeys search runs no-elevators")
+        XCTAssertEqual(assessNoElev, true,
+                       "the streamed /assess must re-verdict under the same no-elevators profile (#35)")
+        XCTAssertEqual(assessBuffer, 300,
+                       "the streamed /assess must use the search's boarding buffer (#36)")
     }
 
     /// Returns the same pending journeys, but every `/assess` throws — the network

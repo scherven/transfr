@@ -143,9 +143,10 @@ public final class TripModel {
         selectedIndex = nil
         response = nil
         path = [.results]
-        // Capture the buffer this search runs under so the streamed /assess
-        // verdicts (below) are judged against the same value, not whatever the
-        // live setting is by the time they land.
+        // Capture the search profile (no-elevators + buffer) this search runs
+        // under so the streamed /assess verdicts (below) are judged against the
+        // same values, not whatever the live settings are by the time they land.
+        plannedAvoidElevators = avoidElevators
         plannedBufferS = bufferS
         do {
             let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false, noElevators: avoidElevators, bufferS: bufferS)
