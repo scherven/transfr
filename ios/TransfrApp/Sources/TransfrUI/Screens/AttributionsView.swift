@@ -26,7 +26,7 @@ struct AttributionsView: View {
                 source("Transitous · MOTIS", "Journeys, live delays and platform assignments, via the open Transitous routing service (MOTIS). Community open data.")
                 source("Deutsche Bahn · IRIS", "Real-time platform and track changes for German stations, via DB's public IRIS feed.")
                 source("Coach-formation providers", "Train coach order & sector maps from the operators' formation APIs (DB Wagenreihung and equivalents), where published.")
-                source("trainline-eu/stations", "Station names, and the English city aliases (info:en) that let you search stations in English. © trainline-eu/stations contributors, ODbL. github.com/trainline-eu/stations")
+                source("trainline-eu/stations", "Station names — including the bundled offline autocomplete corpus — and the English city aliases (info:en) that let you search stations in English. © trainline-eu/stations contributors, ODbL. github.com/trainline-eu/stations")
 
                 SectionHeader(text: "Built with")
                 SetCard {
