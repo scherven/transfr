@@ -71,10 +71,20 @@ public final class TripModel {
         public var relationId: Int
         public var fromPlatform: String
         public var toPlatform: String
+        /// The facility this walk leads to (the "walk to nearest" door), drawn into
+        /// the geometry beside the destination platform. `nil` for a plain
+        /// platform-to-platform lookup.
+        public var poi: WalkPOI?
+        /// Browse the whole station (every platform, no single route) rather than a
+        /// two-platform walk — how a tapped facility is shown, so it reads on the
+        /// full station map with the POI pinned regardless of which platform it's by.
+        public var browse: Bool
 
-        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String) {
+        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String,
+                    poi: WalkPOI? = nil, browse: Bool = false) {
             self.station = station; self.relationId = relationId
             self.fromPlatform = fromPlatform; self.toPlatform = toPlatform
+            self.poi = poi; self.browse = browse
         }
     }
     public var walkLookup: WalkLookup?
@@ -248,6 +258,14 @@ public final class TripModel {
     /// `found == false` and a typed `reason` so the view can say so honestly.
     public func facilities(lat: Double, lon: Double, category: String) async -> FacilitiesResponse? {
         try? await repo.facilities(lat: lat, lon: lon, category: category)
+    }
+
+    /// The whole station in 3D with every facility of a category pinned (the
+    /// map-first Nearest-facility surface). Fails soft to nil on a transport error;
+    /// a resolved-but-empty or POI-layer-absent result comes back as a
+    /// `FacilityMapResponse` with `found == false` and a typed `reason`.
+    public func facilityMap(lat: Double, lon: Double, category: String) async -> FacilityMapResponse? {
+        try? await repo.facilityMap(lat: lat, lon: lon, category: category)
     }
 
     /// Resolve a coordinate to its station's platform-connectivity health (the

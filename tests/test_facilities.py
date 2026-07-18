@@ -209,7 +209,7 @@ def test_build_degrades_to_no_poi_layer(monkeypatch):
     from api.bridge import StationMatch
     monkeypatch.setattr(facilities, "resolve_station",
                         lambda *a, **k: StationMatch(5688517, "Berlin Hbf", 52.525, 13.369, 3.0))
-    monkeypatch.setattr(facilities, "poi_layer_available", lambda bbox: False)
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: False)
     r = facilities.build_facilities(_FakeConn(), 52.525, 13.369, "toilets")
     assert not r.found and r.reason == NO_POI_LAYER
     assert r.station == "Berlin Hbf" and r.relation_id == 5688517
@@ -220,8 +220,8 @@ def test_build_none_mapped_when_layer_present_but_empty(monkeypatch):
     from api.bridge import StationMatch
     monkeypatch.setattr(facilities, "resolve_station",
                         lambda *a, **k: StationMatch(1, "Somewhere", 52.525, 13.369, 3.0))
-    monkeypatch.setattr(facilities, "poi_layer_available", lambda bbox: True)
-    monkeypatch.setattr(facilities, "gather_pois", lambda bbox: [])   # layer up, nothing tagged
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: True)
+    monkeypatch.setattr(facilities, "gather_pois", lambda cur, bbox: [])   # layer up, nothing tagged
     r = facilities.build_facilities(_FakeConn(), 52.525, 13.369, "toilets")
     assert not r.found and r.reason == NONE_MAPPED
 
@@ -230,8 +230,8 @@ def test_build_found_ranks_and_attaches_walk(monkeypatch):
     from api.bridge import StationMatch
     monkeypatch.setattr(facilities, "resolve_station",
                         lambda *a, **k: StationMatch(1, "Berlin Hbf", *STATION, 3.0))
-    monkeypatch.setattr(facilities, "poi_layer_available", lambda bbox: True)
-    monkeypatch.setattr(facilities, "gather_pois", lambda bbox: POIS)
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: True)
+    monkeypatch.setattr(facilities, "gather_pois", lambda cur, bbox: POIS)
     monkeypatch.setattr(facilities, "platform_centroids", lambda cur, rel: PLATFORMS)
     monkeypatch.setattr(facilities, "_route_fn",
                         lambda conn, rel: (lambda a, b: {"found": True, "walk_time_s": 30.0,
@@ -247,8 +247,8 @@ def test_build_found_without_from_platform_has_no_walk(monkeypatch):
     from api.bridge import StationMatch
     monkeypatch.setattr(facilities, "resolve_station",
                         lambda *a, **k: StationMatch(1, "Berlin Hbf", *STATION, 3.0))
-    monkeypatch.setattr(facilities, "poi_layer_available", lambda bbox: True)
-    monkeypatch.setattr(facilities, "gather_pois", lambda bbox: POIS)
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: True)
+    monkeypatch.setattr(facilities, "gather_pois", lambda cur, bbox: POIS)
     monkeypatch.setattr(facilities, "platform_centroids",
                         lambda cur, rel: (_ for _ in ()).throw(AssertionError("no anchor needed")))
     r = facilities.build_facilities(_FakeConn(), *STATION, "toilets")
@@ -273,11 +273,124 @@ def test_platform_centroids_real_berlin():
 
 
 @DB
-def test_build_facilities_degrades_here_no_planet():
-    # This host has no planet extract, so a real end-to-end call must degrade to
-    # no_poi_layer rather than raise (the honest-degradation contract).
+def test_build_facilities_degrades_without_pois_table():
+    # This host never loaded the `pois` table, so a real end-to-end call must
+    # degrade to no_poi_layer rather than raise (the honest-degradation contract).
     import db
     conn = db.connect(connect_timeout=5)
     r = facilities.build_facilities(conn, 52.5251, 13.3694, "toilets")  # near Berlin Hbf
     assert not r.found and r.reason == NO_POI_LAYER
     assert r.station and r.relation_id                        # station still resolved
+
+
+@DB
+def test_gather_pois_reads_the_pois_table():
+    """The DB-backed POI layer: a bbox SELECT over `pois`, no osmium. Creates the
+    table + a row inside a transaction and ROLLS BACK, so it never touches a real
+    loaded table (CREATE TABLE and INSERT both unwind) and needs no planet."""
+    import db
+    conn = db.connect(connect_timeout=5)
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS pois (id BIGINT PRIMARY KEY, category TEXT NOT NULL, "
+                "subtype TEXT, name TEXT, level TEXT, lat DOUBLE PRECISION NOT NULL, "
+                "lon DOUBLE PRECISION NOT NULL)"
+            )
+            cur.execute(
+                "INSERT INTO pois (id, category, subtype, name, level, lat, lon) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
+                (-999_001, "amenity", "toilets", "Test WC", "0", 52.5252, 13.3690),
+            )
+            assert facilities.poi_layer_available(cur) is True
+            got = facilities.gather_pois(cur, facilities.station_bbox(52.5252, 13.3690))
+            assert "Test WC" in [g["name"] for g in got]
+            assert all(g["kind"] == "poi" and g["category"] == "amenity" for g in got)
+            # The bbox actually filters: a box over Madrid finds none of our Berlin row.
+            madrid = facilities.gather_pois(cur, facilities.station_bbox(40.0, -3.0))
+            assert "Test WC" not in [g["name"] for g in madrid]
+    finally:
+        conn.rollback()      # never persist the test table/row
+        conn.close()
+
+
+@DB
+def test_build_facility_map_pins_every_facility_in_order(monkeypatch):
+    """The map-first surface: a browse export with EVERY facility of the category
+    pinned, aligned index-for-index with the ranked list, against the real Berlin
+    DB. The POI layer isn't on this host, so inject a synthetic set (as the offline
+    tests do) and let the real export + platform centroids do the rest."""
+    import db
+    conn = db.connect(connect_timeout=5)
+
+    synthetic = [
+        _poi("amenity", "toilets", "WC North", 52.5252, 13.3690, "0"),
+        _poi("amenity", "toilets", "WC Upper", 52.5255, 13.3696, "1"),
+        _poi("amenity", "toilets", None,       52.5249, 13.3688, "-1"),
+    ]
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: True)
+    monkeypatch.setattr(facilities, "gather_pois", lambda cur, bbox: synthetic)
+
+    r = facilities.build_facility_map(conn, 52.525, 13.369, "toilets")
+    assert r.found is True and r.station == "Berlin Hauptbahnhof"
+    det = r.export["details"]
+    # Every facility is pinned, flagged focus, and aligned index-for-index so a
+    # tapped pin maps back to its row.
+    assert len(det) == len(r.facilities) == 3
+    assert all(d.get("focus") for d in det)
+    assert [d.get("name") for d in det] == [f.name for f in r.facilities]
+    # Pins are lifted to their tagged floor (level x 4 m), not flattened to ground.
+    zs = {d.get("name"): d["xyz"][2] for d in det}
+    assert zs["WC North"] == 0.0 and zs["WC Upper"] == 4.0
+    # Cheap anchor: each facility got a nearest platform, with no pathfind.
+    assert all(f.nearest_platform for f in r.facilities)
+    # Browse export: the whole station, not a two-platform corridor.
+    assert sum(1 for w in r.export["ways"] if w["kind"] == "platform") > 2
+
+
+@DB
+def test_build_facility_map_end_to_end_via_pois_table():
+    """The REAL path, no monkeypatch: rows in `pois` -> gather_pois SQL -> ranked
+    facilities -> browse export with every pin. Inserts Berlin toilets in a
+    transaction and rolls back, so it needs no loaded table and leaves none. This
+    is the whole new architecture (indexed bbox SELECT, no osmium) end to end."""
+    import db
+    conn = db.connect(connect_timeout=5)
+    conn.autocommit = False
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "CREATE TABLE IF NOT EXISTS pois (id BIGINT PRIMARY KEY, category TEXT NOT NULL, "
+                "subtype TEXT, name TEXT, level TEXT, lat DOUBLE PRECISION NOT NULL, "
+                "lon DOUBLE PRECISION NOT NULL)"
+            )
+            for row in [(-999_101, "amenity", "toilets", "WC Main", "0", 52.5252, 13.3690),
+                        (-999_102, "amenity", "toilets", "WC Upper", "1", 52.5256, 13.3697),
+                        (-999_103, "amenity", "toilets", None, "-1", 52.5248, 13.3686)]:
+                cur.execute(
+                    "INSERT INTO pois (id, category, subtype, name, level, lat, lon) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING", row)
+        # build_facility_map opens its own cursors on the same connection, so it sees
+        # these uncommitted rows -- the real poi_layer_available + gather_pois run.
+        r = facilities.build_facility_map(conn, 52.525, 13.369, "toilets")
+        assert r.found is True and r.station == "Berlin Hauptbahnhof"
+        assert len(r.facilities) == 3
+        det = r.export["details"]
+        assert len(det) == 3 and all(d.get("focus") for d in det)
+        assert [d.get("name") for d in det] == [f.name for f in r.facilities]
+        assert all(f.nearest_platform for f in r.facilities)
+    finally:
+        conn.rollback()      # never persist the test table/rows
+        conn.close()
+
+
+@DB
+def test_build_facility_map_degrades_without_pois_table():
+    """The `pois` table was never loaded here -> honest no_poi_layer, station still
+    resolved (the honest-degradation contract, now DB-backed not planet-backed)."""
+    import db
+    conn = db.connect(connect_timeout=5)
+    r = facilities.build_facility_map(conn, 52.525, 13.369, "toilets")
+    assert r.found is False and r.reason == NO_POI_LAYER
+    assert r.station == "Berlin Hauptbahnhof" and r.relation_id

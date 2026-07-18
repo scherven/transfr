@@ -6,27 +6,24 @@ WHAT IS AND ISN'T AVAILABLE.
     tag scope), so resolving the station and its platform centroids is always
     possible where the DB is up.
   * The FACILITIES themselves (toilets, cafes, ATMs, ...) are POIs tagged
-    `amenity`/`shop`/`tourism`/`office`/`leisure`. Those are NOT in transfr_eu --
-    they come from the optional `viz_export` "details" layer, which is an offline
-    osmium extract of the full planet (core/viz/viz_export.py: PLANET_PBF,
-    gather_details). On a host without that planet extract (or a cached bbox of
-    it) the layer is simply unavailable.
+    `amenity`/`shop`/`tourism`/`office`/`leisure`. Those are NOT in the core
+    tag-scoped tables -- they live in a dedicated `pois` table, loaded once from a
+    POI-tag-filtered planet extract (core/dbgen/extract_pois.sh +
+    build_poi_index.py). A facility query is then a fast indexed bbox SELECT.
+
+    This REPLACED an earlier design that forked `osmium extract` against the full
+    planet per request and cached per bbox: that scan took minutes and timed out
+    for every station whose bbox wasn't already cached. The `pois` table answers
+    for every station in milliseconds and needs no planet file on the request path.
 
 So this module degrades honestly, exactly like api/boarding.py does for the
-geo-blocked formation feed: when the POI layer can't be produced here it returns
-`found=False` with a typed `reason` (`no_poi_layer`) rather than guessing. The
-pure ranking/selection (category filter + nearest-first + the routed-walk anchor)
-is unit-tested offline against synthetic POIs; it lights up automatically the day
-a planet extract exists on the host.
-
-The layer is real -- it was generated on the server-admin host (see the committed
-`ios/.../Fixtures/viz_berlin_1_16_details.json`, 191 Berlin POIs); it just isn't
-producible in every environment.
+geo-blocked formation feed: when the `pois` table was never loaded here it returns
+`found=False` with a typed `reason` (`no_poi_layer`) rather than guessing. The pure
+ranking/selection (category filter + nearest-first + the routed-walk anchor) is
+unit-tested offline against synthetic POIs; it lights up the day the table is loaded.
 """
 
-import hashlib
 import math
-import os
 from typing import Callable, Dict, List, Optional, Tuple
 
 from graph import haversine_meters
@@ -40,6 +37,8 @@ from api.transfers import STATION_UNRESOLVED
 NO_POI_LAYER = "no_poi_layer"                # the POI source isn't available here
 UNSUPPORTED_CATEGORY = "unsupported_category"  # asked for a category we don't map
 NONE_MAPPED = "none_mapped"                  # layer present, but this station tags none
+TOO_SPARSE = "too_sparse"                    # < 2 platforms: nothing to draw a map on
+MAP_BUILD_FAILED = "map_build_failed"        # the browse export itself failed to build
 
 # How far out (metres) around the station centroid to gather POIs. Matches
 # viz_export.DEFAULT_DETAIL_RADIUS_M -- a station-footprint-sized box.
@@ -222,23 +221,37 @@ def station_bbox(lat: float, lon: float, radius_m: float = DEFAULT_RADIUS_M):
     return (lon - dlon, lat - dlat, lon + dlon, lat + dlat)
 
 
-def poi_layer_available(bbox_lonlat) -> bool:
-    """Whether the details POI layer can be produced for this bbox on this host:
-    a cached extract for exactly this bbox already exists, or the full planet is
-    present so one can be extracted. False -> the endpoint degrades to
-    `no_poi_layer`. Mirrors viz_export._extract_detail_pbf's cache key so the
-    check matches what a subsequent gather() would actually use."""
-    from viz_export import DETAIL_CACHE_DIR, PLANET_PBF  # lazy: pulls osmium
-    key = hashlib.md5(",".join(f"{v:.5f}" for v in bbox_lonlat).encode()).hexdigest()[:12]
-    cached = os.path.join(DETAIL_CACHE_DIR, f"{key}.osm.pbf")
-    return os.path.exists(cached) or os.path.exists(PLANET_PBF)
+def poi_layer_available(cur) -> bool:
+    """Whether the facility POI layer is loaded on this host: the `pois` table
+    exists and holds at least one row (built by core/dbgen/build_poi_index.py from
+    a POI-tag-filtered planet extract). A bbox query is then a fast indexed SELECT
+    -- no osmium fork, no planet file on the request path.
+
+    False -> the endpoint degrades to `no_poi_layer` exactly as before; the meaning
+    is now 'the `pois` table was never loaded here' rather than 'no planet extract'.
+    `to_regclass` returns NULL (no error) when the table doesn't exist, so a host
+    that never ran the loader degrades cleanly instead of raising."""
+    cur.execute("SELECT to_regclass('public.pois') AS reg")
+    if cur.fetchone()["reg"] is None:
+        return False
+    cur.execute("SELECT EXISTS(SELECT 1 FROM pois) AS present")
+    return bool(cur.fetchone()["present"])
 
 
-def gather_pois(bbox_lonlat) -> List[Dict]:
-    """The POIs (not buildings) in the bbox from the details layer, in lat/lon.
-    Assumes poi_layer_available(bbox) is True (else gather_details raises)."""
-    from viz_export import gather_details  # lazy: pulls osmium
-    return [f for f in gather_details(bbox_lonlat) if f.get("kind") == "poi"]
+def gather_pois(cur, bbox_lonlat) -> List[Dict]:
+    """The POIs inside a (min_lon, min_lat, max_lon, max_lat) box, read from the
+    `pois` table in the gather_details feature shape rank_facilities / detail_entry
+    expect. A btree lat/lon bbox scan (idx_pois_lat / idx_pois_lon) -- milliseconds,
+    no osmium, no planet -- so it answers for every station, not just cached ones."""
+    min_lon, min_lat, max_lon, max_lat = bbox_lonlat
+    cur.execute(
+        "SELECT category, subtype, name, level, lat, lon FROM pois "
+        "WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+        (min_lat, max_lat, min_lon, max_lon),
+    )
+    return [{"kind": "poi", "category": r["category"], "subtype": r["subtype"],
+             "name": r["name"], "level_raw": r["level"], "lat": r["lat"], "lon": r["lon"]}
+            for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
@@ -341,12 +354,14 @@ def build_facilities(
         return _resp(found=False, reason=STATION_UNRESOLVED)
 
     bbox = station_bbox(match.lat, match.lon)
-    if not poi_layer_available(bbox):
-        # The layer can't be produced here -- honest degradation, not a guess.
-        return _resp(found=False, reason=NO_POI_LAYER,
-                     relation_id=match.relation_id, station=match.name)
+    with conn.cursor() as cur:
+        if not poi_layer_available(cur):
+            # The layer was never loaded here -- honest degradation, not a guess.
+            return _resp(found=False, reason=NO_POI_LAYER,
+                         relation_id=match.relation_id, station=match.name)
+        pois = gather_pois(cur, bbox)
 
-    facilities = rank_facilities(gather_pois(bbox), match.lat, match.lon, spec, limit)
+    facilities = rank_facilities(pois, match.lat, match.lon, spec, limit)
     if not facilities:
         return _resp(found=False, reason=NONE_MAPPED,
                      relation_id=match.relation_id, station=match.name)
@@ -358,6 +373,77 @@ def build_facilities(
 
     return _resp(found=True, relation_id=match.relation_id, station=match.name,
                  facilities=facilities)
+
+
+def build_facility_map(
+    conn, lat: float, lon: float, category: str, limit: int = DEFAULT_LIMIT,
+) -> schemas.FacilityMapResponse:
+    """The whole station in 3D with every facility of `category` pinned -- the
+    map-first surface. Resolves the station, gathers + ranks the category's POIs
+    (or degrades with a typed reason exactly like `build_facilities`), gives each a
+    cheap nearest-platform anchor (nearest centroid, NO pathfind, so the map load
+    stays fast), and builds ONE browse `viz_export` (all platforms, no single route)
+    with every facility attached as a focus POI. `export.details` and `facilities`
+    come back in the same order, so a tapped pin maps straight back to its row."""
+    def _resp(**kw):
+        return schemas.FacilityMapResponse(lat=lat, lon=lon, category=category, **kw)
+
+    spec = resolve_category(category)
+    if spec is None:
+        return _resp(found=False, reason=UNSUPPORTED_CATEGORY)
+
+    with conn.cursor() as cur:
+        match = resolve_station(cur, lat, lon)
+    if match is None:
+        return _resp(found=False, reason=STATION_UNRESOLVED)
+
+    bbox = station_bbox(match.lat, match.lon)
+    with conn.cursor() as cur:
+        if not poi_layer_available(cur):
+            return _resp(found=False, reason=NO_POI_LAYER,
+                         relation_id=match.relation_id, station=match.name)
+        pois = gather_pois(cur, bbox)
+
+    facilities = rank_facilities(pois, match.lat, match.lon, spec, limit)
+    if not facilities:
+        return _resp(found=False, reason=NONE_MAPPED,
+                     relation_id=match.relation_id, station=match.name)
+
+    # Cheap nearest-platform anchor: nearest centroid only, no pathfind. Enough for
+    # a tapped pin to open a walk to its platform later, without the map paying for
+    # one route per facility up front.
+    with conn.cursor() as cur:
+        coords = platform_centroids(cur, match.relation_id)
+    for f in facilities:
+        if f.lat is not None and f.lon is not None and coords:
+            f.nearest_platform = nearest_platform_ref(f.lat, f.lon, coords)
+
+    # A browse export needs two distinct platforms to frame the station.
+    refs = list(coords.keys())
+    if len(refs) < 2:
+        from search_context import list_platform_refs  # bare engine import
+        with conn.cursor() as cur:
+            refs = [r for r in list_platform_refs(cur, match.relation_id) if r]
+    if len(refs) < 2:
+        return _resp(found=False, reason=TOO_SPARSE,
+                     relation_id=match.relation_id, station=match.name)
+
+    # Attach every facility (all carry coords -- rank_facilities drops any that
+    # don't) IN ORDER, so details[i] stays aligned with facilities[i].
+    attach = [{"lat": f.lat, "lon": f.lon, "level_raw": f.level, "name": f.name,
+               "category": f.category, "subtype": f.subtype} for f in facilities]
+    from viz_export import export  # resolved via api/__init__ sys.path setup
+    from api import config
+    try:
+        doc = export(conn, match.relation_id, refs[0], refs[-1],
+                     algorithm="astar", details=False, stitch=config.STITCH_BRIDGES,
+                     all_platforms=True, attach_pois=attach)
+    except Exception:  # noqa: BLE001 -- a bad export must not 500 the map
+        return _resp(found=False, reason=MAP_BUILD_FAILED,
+                     relation_id=match.relation_id, station=match.name, facilities=facilities)
+
+    return _resp(found=True, relation_id=match.relation_id, station=match.name,
+                 export=doc, facilities=facilities)
 
 
 def _route_fn(conn, relation_id: int) -> RouteFn:

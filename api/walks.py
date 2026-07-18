@@ -14,8 +14,11 @@ Kept as a thin, DB-taking wrapper around `viz_export.export` so it is:
   * never fatal -- `viz_export.export` raises `SystemExit` when a relation has no
     resolvable coordinates; we catch that (and anything else) and return a typed
     `WalkResult(ok=False, reason=...)` rather than 500 the request;
-  * details-free -- the landmarks/POI layer needs the full planet extract and is
-    only for the "nearest facility" feature, never for a transfer walk.
+  * planet-details-free -- the gathered landmarks/POI layer (`details=True`) needs
+    the full planet extract, so a transfer walk never asks for it. A walk CAN
+    still carry ONE known facility via `key.poi`: its coordinate already came from
+    `/facilities`, so we project it straight into the details layer as the focus
+    (`attach_pois`) with no planet extract -- that's the 'walk to nearest' door.
 """
 
 from __future__ import annotations
@@ -72,6 +75,16 @@ def build_walk(
         to_platform=key.to_platform,
         step_free=key.step_free,
     )
+    # A chosen facility (the 'walk to nearest' door) rides into the export's
+    # details layer as the focus POI -- projected from its already-known
+    # coordinate, so no planet extract is needed.
+    attach_pois = None
+    if key.poi is not None:
+        attach_pois = [{
+            "lat": key.poi.lat, "lon": key.poi.lon,
+            "name": key.poi.name, "category": key.poi.category,
+            "subtype": key.poi.subtype, "level_raw": key.poi.level,
+        }]
     try:
         doc = export(
             conn,
@@ -83,6 +96,7 @@ def build_walk(
             stitch=config.STITCH_BRIDGES,
             avoid_elevators=key.step_free,
             all_platforms=key.all_platforms,
+            attach_pois=attach_pois,
         )
     except SystemExit:
         # export() raises SystemExit("no coordinates resolved ...") when the

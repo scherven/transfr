@@ -62,6 +62,27 @@ struct VizExportDecodeTests {
         }
     }
 
+    /// The `/facility-map` contract decodes: the browse export + the ranked list,
+    /// aligned index-for-index (details[i] ↔ facilities[i]) so a tapped pin maps
+    /// straight back to its facility. Every pin is a `focus` POI with a cheap
+    /// nearest-platform anchor.
+    @Test func decodesFacilityMap() throws {
+        let map = try TransfrJSON.decode(FacilityMapResponse.self, from: Self.fixture("facility_map_berlin"))
+        #expect(map.found)
+        #expect(map.station == "Berlin Hauptbahnhof")
+        #expect(map.category == "toilets")
+        #expect(map.facilities.count == 4)
+
+        let export = try #require(map.export)
+        let pois = export.details.filter { $0.kind == "poi" }
+        #expect(pois.count == map.facilities.count)
+        #expect(pois.allSatisfy { $0.focus == true && $0.xyz != nil })
+        // Order is preserved, so the pin/list correspondence holds.
+        #expect(zip(pois, map.facilities).allSatisfy { $0.name == $1.name })
+        // The cheap platform anchor came through for "Show walk".
+        #expect(map.facilities.allSatisfy { $0.nearestPlatform != nil })
+    }
+
     /// A `Point3` round-trips through our unkeyed [x,y,z] coding.
     @Test func point3RoundTrips() throws {
         let p = Point3(x: -59.9, y: 65.8, z: -8.0)

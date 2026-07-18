@@ -176,6 +176,36 @@ CREATE INDEX IF NOT EXISTS idx_station_stops_ref ON station_stops (ref);
 CREATE INDEX IF NOT EXISTS idx_osm_nodes_lat ON osm_nodes (lat);
 CREATE INDEX IF NOT EXISTS idx_osm_nodes_lon ON osm_nodes (lon);
 
+-- Facility POIs (amenity/shop/tourism/office/leisure) -- the "nearest facility"
+-- / facility-map source (api/facilities.py). NOT part of the tag-scoped core
+-- import (that is railway/pedestrian only), because POIs are a large, orthogonal
+-- tag set that would bloat the pathfinding tables. Loaded SEPARATELY by
+-- core/dbgen/build_poi_index.py from a POI-tag-filtered planet extract
+-- (core/dbgen/extract_pois.sh), so the API can answer a facility query with a
+-- fast indexed bbox SELECT instead of forking `osmium extract` against the full
+-- planet on every request -- the per-request planet scan timed out for every
+-- station whose bbox wasn't already cached.
+--
+-- Same no-PostGIS pattern as station_points: a btree lat/lon bbox prefilter, then
+-- exact haversine ranking in Python (api/facilities.rank_facilities). `id` is the
+-- OSM id sign-encoded (node > 0, way-as-area < 0) so nodes and ways can't collide
+-- on the primary key, which makes a re-load idempotent (ON CONFLICT DO NOTHING).
+--
+-- Staleness: rebuild by re-running core/dbgen/build_poi_index.py after a data
+-- refresh (idempotent; --rebuild to TRUNCATE first).
+CREATE TABLE IF NOT EXISTS pois (
+    id       BIGINT PRIMARY KEY,
+    category TEXT NOT NULL,          -- OSM key: amenity/shop/tourism/office/leisure
+    subtype  TEXT,                   -- its value: toilets/cafe/pharmacy/...
+    name     TEXT,
+    level    TEXT,                   -- OSM `level` tag, verbatim ('0', '-1', '1;2'), or null
+    lat      DOUBLE PRECISION NOT NULL,
+    lon      DOUBLE PRECISION NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_pois_lat ON pois (lat);
+CREATE INDEX IF NOT EXISTS idx_pois_lon ON pois (lon);
+CREATE INDEX IF NOT EXISTS idx_pois_category ON pois (category);
+
 -- Synthetic stitch bridges (built by core/build_stitch_bridges.py; consumed by
 -- core/search_context when use_stitch_bridges=True). A one-edge join from a
 -- pedestrian connector node lying INSIDE a platform polygon to that platform,

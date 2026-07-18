@@ -128,7 +128,9 @@ public struct VizExport: Codable, Sendable {
 
     /// A landmark/store/building around the station (optional details layer).
     /// A POI carries `xyz` (+ optional `outline` footprint); a building carries
-    /// `points` (its outline).
+    /// `points` (its outline). `focus` marks the one facility the user chose in
+    /// "walk to nearest" (server-flagged), so the renderer draws it emphasised
+    /// rather than as context; `nil`/`false` on every other detail.
     public struct Detail: Codable, Sendable {
         public var kind: String        // "poi" | "building"
         public var category: String
@@ -138,5 +140,14 @@ public struct VizExport: Codable, Sendable {
         public var xyz: Point3?
         public var points: [Point3]?
         public var outline: [Point3]?
+        public var focus: Bool?
+
+        public init(kind: String, category: String, subtype: String? = nil, name: String? = nil,
+                    dist: Double, xyz: Point3? = nil, points: [Point3]? = nil,
+                    outline: [Point3]? = nil, focus: Bool? = nil) {
+            self.kind = kind; self.category = category; self.subtype = subtype; self.name = name
+            self.dist = dist; self.xyz = xyz; self.points = points; self.outline = outline
+            self.focus = focus
+        }
     }
 }
