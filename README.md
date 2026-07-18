@@ -2,33 +2,9 @@
 
 > can you really make that transfer?
 
-A journey planner tells you a transfer "works" because the timetable says the
-arriving and departing trains overlap at a station. It says nothing about the
-78 metres, two flights of stairs, and the underpass between platform 4 and
-platform 5. **transfr turns every change-of-train into a concrete, walkable,
-timed platform-to-platform route** and returns a verdict —
-`feasible` / `tight` / `infeasible` / `unknown` — before and during the trip.
+When you're routing a train journey, often you will need to transfer at an intermediary station. Particularly with Deutsche Bahn delays, these transfers can get tight! BUT the planner doesn't actually know how tight it is. transfr reads the internal walkways in the station with OpenStreetMap and maps your path between the platforms. Unfortunately there's not *quite* enough data for this to actually be useful but it's kind of useful. 
 
-## Background
-
-**The gap.** Everyone has journey search. Nobody answers "will I actually make
-this connection, and where the hell is the platform?" transfr owns exactly that
-gap: for a departure + arrival station it searches real journeys (via Transitous
-/ MOTIS 2) and, for every change of train, computes the real platform-to-platform
-walk over OpenStreetMap pedestrian geometry and judges whether it fits inside the
-layover.
-
-**How a transfer is judged** (from the arrival stop location):
-
-1. same platform → trivial.
-2. nearby buffer stop → walk to the buffer stop, across, and up.
-3. nearby connector → walk to the connector, then across.
-4. neither → assume stairs connect the entrances, walk to the stairs.
-
-The result is a walk distance, a walk time, the level changes along the way
-(stairs / escalator / elevator / ramp), and a self-contained, georeferenced walk
-geometry that the client renders as a section / per-level / 3D / AR view.
-
+# Claude wrote this next part (maybe you could tell)
 **The pieces:**
 
 | Component | What it is |
