@@ -73,10 +73,41 @@ struct WalkScene {
         return ls.isEmpty ? [startLevel] : ls.sorted()
     }
 
-    /// The whole scene's XY box — the 3D's frame, and the plan's fallback when a
-    /// level has no route on it.
+    /// The whole scene's XY box — the plan's fallback when a level has no route on
+    /// it, and the 3D's frame in browse (station-map) mode or when there's no path.
     var worldBounds: CGRect {
         CGRect(x: minX, y: minY, width: max(maxX - minX, 0.001), height: max(maxY - minY, 0.001))
+    }
+
+    /// The XY box of the whole *path* (all levels) — `nil` when there's no path.
+    ///
+    /// Unlike `worldBounds` this ignores the context ways, so a short walk inside a
+    /// vast concourse isn't measured against the whole station. On Berlin Hbf 1→16
+    /// the walk is ~57 × 55 m where the scene box is ~510 × 814 m.
+    var walkBounds: CGRect? {
+        guard let first = pathPoints.first else { return nil }
+        var lo = CGPoint(x: CGFloat(first.x), y: CGFloat(first.y))
+        var hi = lo
+        for p in pathPoints {
+            lo.x = min(lo.x, CGFloat(p.x)); hi.x = max(hi.x, CGFloat(p.x))
+            lo.y = min(lo.y, CGFloat(p.y)); hi.y = max(hi.y, CGFloat(p.y))
+        }
+        return CGRect(x: lo.x, y: lo.y, width: hi.x - lo.x, height: hi.y - lo.y)
+    }
+
+    /// The 3D's XY framing box in walk mode: the path's XY bbox grown by a margin,
+    /// so the walk fills the model instead of collapsing against the station's full
+    /// footprint (the Berlin 1→16 "vertical stick"). The full level range is kept
+    /// separately, so every floor tab still shows. `nil` when there's no path — the
+    /// caller then frames the whole station (`worldBounds`), which is also what
+    /// browse (station-map) mode wants.
+    ///
+    /// Margin mirrors the design prototype's "Concept A": ~22 % of the longer side
+    /// plus a fixed 18 m, so a 5 m hop and a 200 m corridor both breathe.
+    var walkFramingBox: CGRect? {
+        guard let w = walkBounds else { return nil }
+        let m = max(w.width, w.height) * 0.22 + 18
+        return w.insetBy(dx: -m, dy: -m)
     }
 
     /// The XY box of the part of the path on `level` — the frame that floor's plan
@@ -187,6 +218,17 @@ enum WalkConnector {
         // orange the legend spends on "Lift", so an unclassified change drew as a
         // lift that doesn't exist (3 of Dortmund 11→4's 4 changes). Theme.nodata is
         // the app's own "we don't know" grey — DESIGN.md §7.5, honest gaps (#53).
+        default:                    return Theme.nodata
+        }
+    }
+    /// The connector colour softened ~18 % toward the panel — the "Recessed" 3D
+    /// treatment, so the shaped risers inform without out-shouting the route.
+    static func softColor(_ kind: String) -> Color {
+        switch kind {
+        case "stairs":              return Theme.stairSoft
+        case "escalator":           return Theme.escSoft
+        case "elevator", "lift":    return Theme.elevSoft
+        case "ramp":                return Theme.accent
         default:                    return Theme.nodata
         }
     }
@@ -497,6 +539,116 @@ private func contextOrder(_ kind: String) -> Int {
     }
 }
 
+// MARK: - Iconographic connector glyphs (3D)
+//
+// Ported from the connector prototype: each connector segment on the exploded model
+// is drawn as the *shape* of the real thing — and, for escalators and lifts, its
+// motion — on the "Recessed" base (soft colour + a paper casing so crossings stay
+// legible). A stair steps, an escalator's chevrons ride toward the top, a lift car
+// travels its shaft. When motion is off (reduce-motion) they freeze at a neutral pose.
+
+private let connChevronGap: CGFloat = 18      // spacing of the escalator's chevrons
+private let connChevronSpeed: Double = 15     // px/s they ride upward
+private let liftCyclePeriod: Double = 5.6     // s for one car up-and-down cycle
+
+private func strokePts(_ ctx: GraphicsContext, _ pts: [CGPoint], _ color: Color, _ w: CGFloat) {
+    guard let first = pts.first else { return }
+    var p = Path(); p.move(to: first)
+    for q in pts.dropFirst() { p.addLine(to: q) }
+    ctx.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
+}
+
+/// A single chevron centred at `c`, pointing along the unit vector `dir`.
+private func chevron(_ ctx: GraphicsContext, at c: CGPoint, dir: CGPoint, size: CGFloat, _ color: Color, _ w: CGFloat) {
+    let px = -dir.y, py = dir.x
+    let tip = CGPoint(x: c.x + dir.x * size * 0.5, y: c.y + dir.y * size * 0.5)
+    let back = CGPoint(x: c.x - dir.x * size * 0.5, y: c.y - dir.y * size * 0.5)
+    var p = Path()
+    p.move(to: CGPoint(x: back.x + px * size * 0.6, y: back.y + py * size * 0.6))
+    p.addLine(to: tip)
+    p.addLine(to: CGPoint(x: back.x - px * size * 0.6, y: back.y - py * size * 0.6))
+    ctx.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: w, lineCap: .round, lineJoin: .round))
+}
+
+/// Stairs — a stepped silhouette (tread, riser, tread…) between two screen points.
+private func glyphStairs(_ ctx: GraphicsContext, _ a: CGPoint, _ b: CGPoint, _ col: Color, w: CGFloat, alpha: Double) {
+    let len = hypot(b.x - a.x, b.y - a.y)
+    let n = max(3, min(7, Int((len / 8).rounded())))
+    let dx = (b.x - a.x) / CGFloat(n), dy = (b.y - a.y) / CGFloat(n)
+    var pts: [CGPoint] = [a]; var x = a.x, y = a.y
+    for _ in 0..<n { x += dx; pts.append(CGPoint(x: x, y: y)); y += dy; pts.append(CGPoint(x: x, y: y)) }
+    strokePts(ctx, pts, Theme.paper.opacity(0.9 * alpha), w + 3)   // casing
+    strokePts(ctx, pts, col.opacity(alpha), w)
+}
+
+/// Escalator — a faint band with chevrons riding from the low end to the high end.
+private func glyphEscalator(_ ctx: GraphicsContext, lo: CGPoint, hi: CGPoint, _ col: Color,
+                            w: CGFloat, alpha: Double, now: Double, motion: Bool) {
+    let len = hypot(hi.x - lo.x, hi.y - lo.y); guard len > 2 else { return }
+    let ux = (hi.x - lo.x) / len, uy = (hi.y - lo.y) / len
+    strokePts(ctx, [lo, hi], Theme.paper.opacity(0.8 * alpha), w + 3)
+    strokePts(ctx, [lo, hi], col.opacity(0.5 * alpha), w)
+    let gap = connChevronGap
+    let phase = motion ? CGFloat((now * connChevronSpeed).truncatingRemainder(dividingBy: Double(gap))) : gap * 0.5
+    var s = phase
+    while s <= len - 1.5 {
+        chevron(ctx, at: CGPoint(x: lo.x + ux * s, y: lo.y + uy * s),
+                dir: CGPoint(x: ux, y: uy), size: 4.4, col.opacity(alpha), 1.7)
+        s += gap
+    }
+}
+
+private func easeTri(_ u: Double) -> Double { u < 0.5 ? 2 * u * u : 1 - pow(-2 * u + 2, 2) / 2 }
+/// The car's position along its shaft, 0 (low) … 1 (high), on a slow eased cycle.
+private func liftCarPosition(_ now: Double) -> Double {
+    let x = now.truncatingRemainder(dividingBy: liftCyclePeriod) / liftCyclePeriod
+    return easeTri(x < 0.5 ? x / 0.5 : (1 - x) / 0.5)
+}
+
+/// Lift — a masked shaft with side rails, landing arrows, and a car that travels it.
+private func glyphLift(_ ctx: GraphicsContext, lo: CGPoint, hi: CGPoint, _ col: Color,
+                       alpha: Double, big: Bool, now: Double, motion: Bool) {
+    let len = hypot(hi.x - lo.x, hi.y - lo.y); guard len > 2 else { return }
+    let ux = (hi.x - lo.x) / len, uy = (hi.y - lo.y) / len, px = -uy, py = ux
+    let r: CGFloat = big ? 4.4 : 3.2
+    strokePts(ctx, [lo, hi], Theme.paper.opacity(0.92 * alpha), r * 2 + 4)   // mask the route behind
+    strokePts(ctx, [CGPoint(x: lo.x + px * r, y: lo.y + py * r), CGPoint(x: hi.x + px * r, y: hi.y + py * r)], col.opacity(0.45 * alpha), 1.4)
+    strokePts(ctx, [CGPoint(x: lo.x - px * r, y: lo.y - py * r), CGPoint(x: hi.x - px * r, y: hi.y - py * r)], col.opacity(0.45 * alpha), 1.4)
+    chevron(ctx, at: CGPoint(x: hi.x + ux * 1.5, y: hi.y + uy * 1.5), dir: CGPoint(x: ux, y: uy), size: 4.6, col.opacity(0.4 * alpha), 1.3)
+    chevron(ctx, at: CGPoint(x: lo.x - ux * 1.5, y: lo.y - uy * 1.5), dir: CGPoint(x: -ux, y: -uy), size: 4.6, col.opacity(0.4 * alpha), 1.3)
+    let t = motion ? liftCarPosition(now) : 0.62
+    let cx = lo.x + (hi.x - lo.x) * CGFloat(t), cy = lo.y + (hi.y - lo.y) * CGFloat(t)
+    let cw = r * 2 + 2, ch: CGFloat = big ? 9 : 6.5
+    var g = ctx
+    g.translateBy(x: cx, y: cy)
+    g.rotate(by: .radians(atan2(uy, ux) + .pi / 2))
+    let rect = CGRect(x: -cw / 2, y: -ch / 2, width: cw, height: ch)
+    g.fill(Path(roundedRect: rect, cornerRadius: 2.2), with: .color(col.opacity(alpha)))
+    g.stroke(Path(roundedRect: rect, cornerRadius: 2.2), with: .color(Theme.paper.opacity(0.9 * alpha)), lineWidth: 1.2)
+}
+
+/// Draw one connector segment (raw 3D endpoints) as its glyph. `lo`/`hi` are ordered
+/// by height, so escalator chevrons and the lift car always read low → high.
+private func connectorSegment(_ ctx: GraphicsContext, _ iso: IsoFit, _ a3: Point3, _ b3: Point3,
+                              kind: String, isRiser: Bool, now: Double, motion: Bool, alphaMul: Double) {
+    let A = iso.map(a3), B = iso.map(b3)
+    let alpha = (isRiser ? 1.0 : 0.62) * alphaMul
+    let col = WalkConnector.softColor(kind)
+    let lo = a3.z <= b3.z ? A : B
+    let hi = a3.z <= b3.z ? B : A
+    switch kind {
+    case "stairs":
+        glyphStairs(ctx, A, B, col, w: isRiser ? 3 : 1.9, alpha: alpha)
+    case "escalator":
+        glyphEscalator(ctx, lo: lo, hi: hi, col, w: isRiser ? 2.4 : 1.7, alpha: alpha, now: now, motion: motion)
+    case "elevator", "lift":
+        glyphLift(ctx, lo: lo, hi: hi, col, alpha: alpha, big: isRiser, now: now, motion: motion)
+    default:
+        strokePts(ctx, [A, B], Theme.paper.opacity(0.8 * alpha), (isRiser ? 2.6 : 1.6) + 3)
+        strokePts(ctx, [A, B], col.opacity(alpha), isRiser ? 2.6 : 1.6)
+    }
+}
+
 // MARK: - 3D (draggable axonometric)
 
 /// The interactive exploded-floor 3D of a station — drag to rotate, pinch or the
@@ -507,6 +659,10 @@ private func contextOrder(_ kind: String) -> Int {
 struct IsoGeometryCanvas: View {
     let scene: WalkScene
     var browse: Bool = false
+    /// Drives the escalator/lift motion. Production leaves it on; headless snapshots
+    /// pass `false` for one deterministic, animation-free frame (`reduceMotion` is a
+    /// read-only environment value and can't be forced through `.environment`).
+    var animated: Bool = true
     @State private var yaw: Double = 0.5
     @GestureState private var twist: Double = 0
     @State private var zoom: CGFloat = 1
@@ -514,70 +670,30 @@ struct IsoGeometryCanvas: View {
     @State private var pan: CGSize = .zero
     @GestureState private var dragPan: CGSize = .zero
     @State private var focusLevel: Int?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let liveYaw = yaw + twist
         let liveZoom = min(max(zoom * pinch, 0.5), 8)
         let livePan = CGSize(width: pan.width + dragPan.width, height: pan.height + dragPan.height)
         let focus = focusLevel
-        Canvas { ctx, size in
-            let iso = IsoFit(scene: scene, size: size, angle: liveYaw, zoom: liveZoom, pan: livePan, pad: 24)
-            drawLevelTabs(ctx, iso)
-            func alpha(_ lvl: Int) -> Double { focus == nil || focus == lvl ? 1 : 0.10 }
-
-            // Ways, drawn low floors first so upper floors overlay. A selected level
-            // dims the rest.
-            let ways = scene.export.ways.sorted { wayLevel($0, scene) < wayLevel($1, scene) }
-            for way in ways where way.points.count >= 2 {
-                if !browse && way.walkRelevant == false { continue }   // walk view: only the connectors it uses
-                let a = alpha(wayLevel(way, scene))
-                var p = Path()
-                p.move(to: iso.map(way.points[0]))
-                for pt in way.points.dropFirst() { p.addLine(to: iso.map(pt)) }
-                switch way.kind {
-                case "platform":
-                    ctx.stroke(p, with: .color(Theme.panel3.opacity(a)), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
-                case "walkway":
-                    ctx.stroke(p, with: .color(Theme.ink3.opacity(0.28 * a)), style: StrokeStyle(lineWidth: 1.5))
-                case "stairs", "escalator", "ramp", "elevator":
-                    ctx.stroke(p, with: .color(WalkConnector.color(way.kind).opacity(0.9 * a)), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                default:
-                    ctx.stroke(p, with: .color(Theme.line2.opacity(a)), style: StrokeStyle(lineWidth: 1))
+        Group {
+            if reduceMotion || !animated {
+                Canvas { ctx, size in
+                    draw(ctx, size, liveYaw: liveYaw, liveZoom: liveZoom, livePan: livePan,
+                         focus: focus, now: 0, motion: false)
+                }
+            } else {
+                // One TimelineView clock drives the escalator chevrons and the lift
+                // car; the projection and the rest of the scene are recomputed each
+                // tick, the way the prototype's rAF loop redraws every frame.
+                TimelineView(.animation) { tl in
+                    Canvas { ctx, size in
+                        draw(ctx, size, liveYaw: liveYaw, liveZoom: liveZoom, livePan: livePan,
+                             focus: focus, now: tl.date.timeIntervalSinceReferenceDate, motion: true)
+                    }
                 }
             }
-
-            // Every platform the export carries, marked with its ref and lifted to
-            // its floor — not just the two the walk connects. Hidden on other floors
-            // when a level is isolated.
-            for way in ways where way.kind == "platform" {
-                guard let ref = way.ref, !way.points.isEmpty else { continue }
-                let lvl = way.level ?? wayLevel(way, scene)
-                if focus != nil && focus != lvl { continue }
-                let n = CGFloat(way.points.count)
-                let c = Point3(
-                    x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
-                    y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
-                    z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
-                platformTag(ctx, iso.map(c), ref)
-            }
-
-            // Route + its level changes (walk mode only; browse shows the station).
-            guard !browse else { return }
-            guard scene.found, scene.pathPoints.count >= 2 else {
-                if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
-                return
-            }
-            let pts = scene.pathPoints
-            var route = Path()
-            route.move(to: iso.map(pts[0]))
-            for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
-            ctx.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round))
-            for t in scene.transitions {   // colour each stair / escalator / lift riser on the path
-                var r = Path(); r.move(to: iso.map(t.from)); r.addLine(to: iso.map(t.to))
-                ctx.stroke(r, with: .color(WalkConnector.color(t.kind)), style: StrokeStyle(lineWidth: 5, lineCap: .round))
-            }
-            endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
-            endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
         }
         .contentShape(Rectangle())
         // One-finger drag pans; pinch zooms; two-finger twist rotates. All three
@@ -609,6 +725,84 @@ struct IsoGeometryCanvas: View {
             }
             .font(.system(size: 9.5)).foregroundStyle(Theme.ink3).padding(.top, 6)
         }
+    }
+
+    /// Renders the whole 3D scene into `ctx`. Split out of `body` so the static
+    /// (reduce-motion) path and the animated `TimelineView` path share one renderer.
+    /// `now` (seconds) drives the escalator chevrons and lift car; `motion == false`
+    /// freezes them at a neutral pose.
+    private func draw(_ ctx: GraphicsContext, _ size: CGSize, liveYaw: Double, liveZoom: CGFloat,
+                      livePan: CGSize, focus: Int?, now: Double, motion: Bool) {
+        // Walk mode frames the *walk* — the path's XY box grown by a margin — so a
+        // short walk inside a vast station spreads across the model instead of
+        // collapsing to a vertical stick (Berlin Hbf 1→16). Browse (station map) mode
+        // and pathless walks fall back to the whole-station box so the entire layout
+        // stays visible. Either way the full level range drives the vertical lift and
+        // the left-edge tabs.
+        let box = (browse ? nil : scene.walkFramingBox) ?? scene.worldBounds
+        let iso = IsoFit(scene: scene, box: box, size: size, angle: liveYaw, zoom: liveZoom, pan: livePan, pad: 24)
+        drawLevelTabs(ctx, iso)
+        func alpha(_ lvl: Int) -> Double { focus == nil || focus == lvl ? 1 : 0.10 }
+
+        // Ways, drawn low floors first so upper floors overlay. A selected level dims the rest.
+        let ways = scene.export.ways.sorted { wayLevel($0, scene) < wayLevel($1, scene) }
+        for way in ways where way.points.count >= 2 {
+            if !browse && way.walkRelevant == false { continue }   // walk view: only the connectors it uses
+            let a = alpha(wayLevel(way, scene))
+            var p = Path()
+            p.move(to: iso.map(way.points[0]))
+            for pt in way.points.dropFirst() { p.addLine(to: iso.map(pt)) }
+            switch way.kind {
+            case "platform":
+                ctx.stroke(p, with: .color(Theme.panel3.opacity(a)), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+            case "walkway":
+                ctx.stroke(p, with: .color(Theme.ink3.opacity(0.28 * a)), style: StrokeStyle(lineWidth: 1.5))
+            case "stairs", "escalator", "ramp", "elevator", "lift":
+                // Each connector is drawn as its own shape (and motion): stepped
+                // stairs, an escalator's riding chevrons, a lift car in its shaft.
+                for i in 0..<(way.points.count - 1) {
+                    connectorSegment(ctx, iso, way.points[i], way.points[i + 1],
+                                     kind: way.kind, isRiser: false, now: now, motion: motion, alphaMul: a)
+                }
+            default:
+                ctx.stroke(p, with: .color(Theme.line2.opacity(a)), style: StrokeStyle(lineWidth: 1))
+            }
+        }
+
+        // Every platform the export carries, marked with its ref and lifted to its
+        // floor — not just the two the walk connects. Hidden on other floors when a
+        // level is isolated.
+        for way in ways where way.kind == "platform" {
+            guard let ref = way.ref, !way.points.isEmpty else { continue }
+            let lvl = way.level ?? wayLevel(way, scene)
+            if focus != nil && focus != lvl { continue }
+            let n = CGFloat(way.points.count)
+            let c = Point3(
+                x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
+                y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
+                z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
+            platformTag(ctx, iso.map(c), ref)
+        }
+
+        // Route + its level changes (walk mode only; browse shows the station).
+        guard !browse else { return }
+        guard scene.found, scene.pathPoints.count >= 2 else {
+            if !scene.found { drawUnavailable(ctx, size, "Platforms not connected") }
+            return
+        }
+        let pts = scene.pathPoints
+        var route = Path()
+        route.move(to: iso.map(pts[0]))
+        for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
+        // Recessed treatment: the route is the hero — a touch heavier, with a soft glow.
+        var glow = ctx
+        glow.addFilter(.shadow(color: Theme.accent.opacity(0.55), radius: 4))
+        glow.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+        for t in scene.transitions {   // the stair / escalator / lift you actually ride
+            connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1)
+        }
+        endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
+        endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
     }
 
     private var controls: some View {
@@ -661,8 +855,11 @@ struct IsoGeometryCanvas: View {
     /// projected height so you can read which band is which.
     private func drawLevelTabs(_ ctx: GraphicsContext, _ iso: IsoFit) {
         for lvl in scene.levelsAsc {
-            let ref = iso.map(Point3(x: Float(scene.minX),
-                                     y: Float((scene.minY + scene.maxY) / 2),
+            // Anchor the tabs to the *framing* box's left-mid edge, not the whole
+            // scene's — otherwise walk-mode framing (a small box) would project the
+            // far scene corner clean off-canvas and the tabs would drift away.
+            let ref = iso.map(Point3(x: Float(iso.box.minX),
+                                     y: Float(iso.box.midY),
                                      z: Float(CGFloat(lvl) * scene.floorHeight)))
             var t = ctx.resolve(Text(WalkScene.label(forLevel: lvl))
                 .font(.system(size: 9, weight: .bold, design: .monospaced)))
@@ -728,10 +925,20 @@ struct PlanFit {
 /// Exploded-floor axonometric projection. XY is normalised to a nominal size (so
 /// stations of any footprint look alike), rotated by `angle`, iso-projected, then
 /// each level is lifted clear of the floor below it. The fit is computed from the
-/// world box corners at the extreme levels, so nothing clips at any rotation.
+/// **framing box** corners at the extreme levels, so nothing clips at any rotation.
+///
+/// The framing box is passed in, not read off the scene: walk mode frames the
+/// *walk* (`WalkScene.walkFramingBox` — the path's XY box plus a margin) so a short
+/// walk inside a vast station spreads across the model instead of collapsing to a
+/// vertical stick; browse (station map) mode passes the whole-station box
+/// (`worldBounds`). The level range still comes from the scene, so every floor tab
+/// shows and the per-floor lift stays proportional to the (now smaller) footprint.
 /// Internal (not private) so the tests can pin that the floors really separate.
 struct IsoFit {
     let angle: Double
+    /// The XY box this fit frames — the walk's box in walk mode, the whole station
+    /// in browse. `drawLevelTabs` reads it so the tabs track the framed box.
+    let box: CGRect
     let cx: CGFloat, cy: CGFloat, norm: CGFloat, floorHeight: CGFloat
     let scale: CGFloat, scx: CGFloat, scy: CGFloat, qcx: CGFloat, qcy: CGFloat
     let pan: CGSize
@@ -750,20 +957,23 @@ struct IsoFit {
     /// proportions.
     let levelUnit: CGFloat
 
-    init(scene: WalkScene, size: CGSize, angle: Double, zoom: CGFloat, pan: CGSize = .zero, pad: CGFloat) {
+    init(scene: WalkScene, box: CGRect, size: CGSize, angle: Double, zoom: CGFloat, pan: CGSize = .zero, pad: CGFloat) {
         self.angle = angle
         self.pan = pan
-        cx = (scene.minX + scene.maxX) / 2
-        cy = (scene.minY + scene.maxY) / 2
-        let diag = max((scene.maxX - scene.minX).magnitude, (scene.maxY - scene.minY).magnitude)
+        self.box = box
+        cx = box.midX
+        cy = box.midY
+        let diag = max(box.width.magnitude, box.height.magnitude)
         norm = 100 / max(diag, 0.001)
         floorHeight = scene.floorHeight
 
         // A floor's projected screen-y span. `project` puts y at (rx+ry)·sin30, and
         // rx+ry = nx·(cos+sin) + ny·(cos−sin), so over the normalised box the span
-        // is |cos+sin|·spanNX + |cos−sin|·spanNY, halved by sin30.
-        let spanNX = (scene.maxX - scene.minX).magnitude * norm
-        let spanNY = (scene.maxY - scene.minY).magnitude * norm
+        // is |cos+sin|·spanNX + |cos−sin|·spanNY, halved by sin30. Derived from the
+        // framing box, so in walk mode the lift tracks the walk's footprint, not the
+        // whole station's.
+        let spanNX = box.width.magnitude * norm
+        let spanNY = box.height.magnitude * norm
         let c = CGFloat(cos(angle)), s = CGFloat(sin(angle))
         let footprintY = (abs(c + s) * spanNX + abs(c - s) * spanNY) * 0.5
         // ~1/3 of the footprint (was `× 1.06`, full clearance): floors overlap but
@@ -771,12 +981,13 @@ struct IsoFit {
         levelUnit = max(footprintY * 0.35, 8)
         let lu = levelUnit
 
-        // Pre-project the 8 bounding corners (XY box × level range) to find extents.
+        // Pre-project the 8 bounding corners (framing box × full level range) to find
+        // extents. The level range is the station's, so every floor tab still shows.
         let loL = CGFloat(scene.levelsAsc.first ?? 0), hiL = CGFloat(scene.levelsAsc.last ?? 0)
         var lo = CGPoint(x: CGFloat.greatestFiniteMagnitude, y: CGFloat.greatestFiniteMagnitude)
         var hi = CGPoint(x: -CGFloat.greatestFiniteMagnitude, y: -CGFloat.greatestFiniteMagnitude)
-        for x in [scene.minX, scene.maxX] {
-            for y in [scene.minY, scene.maxY] {
+        for x in [box.minX, box.maxX] {
+            for y in [box.minY, box.maxY] {
                 for l in [loL, hiL] {
                     let q = Self.project(x: x, y: y, level: l, cx: cx, cy: cy, norm: norm, angle: angle, levelUnit: lu)
                     lo.x = min(lo.x, q.x); hi.x = max(hi.x, q.x)
