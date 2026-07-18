@@ -67,6 +67,70 @@ public enum Theme {
     public static let radius: CGFloat = 22
     public static let mono  = Font.system(.body, design: .monospaced)
 
+    // MARK: - Font vocabulary (Dynamic Type)
+    //
+    // The prototype's list/settings type scale, ported so it PARTICIPATES in Dynamic
+    // Type (#58). `Font.system(size:)` is a *fixed* point size that ignores the user's
+    // text-size setting — and there is no `Font.system(size:relativeTo:)` overload — so
+    // a plain `Font` token cannot carry the prototype's tight sizes *and* scale.
+    // Instead each token is a `ViewModifier` backed by `@ScaledMetric`, which scales its
+    // base size against a semantic `TextStyle` (`relativeTo:`): the exact default-size
+    // look is preserved, and the size grows with accessibility settings. Apply via
+    // `someView.settingFont(.title)` (see the `View` helper below).
+    //
+    // `mono` above stays a plain semantic `Font` because `.body` already scales.
+    // `monoInline` is likewise semantic (`.caption`) so it can be used *inside* `Text`
+    // concatenation, where a `ViewModifier` cannot — the `+` operands must stay `Text`.
+
+    /// Semantic monospaced inline value (e.g. the "up to 3 min" figure inside a
+    /// sentence). A `Font` — not a modifier — so it composes with `Text + Text`.
+    public static let monoInline = Font.system(.caption, design: .monospaced).weight(.semibold)
+
+    /// A system font at a prototype-fixed design `size` that scales with Dynamic Type,
+    /// anchored to `textStyle`. Applied through `View.settingFont(_:)`.
+    struct ScaledSystemFont: ViewModifier {
+        @ScaledMetric private var size: CGFloat
+        private let weight: Font.Weight
+        private let design: Font.Design
+        init(size: CGFloat, relativeTo textStyle: Font.TextStyle,
+             weight: Font.Weight = .regular, design: Font.Design = .default) {
+            _size = ScaledMetric(wrappedValue: size, relativeTo: textStyle)
+            self.weight = weight
+            self.design = design
+        }
+        func body(content: Content) -> some View {
+            content.font(.system(size: size, weight: weight, design: design))
+        }
+    }
+
+    /// The named tokens of the settings/list type scale. Each resolves to a
+    /// `ScaledSystemFont`; apply with `View.settingFont(_:)`.
+    enum SettingFont {
+        case title       // row / card titles
+        case subtitle    // row & card supporting text
+        case header      // uppercase section labels
+        case segment     // segmented-control pills
+        case value       // the makeable % readout
+        case micro       // the zone (makeable/tight/miss) labels
+        case icon        // a row's SF Symbol tile glyph
+        case chevron     // a nav row's trailing chevron
+
+        // `@MainActor`: `ScaledSystemFont` is main-actor-isolated (via its
+        // `ViewModifier` conformance), so its initializer can only be called here.
+        @MainActor var modifier: ScaledSystemFont {
+            switch self {
+            case .title:    ScaledSystemFont(size: 14,   relativeTo: .body,     weight: .medium)
+            case .subtitle: ScaledSystemFont(size: 11.5, relativeTo: .caption)
+            case .header:   ScaledSystemFont(size: 10.5, relativeTo: .caption2, weight: .semibold)
+            case .segment:  ScaledSystemFont(size: 12.5, relativeTo: .footnote, weight: .semibold)
+            case .value:    ScaledSystemFont(size: 16,   relativeTo: .body,     weight: .bold, design: .monospaced)
+            case .micro:    ScaledSystemFont(size: 10.5, relativeTo: .caption2)
+            case .icon:     ScaledSystemFont(size: 14,   relativeTo: .body,     weight: .medium)
+            case .chevron:  ScaledSystemFont(size: 13,   relativeTo: .body,     weight: .semibold)
+            }
+        }
+    }
+
     // MARK: - Dynamic color helpers
 
     static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
@@ -77,6 +141,13 @@ public enum Theme {
         Color(uiColor: UIColor {
             $0.userInterfaceStyle == .dark ? UIColor(hex: dark, alpha: da) : UIColor(hex: light, alpha: la)
         })
+    }
+}
+
+extension View {
+    /// Apply a semantic settings/list font token that scales with Dynamic Type (#58).
+    @MainActor func settingFont(_ token: Theme.SettingFont) -> some View {
+        modifier(token.modifier)
     }
 }
 

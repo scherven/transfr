@@ -9,7 +9,7 @@ struct SectionHeader: View {
     let text: String
     var body: some View {
         Text(text.uppercased())
-            .font(.system(size: 10.5, weight: .semibold)).tracking(1.3)
+            .tracking(1.3).settingFont(.header)
             .foregroundStyle(Theme.ink3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 2).padding(.top, 14).padding(.bottom, 8)
@@ -27,9 +27,9 @@ struct SettingRow<Trailing: View>: View {
         HStack(spacing: 12) {
             SetIcon(icon)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                Text(title).settingFont(.title).foregroundStyle(Theme.ink)
                 if let subtitle {
-                    Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Theme.ink3).lineSpacing(1)
+                    Text(subtitle).settingFont(.subtitle).foregroundStyle(Theme.ink3).lineSpacing(1)
                 }
             }
             Spacer(minLength: 8)
@@ -54,9 +54,9 @@ struct SettingStack<Content: View>: View {
             HStack(spacing: 12) {
                 SetIcon(icon)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                    Text(title).settingFont(.title).foregroundStyle(Theme.ink)
                     if let subtitle {
-                        Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Theme.ink3)
+                        Text(subtitle).settingFont(.subtitle).foregroundStyle(Theme.ink3)
                     }
                 }
                 Spacer(minLength: 0)
@@ -81,13 +81,13 @@ struct NavRow: View {
             HStack(spacing: 12) {
                 SetIcon(icon)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                    Text(title).settingFont(.title).foregroundStyle(Theme.ink)
                     if let subtitle {
-                        Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Theme.ink3)
+                        Text(subtitle).settingFont(.subtitle).foregroundStyle(Theme.ink3)
                     }
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right").font(.system(size: 13, weight: .semibold))
+                Image(systemName: "chevron.right").settingFont(.chevron)
                     .foregroundStyle(Theme.ink3)
             }
             .padding(.horizontal, 13).padding(.vertical, 12)
@@ -103,13 +103,15 @@ struct SetIcon: View {
     let name: String
     var tint: Color = Theme.ink2
     var bg: Color = Theme.panel2
+    // The tile scales with Dynamic Type alongside the row title it pairs with (#58).
+    @ScaledMetric(relativeTo: .body) private var tile: CGFloat = 32
     init(_ name: String, tint: Color = Theme.ink2, bg: Color = Theme.panel2) {
         self.name = name; self.tint = tint; self.bg = bg
     }
     var body: some View {
-        Image(systemName: name).font(.system(size: 14, weight: .medium))
+        Image(systemName: name).settingFont(.icon)
             .foregroundStyle(tint)
-            .frame(width: 32, height: 32)
+            .frame(width: tile, height: tile)
             .background(RoundedRectangle(cornerRadius: 9).fill(bg))
     }
 }
@@ -141,7 +143,7 @@ struct SegmentedControl<T: Hashable>: View {
                     withAnimation(.snappy(duration: 0.18)) { selection = opt }
                 } label: {
                     Text(label(opt))
-                        .font(.system(size: 12.5, weight: .semibold))
+                        .settingFont(.segment)
                         .foregroundStyle(selection == opt ? Theme.ink : Theme.ink2)
                         .frame(maxWidth: .infinity).padding(.vertical, 7)
                         .background(
@@ -161,15 +163,22 @@ struct SegmentedControl<T: Hashable>: View {
 /// The custom toggle (`.tgl`) — accent when on.
 struct TransfrToggle: View {
     @Binding var isOn: Bool
+    // The whole switch scales with Dynamic Type (#58); every metric shares the same
+    // `.body` anchor so the track, knob and inset grow proportionally (capsule kept).
+    @ScaledMetric(relativeTo: .body) private var trackW: CGFloat = 44
+    @ScaledMetric(relativeTo: .body) private var trackH: CGFloat = 26
+    @ScaledMetric(relativeTo: .body) private var knob: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) private var pad: CGFloat = 3
+    init(isOn: Binding<Bool>) { _isOn = isOn }
     var body: some View {
         Button { withAnimation(.snappy(duration: 0.18)) { isOn.toggle() } } label: {
-            RoundedRectangle(cornerRadius: 13)
+            RoundedRectangle(cornerRadius: trackH / 2)
                 .fill(isOn ? Theme.accent : Theme.panel3)
-                .frame(width: 44, height: 26)
+                .frame(width: trackW, height: trackH)
                 .overlay(alignment: isOn ? .trailing : .leading) {
-                    Circle().fill(.white).frame(width: 20, height: 20)
+                    Circle().fill(.white).frame(width: knob, height: knob)
                         .shadow(color: .black.opacity(0.2), radius: 2, y: 1)
-                        .padding(3)
+                        .padding(pad)
                 }
         }
         .buttonStyle(.plain)

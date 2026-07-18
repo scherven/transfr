@@ -75,14 +75,14 @@ struct SettingsView: View {
         return SetCard {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text("\u{201C}Makeable\u{201D} cut-off").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                    Text("\u{201C}Makeable\u{201D} cut-off").settingFont(.title).foregroundStyle(Theme.ink)
                     Spacer()
                     Text("\(s.makeablePct)%")
-                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .settingFont(.value)
                         .foregroundStyle(Theme.accent)
                 }
                 Text("Makeable when the walk uses under this share of the layover.")
-                    .font(.system(size: 11.5)).foregroundStyle(Theme.ink3)
+                    .settingFont(.subtitle).foregroundStyle(Theme.ink3)
                     .padding(.top, 5).padding(.bottom, 12)
 
                 Slider(value: Binding(
@@ -100,12 +100,12 @@ struct SettingsView: View {
                 HStack {
                     Text("makeable"); Spacer(); Text("tight"); Spacer(); Text("miss")
                 }
-                .font(.system(size: 10.5)).foregroundStyle(Theme.ink3).padding(.top, 6)
+                .settingFont(.micro).foregroundStyle(Theme.ink3).padding(.top, 6)
 
                 (Text("On an 8 minute connection, that's up to ")
-                 + Text(s.makeableExample).font(.system(size: 12, weight: .semibold, design: .monospaced)).foregroundColor(Theme.ink)
+                 + Text(s.makeableExample).font(Theme.monoInline).foregroundColor(Theme.ink)
                  + Text(" of walking before it's flagged."))
-                    .font(.system(size: 11.5)).foregroundStyle(Theme.ink3).padding(.top, 10)
+                    .settingFont(.subtitle).foregroundStyle(Theme.ink3).padding(.top, 10)
             }
         }
     }
