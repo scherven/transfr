@@ -81,6 +81,35 @@ def test_karlsruhe_3_12_shows_only_real_level_changes(conn):
     assert max(zs) - min(zs) > 0.01
 
 
+def test_essen_10_6_attributes_seam_to_the_mapped_escalator(conn):
+    # Essen Hbf 10->6 climbs to the L+2 footbridge and rides an escalator back down.
+    # The climb is a graph seam at a bare, untagged node (way 46833435, a
+    # source=survey outline): node_kind sees no mechanism -> 'vertical'. But a mapped
+    # escalator connecting L0<->L2 sits ~4 m away, so connector_kind_near NAMES the
+    # change from it. Neither leg may read 'vertical'.
+    path = _export(conn, 1764615, "10", "6")
+    transitions = path["transitions"]
+    kinds = [t["kind"] for t in transitions]
+    assert "vertical" not in kinds, f"seam left unattributed: {_summary(transitions)}"
+    assert kinds.count("escalator") == 2, f"expected both legs named escalator, got {_summary(transitions)}"
+    # The up-leg is the node-mapped seam that attribution rescued (has a node_id, not
+    # a way_id); the down-leg is the escalator way the walk actually rides.
+    assert any(t["kind"] == "escalator" and t.get("node_id") for t in transitions)
+
+
+def test_attribution_never_invents_a_mechanism_out_of_thin_air(conn):
+    # Honesty guardrail: connector_kind_near only names a mechanism that is really
+    # mapped near the seam and reaches both floors -- otherwise it returns None and
+    # the change stays the honest 'vertical'. With no ways in range it must not guess.
+    from search_context import SearchContext  # noqa: E402
+    proj = vx.Projector(51.0, 7.0, 4.0)
+    coords = {1: (51.0, 7.0)}
+    assert vx.connector_kind_near(1, 0.0, 8.0, {}, coords, proj, 4.0, conn=None) is None
+    # A nearby way that is NOT a vertical mechanism (a plain footway) is ignored.
+    ways = {9: {"nodes": [1], "tags": {"highway": "footway"}}}
+    assert vx.connector_kind_near(1, 0.0, 8.0, ways, coords, proj, 4.0, conn=None) is None
+
+
 def test_berlin_1_16_keeps_its_real_transitions(conn):
     # Guardrail: the fix must not flatten a genuinely multi-level transfer.
     # Berlin Hbf 1->16 legitimately changes level via a mapped escalator way and

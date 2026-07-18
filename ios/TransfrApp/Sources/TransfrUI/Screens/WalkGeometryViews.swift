@@ -190,7 +190,7 @@ struct WalkScene {
                 icon: WalkConnector.icon(t.kind, up: up),
                 color: WalkConnector.color(t.kind),
                 title: WalkConnector.instruction(t.kind, up: up, to: Self.label(forLevel: toLvl)),
-                sub: WalkConnector.label(t.kind)))
+                sub: WalkConnector.subtitle(t.kind)))
         }
         let arrive = WalkStep(icon: "checkmark", color: Theme.accent,
                               title: "Board on Platform \(endRef)",
@@ -254,6 +254,13 @@ enum WalkConnector {
         default: "Level change"
         }
     }
+    /// Turn-by-turn subtitle: the named mode for a connector the map classifies, or
+    /// an honest note when it records a level change but no mechanism (core/'s
+    /// `vertical` — an untagged shared node, e.g. Essen Hbf 10→6's climb to L+2). The
+    /// row then never implies a stair or lift the data can't actually back.
+    static func subtitle(_ kind: String) -> String {
+        isMapped(kind) ? label(kind) : "Level change not mapped — follow station signs"
+    }
     static func verb(_ kind: String) -> String {
         switch kind {
         case "stairs": "Stairs"; case "escalator": "Escalator"
@@ -270,7 +277,9 @@ enum WalkConnector {
         case "escalator":         return "Ride the escalator \(dir) to \(label)"
         case "elevator", "lift":  return "Take the lift \(dir) to \(label)"
         case "ramp":              return "Follow the ramp \(dir) to \(label)"
-        default:                  return "Change level \(dir) to \(label)"
+        // Unclassified level change (core/'s `vertical`): name a direction, never a
+        // mechanism we can't back — the subtitle carries the "not mapped" note.
+        default:                  return "Go \(dir) to \(label)"
         }
     }
     static func icon(_ kind: String, up: Bool) -> String {
@@ -279,7 +288,7 @@ enum WalkConnector {
         case "escalator":         return up ? "arrow.up.forward" : "arrow.down.forward"
         case "elevator", "lift":  return "arrow.up.arrow.down"
         case "ramp":              return up ? "arrow.up.right" : "arrow.down.right"
-        default:                  return "arrow.up.arrow.down"
+        default:                  return up ? "arrow.up" : "arrow.down"
         }
     }
 }
@@ -596,18 +605,21 @@ private func glyphStairs(_ ctx: GraphicsContext, _ a: CGPoint, _ b: CGPoint, _ c
     strokePts(ctx, pts, col.opacity(alpha), w)
 }
 
-/// Escalator — a faint band with chevrons riding from the low end to the high end.
-private func glyphEscalator(_ ctx: GraphicsContext, lo: CGPoint, hi: CGPoint, _ col: Color,
+/// Escalator — a faint band with chevrons riding from `start` toward `end`. On the
+/// ridden route those are the direction of *travel*, so a descending escalator reads
+/// downward and matches its "…down to L0" instruction; off the route (context /
+/// browse, no travel direction) the caller passes low→high.
+private func glyphEscalator(_ ctx: GraphicsContext, start: CGPoint, end: CGPoint, _ col: Color,
                             w: CGFloat, alpha: Double, now: Double, motion: Bool) {
-    let len = hypot(hi.x - lo.x, hi.y - lo.y); guard len > 2 else { return }
-    let ux = (hi.x - lo.x) / len, uy = (hi.y - lo.y) / len
-    strokePts(ctx, [lo, hi], Theme.paper.opacity(0.8 * alpha), w + 3)
-    strokePts(ctx, [lo, hi], col.opacity(0.5 * alpha), w)
+    let len = hypot(end.x - start.x, end.y - start.y); guard len > 2 else { return }
+    let ux = (end.x - start.x) / len, uy = (end.y - start.y) / len
+    strokePts(ctx, [start, end], Theme.paper.opacity(0.8 * alpha), w + 3)
+    strokePts(ctx, [start, end], col.opacity(0.5 * alpha), w)
     let gap = connChevronGap
     let phase = motion ? CGFloat((now * connChevronSpeed).truncatingRemainder(dividingBy: Double(gap))) : gap * 0.5
     var s = phase
     while s <= len - 1.5 {
-        chevron(ctx, at: CGPoint(x: lo.x + ux * s, y: lo.y + uy * s),
+        chevron(ctx, at: CGPoint(x: start.x + ux * s, y: start.y + uy * s),
                 dir: CGPoint(x: ux, y: uy), size: 4.4, col.opacity(alpha), 1.7)
         s += gap
     }
@@ -642,20 +654,26 @@ private func glyphLift(_ ctx: GraphicsContext, lo: CGPoint, hi: CGPoint, _ col: 
     g.stroke(Path(roundedRect: rect, cornerRadius: 2.2), with: .color(Theme.paper.opacity(0.9 * alpha)), lineWidth: 1.2)
 }
 
-/// Draw one connector segment (raw 3D endpoints) as its glyph. `lo`/`hi` are ordered
-/// by height, so escalator chevrons and the lift car always read low → high.
+/// Draw one connector segment (raw 3D endpoints) as its glyph. Height-ordered
+/// `lo`/`hi` drive the physical shaft of the lift. `directed` — set on the ridden
+/// route — makes the escalator's chevrons follow the way you TRAVEL (`a3` from → `b3`
+/// to), so a descending escalator reads downward; off the route (context / browse)
+/// they default to low → high.
 private func connectorSegment(_ ctx: GraphicsContext, _ iso: IsoFit, _ a3: Point3, _ b3: Point3,
-                              kind: String, isRiser: Bool, now: Double, motion: Bool, alphaMul: Double) {
+                              kind: String, isRiser: Bool, now: Double, motion: Bool, alphaMul: Double,
+                              directed: Bool = false) {
     let A = iso.map(a3), B = iso.map(b3)
     let alpha = (isRiser ? 1.0 : 0.62) * alphaMul
     let col = WalkConnector.softColor(kind)
     let lo = a3.z <= b3.z ? A : B
     let hi = a3.z <= b3.z ? B : A
+    let start = directed ? A : lo   // escalator flow: travel direction on the route,
+    let end   = directed ? B : hi   // low → high everywhere else
     switch kind {
     case "stairs":
         glyphStairs(ctx, A, B, col, w: isRiser ? 3 : 1.9, alpha: alpha)
     case "escalator":
-        glyphEscalator(ctx, lo: lo, hi: hi, col, w: isRiser ? 2.4 : 1.7, alpha: alpha, now: now, motion: motion)
+        glyphEscalator(ctx, start: start, end: end, col, w: isRiser ? 2.4 : 1.7, alpha: alpha, now: now, motion: motion)
     case "elevator", "lift":
         glyphLift(ctx, lo: lo, hi: hi, col, alpha: alpha, big: isRiser, now: now, motion: motion)
     default:
@@ -825,15 +843,21 @@ struct IsoGeometryCanvas: View {
         if !browse {
             if scene.found, scene.pathPoints.count >= 2 {
                 let pts = scene.pathPoints
-                var route = Path()
-                route.move(to: iso.map(pts[0]))
-                for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
-                // Recessed treatment: the route is the hero — a touch heavier, with a soft glow.
+                // Draw the route as its flat, on-floor runs only. The level-change
+                // segments are left to the connector glyphs below, so the accent line
+                // no longer lies on top of (and fights) the stair/escalator it rides —
+                // the connector reads as itself. Recessed treatment: the route is the
+                // hero — heavier, with a soft glow.
                 var glow = ctx
                 glow.addFilter(.shadow(color: Theme.accent.opacity(0.55), radius: 4))
-                glow.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+                for run in scene.levelRuns {
+                    var seg = Path()
+                    seg.move(to: iso.map(run.points[0]))
+                    for pt in run.points.dropFirst() { seg.addLine(to: iso.map(pt)) }
+                    glow.stroke(seg, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+                }
                 for t in scene.transitions {   // the stair / escalator / lift you actually ride
-                    connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1)
+                    connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1, directed: true)
                 }
                 endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
                 endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)

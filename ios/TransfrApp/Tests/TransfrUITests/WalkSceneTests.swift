@@ -131,6 +131,45 @@ struct WalkSceneTests {
         #expect(unmapped.allSatisfy { WalkConnector.color($0.kind) == Theme.nodata })
     }
 
+    /// Essen Hbf 10→6 is the "up-and-over" case (climb to the L+2 footbridge, ride an
+    /// escalator back down): the fixture that pins the rendering fixes.
+    ///
+    /// - Escalator direction: the descending leg (`to.z < from.z`) must read "…down
+    ///   to L0", not "up".
+    /// - Mechanism attribution (core/viz_export.connector_kind_near): the climb is a
+    ///   graph seam at a bare, untagged node, but a mapped escalator connecting L0↔L2
+    ///   sits a few metres away, so the change is named "escalator" — NOT the honest
+    ///   fallback "vertical". Both legs end up escalators; no step says "not mapped".
+    @Test func essenUpAndOverAttributesBothEscalators() throws {
+        let s = try Self.scene("viz_essen_10_6")
+        #expect(s.found)
+        #expect(s.startRef == "10" && s.endRef == "6")
+
+        let up = try #require(s.transitions.first { $0.to.z > $0.from.z })
+        let down = try #require(s.transitions.first { $0.to.z < $0.from.z })
+        #expect(up.kind == "escalator")     // attributed from the mapped escalator nearby
+        #expect(down.kind == "escalator")
+
+        let steps = s.turnByTurn()
+        #expect(steps.contains { $0.title == "Ride the escalator up to L+2" })
+        #expect(steps.contains { $0.title == "Ride the escalator down to L0" })   // not "up"
+        // Attribution succeeded, so no row falls back to the unmapped wording.
+        #expect(steps.allSatisfy { !$0.sub.contains("not mapped") })
+    }
+
+    /// The honest fallback still stands for a GENUINE gap: a `vertical` transition
+    /// with no mechanism to attribute names a direction but no mechanism, and its
+    /// subtitle states the gap (never claims a stair or lift the data can't back).
+    @Test func unmappedLevelChangeReadsHonestly() throws {
+        #expect(WalkConnector.instruction("vertical", up: true, to: "L+2") == "Go up to L+2")
+        #expect(WalkConnector.instruction("vertical", up: false, to: "L0") == "Go down to L0")
+        #expect(WalkConnector.subtitle("vertical") == "Level change not mapped — follow station signs")
+        #expect(!WalkConnector.subtitle("vertical").lowercased().contains("escalator"))
+        // A named mechanism keeps its plain label.
+        #expect(WalkConnector.subtitle("escalator") == "Escalator")
+        #expect(WalkConnector.subtitle("stairs") == "Stairs")
+    }
+
     /// The card's level line must read like a person wrote it — and must never name
     /// a mode the map doesn't record.
     @Test func levelNoteNamesOnlyWhatTheMapRecords() throws {
@@ -300,7 +339,7 @@ struct WalkSceneTests {
     // MARK: - The canvases actually rasterise (projection runs, no NaNs/crash)
 
     @Test func rendersAllThreeCanvases() throws {
-        for name in ["viz_berlin_1_16", "viz_dortmund_11_4"] {
+        for name in ["viz_berlin_1_16", "viz_dortmund_11_4", "viz_essen_10_6"] {
             let s = try Self.scene(name)
             let short = name.replacingOccurrences(of: "viz_", with: "")
 
