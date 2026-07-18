@@ -56,12 +56,10 @@ from search_context import SearchContext, list_platform_refs  # noqa: E402
 DEFAULT_FLOOR_HEIGHT_M = 4.0
 MAX_RADIUS_M = 350.0  # user-set ceiling for the optional context-widening load
 
-# A connector is "walk-relevant" when the resolved path passes within this many
-# metres of it -- i.e. the walk actually uses that stair/escalator/lift. Lets a
-# walk view show only the vertical circulation on the route; a full station map
-# shows them all.
+# The vertical-circulation kinds a walk view can filter down to the ones actually
+# on the resolved route (see the "walk-relevance" pass below); a full station map
+# ignores the flag and shows them all.
 CONNECTOR_KINDS = {"stairs", "escalator", "elevator", "ramp"}
-WALK_RELEVANT_M = 3.5
 
 # --- "details" layer: landmarks/stores/buildings around the station ----------
 # The transfr_eu DB is tag-scoped to railway/pedestrian (no shops/buildings), so
@@ -184,6 +182,109 @@ def node_kind(tags: Dict[str, str]) -> str:
     if tags.get("highway") == "steps":
         return "stairs"
     return "vertical"
+
+
+# radius (metres) within which a mapped stair/escalator/lift is taken to BE the
+# mechanism for a level change the graph made at a bare, untagged node. The seam
+# node and the real connector are a few metres apart in the messy indoor mapping
+# (Essen Hbf: the escalator the walk rides is ~4 m from the seam node), so this is
+# generous but still local to the one circulation core.
+ATTRIB_RADIUS_M = 8.0     # touched-set connectors (already loaded by the search)
+ATTRIB_DB_RADIUS_M = 12.0  # DB fallback: mechanisms the search never walked
+_CONNECTOR_TAG_SQL = (
+    "(w.tags->>'highway' IN ('steps','elevator') OR w.tags->>'railway'='elevator' "
+    "OR w.tags->>'conveying' IN ('yes','forward','backward'))"
+)
+
+
+def _nearby_connectors(conn, lat, lon, proj, radius_m):
+    """(tags, projected-points) for every mapped stair/escalator/lift with a node
+    within `radius_m` of (lat, lon). Two index-backed lookups (bbox on osm_nodes,
+    then the ways touching those nodes via node_way_ids), run ONLY when a level
+    change has no connector in the already-loaded touched set."""
+    dlat = radius_m / 111_320.0
+    dlon = radius_m / (111_320.0 * max(0.1, math.cos(math.radians(lat))))
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT w.id, w.tags, w.nodes "
+            "FROM osm_nodes n JOIN node_way_ids nw ON nw.node_id = n.id "
+            "CROSS JOIN LATERAL unnest(nw.way_ids) AS wid JOIN osm_ways w ON w.id = wid "
+            "WHERE n.lat BETWEEN %s AND %s AND n.lon BETWEEN %s AND %s AND "
+            + _CONNECTOR_TAG_SQL,
+            (lat - dlat, lat + dlat, lon - dlon, lon + dlon),
+        )
+        rows = cur.fetchall()
+        if not rows:
+            return []
+        need = sorted({n for r in rows for n in r["nodes"]})
+        cur.execute("SELECT id, lat, lon FROM osm_nodes WHERE id = ANY(%s)", (need,))
+        nc = {r["id"]: (r["lat"], r["lon"]) for r in cur.fetchall()}
+    return [((r["tags"] or {}), [proj.xy(*nc[n]) for n in r["nodes"] if n in nc])
+            for r in rows]
+
+
+def connector_kind_near(node_id, from_z, to_z, ways, coords, proj, floor_height_m,
+                        conn=None) -> Optional[str]:
+    """The mapped vertical connector beside a node where the path changes level
+    with nothing on the node saying how. Returns 'stairs' / 'escalator' /
+    'elevator' when a way of that kind, reaching the two floors, passes close to
+    the node -- else None.
+
+    Why: the graph can step between floors at a bare shared node (an untagged
+    geometry stub meeting a leveled way), which reads as an unclassified
+    'vertical'. Pruning those stubs from the graph disconnects ~12% of real
+    transfers, so instead we NAME the change from the real stair/escalator/lift
+    the traveller uses, which OSM did map -- a few metres off the seam. The
+    already-loaded touched set is checked first (free); only if it has nothing do
+    we hit the DB, because the search may have reached the goal via the shortcut
+    without ever walking the real staircase beside it. Only unambiguous mechanisms
+    (steps / conveying / elevator) qualify; a multi-level footway ('ramp') is too
+    weak to override the honest 'this level change is not mapped', and a true gap
+    (no mechanism within reach) correctly stays 'vertical'."""
+    if node_id not in coords:
+        return None
+    ax, ay = proj.xy(*coords[node_id])
+    fh = floor_height_m or 1.0
+    # Work in z (metres), not rounded floors: a stepped staircase is mapped with
+    # fractional mezzanine levels (-0.7, -0.3) that round to the same floor, so a
+    # rounded span check would skip the very steps way at the node.
+    zlo, zhi = sorted((from_z, to_z))
+    tol = 0.6  # metres of slack at each end of the shaft
+    prio = {"escalator": 0, "stairs": 1, "elevator": 2}
+
+    def score(tags, pts, on_node):
+        levels = parse_levels(tags.get("level"))
+        kind = way_kind(tags, levels)
+        if kind not in prio or not pts:
+            return None
+        cz = [l * fh for l in levels] or [0.0]
+        spans = (min(cz) <= zlo + tol and max(cz) >= zhi - tol)      # reaches both ends
+        # on the node itself, an under-tagged staircase need only OVERLAP the change
+        overlaps = on_node and (max(cz) >= zlo - tol and min(cz) <= zhi + tol)
+        if not (spans or overlaps):
+            return None
+        if len(pts) == 1:
+            d2 = (ax - pts[0][0]) ** 2 + (ay - pts[0][1]) ** 2
+        else:
+            d2 = min(_seg_dist2(ax, ay, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1])
+                     for i in range(len(pts) - 1))
+        return (d2, prio[kind], kind)
+
+    best = None
+    r2 = ATTRIB_RADIUS_M ** 2
+    for info in ways.values():
+        pts = [proj.xy(*coords[n]) for n in info["nodes"] if n in coords]
+        c = score(info.get("tags") or {}, pts, node_id in info["nodes"])
+        if c and c[0] <= r2 and (best is None or c < best):
+            best = c
+    if best is None and conn is not None:
+        db_r2 = ATTRIB_DB_RADIUS_M ** 2
+        lat, lon = coords[node_id]
+        for tags, pts in _nearby_connectors(conn, lat, lon, proj, ATTRIB_DB_RADIUS_M):
+            c = score(tags, pts, False)   # off the touched path: strict span only
+            if c and c[0] <= db_r2 and (best is None or c < best):
+                best = c
+    return best[2] if best else None
 
 
 # ---------------------------------------------------------------------------
@@ -650,8 +751,14 @@ def export(
             # ended on, but at a different height -- a vertical link mapped ON
             # the node (e.g. an elevator node). Classify it from the node's tags.
             if prev_node == a and abs(prev_z - za) > 0.01:
+                kind = node_kind(path_node_tags.get(a, {}))
+                if kind == "vertical":
+                    # The node itself says nothing; name the change from the mapped
+                    # stair/escalator/lift beside it before falling back to 'vertical'.
+                    kind = connector_kind_near(a, prev_z, za, ways, coords, proj,
+                                               floor_height_m, conn=conn) or "vertical"
                 transitions.append({
-                    "kind": node_kind(path_node_tags.get(a, {})),
+                    "kind": kind,
                     "node_id": a,
                     "from": [pa[0], pa[1], round(prev_z, 2)],
                     "to": pa,
@@ -727,20 +834,22 @@ def export(
             levels_seen.add(float(lvl_i))
 
     # Connector walk-relevance: flag each stairs/escalator/elevator/ramp the walk
-    # actually passes through (a path point within WALK_RELEVANT_M of its line).
-    # A walk view can then show only the vertical circulation on the route; a full
-    # station map ignores the flag and shows them all. Only set when a path exists.
+    # actually TRAVERSES -- decided by topology (the connector way lies on the
+    # resolved path), not 2D proximity. Proximity flagged any connector whose plan
+    # footprint passed within a few metres of the route, so a stairway running
+    # parallel to the escalator the walk rides -- same level span, ~2 m away in plan
+    # -- was drawn as "used" (Essen Hbf 10->6, where the walk rides an escalator down
+    # but two flanking staircases were flagged too). A walk view shows only these; a
+    # full station map ignores the flag and shows them all. Only set when a path
+    # exists. (Level changes mapped ON a node, not a way, carry no connector way to
+    # flag; they are drawn from `transitions` regardless of this flag.)
     if path_json.get("found") and path_json.get("points"):
-        ppts = [(p[0], p[1]) for p in path_json["points"]]
-        thr2 = WALK_RELEVANT_M ** 2
+        walked = set(path_json.get("way_ids") or [])
+        walked.update(t["way_id"] for t in (path_json.get("transitions") or []) if t.get("way_id"))
         for w in ways_json:
             if w["kind"] not in CONNECTOR_KINDS:
                 continue
-            pts = w["points"]
-            w["walk_relevant"] = any(
-                _seg_dist2(px, py, pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1]) <= thr2
-                for i in range(len(pts) - 1) for (px, py) in ppts
-            )
+            w["walk_relevant"] = w["id"] in walked
 
     # Horizontal extent of everything drawn -- the renderer sizes the level
     # reference planes to it, and an AR client can use it as the anchor footprint.
