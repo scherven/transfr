@@ -103,7 +103,64 @@ final class TripModelStreamingTests: XCTestCase {
         XCTAssertEqual(done.recomputedVerdict, .feasible)
 
         let calls = await repo.assessCalls
-        XCTAssertEqual(calls, 2, "one /assess fires per still-pending transfer")
+        XCTAssertEqual(calls, 1, "one /assess batches a whole journey's changes (both transfers), " +
+                       "not one request per transfer")
+    }
+
+    /// Returns the same pending journeys, but every `/assess` throws — the network
+    /// blip / server error / timeout that used to strand a transfer on `pending`
+    /// forever. Counts calls so the retry is observable.
+    actor FailingAssessRepo: JourneyRepository {
+        private(set) var assessCalls = 0
+        func journeys(from: String, to: String, when: Date?, assess: Bool,
+                      noElevators: Bool = false) async throws -> JourneysResponse {
+            let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+            return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
+        }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
+            assessCalls += 1
+            throw URLError(.timedOut)
+        }
+        func stations(query: String) async throws -> [StationSuggestion] { [] }
+        func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
+            throw RepositoryError.notAvailable("platforms")
+        }
+        func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {
+            throw RepositoryError.notAvailable("stationWalk")
+        }
+        func facilities(lat: Double, lon: Double, category: String) async throws -> FacilitiesResponse {
+            throw RepositoryError.notAvailable("facilities")
+        }
+        func stationHealth(lat: Double, lon: Double) async throws -> StationHealthResponse {
+            throw RepositoryError.notAvailable("stationHealth")
+        }
+        func walk(for key: WalkKey) async throws -> WalkResult {
+            WalkResult(relationId: key.relationId, fromPlatform: key.fromPlatform,
+                       toPlatform: key.toPlatform, stepFree: key.stepFree, ok: false)
+        }
+    }
+
+    /// THE resilience contract (the reported bug): when `/assess` keeps failing, the
+    /// transfers must NOT stay `pending` forever — the old behaviour, where the error
+    /// was swallowed by `try?`, nothing retried, and `pending` was the only loading
+    /// state. They retry, then settle on a TERMINAL `unknown` carrying
+    /// `assessFailedReason`, so the journey rolls up honestly and PreparingWalksView
+    /// can reach `allSettled` instead of spinning indefinitely.
+    @MainActor
+    func testFailedAssessSettlesTerminalRatherThanStuckPending() async throws {
+        let repo = FailingAssessRepo()
+        let model = TripModel(repository: repo)
+        await model.plan()
+
+        // No transfer is left pending — the whole point of the fix.
+        await waitUntil { model.journeys.first?.transfers.allSatisfy { !$0.verdictKind.isPending } ?? false }
+        let j = try XCTUnwrap(model.journeys.first)
+        XCTAssertTrue(j.transfers.allSatisfy { $0.verdictKind == .unknown(TripModel.assessFailedReason) },
+                      "a transfer whose /assess failed settles on a terminal unknown, not pending")
+        XCTAssertEqual(j.verdictKind, .unknown(nil), "and the journey rolls up to unknown, never a fake feasible")
+
+        let calls = await repo.assessCalls
+        XCTAssertGreaterThan(calls, 1, "the failing /assess is retried before giving up")
     }
 
     @MainActor
@@ -160,7 +217,8 @@ final class TripModelStreamingTests: XCTestCase {
         private var entered = false
         private var calls = 0
 
-        func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
+        func journeys(from: String, to: String, when: Date?, assess: Bool,
+                      noElevators: Bool = false) async throws -> JourneysResponse {
             calls += 1
             let held = calls == 1
             entered = true
@@ -192,7 +250,7 @@ final class TripModelStreamingTests: XCTestCase {
             """
         }
 
-        func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] { [] }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
         func stations(query: String) async throws -> [StationSuggestion] { [] }
         func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
             throw RepositoryError.notAvailable("platforms")
@@ -214,10 +272,11 @@ final class TripModelStreamingTests: XCTestCase {
 
     /// Every `/journeys` fails.
     struct FailingRepo: JourneyRepository {
-        func journeys(from: String, to: String, when: Date?, assess: Bool) async throws -> JourneysResponse {
+        func journeys(from: String, to: String, when: Date?, assess: Bool,
+                      noElevators: Bool = false) async throws -> JourneysResponse {
             throw URLError(.notConnectedToInternet)
         }
-        func assess(_ interchanges: [AssessInterchange]) async throws -> [Transfer] { [] }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
         func stations(query: String) async throws -> [StationSuggestion] { [] }
         func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
             throw RepositoryError.notAvailable("platforms")

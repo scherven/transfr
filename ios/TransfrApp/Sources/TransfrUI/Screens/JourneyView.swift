@@ -264,7 +264,12 @@ struct TransferCard: View {
         case .feasible:   return "Comfortable"
         case .tight:      return "Tight — move promptly"
         case .infeasible: return "Very likely to miss"
-        case .unknown:    return "No platform data here"
+        case .unknown(let reason):
+            // A transfer we couldn't reach the service to assess reads honestly as
+            // that, not as a mapping gap (which is what every server-side `unknown`
+            // reason means). See `TripModel.assessFailedReason`.
+            return reason == TripModel.assessFailedReason
+                ? "Couldn't check this transfer" : "No platform data here"
         case .pending:    return "Checking this transfer…"
         }
     }
