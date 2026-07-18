@@ -152,12 +152,29 @@ class PlatformWalkResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class PlatformMarker(BaseModel):
+    """One platform's label at its real coordinate, from the feed harvest
+    (core/dbgen/harvest_platform_labels.py) or a bulk GTFS ingest. `n` is how many
+    stop observations backed it -- a confidence signal, higher = more sightings."""
+
+    track: str
+    lat: float
+    lon: float
+    n: int = 1
+
+
 class StationPlatformsResponse(BaseModel):
     """The platforms at the station nearest a coordinate. Powers the walk-only
     door: the platform pickers adapt to the entered station, and `relation_id`
     is what a subsequent /walk between two of these refs uses, so the two calls
     resolve the same station. `found=False` (with `reason`) when no station sits
-    near the coordinate."""
+    near the coordinate.
+
+    `platforms` are the OSM refs (what the map draws). `feed_platforms` are the
+    harvested/ingested overlay tracks -- the labels OSM lacks -- WITH coordinates,
+    so every picker reading this endpoint can offer the FULL platform set and still
+    route a walk to one (the coord feeds the WalkKey / core Tier-3 fallback). Kept a
+    separate field so the OSM-only `platforms` still drives the map's colour split."""
 
     lat: float
     lon: float
@@ -165,18 +182,8 @@ class StationPlatformsResponse(BaseModel):
     station: Optional[str] = None
     found: bool
     platforms: List[str] = Field(default_factory=list)
+    feed_platforms: List[PlatformMarker] = Field(default_factory=list)
     reason: Optional[str] = None
-
-
-class PlatformMarker(BaseModel):
-    """One platform's label at its real coordinate, from the feed harvest (see
-    core/dbgen/harvest_platform_labels.py). `n` is how many stop observations
-    backed it -- a confidence signal, higher = more sightings."""
-
-    track: str
-    lat: float
-    lon: float
-    n: int = 1
 
 
 class StationPlatformMarkersResponse(BaseModel):

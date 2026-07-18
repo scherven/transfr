@@ -208,9 +208,14 @@ def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
                 lat=lat, lon=lon, found=False, reason=STATION_UNRESOLVED,
             )
         refs = list_platform_refs(cur, match.relation_id)
+    # Fold in the harvested/ingested overlay tracks (the labels OSM lacks) so every
+    # picker that reads this endpoint offers the full platform set -- with coords, so
+    # a walk to one still routes. Empty when no overlay is present for this station.
+    feed = platform_labels.platform_markers(lat, lon)
+    feed_platforms = [schemas.PlatformMarker(**m) for m in feed[1]] if feed else []
     return schemas.StationPlatformsResponse(
         lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
-        found=True, platforms=refs,
+        found=True, platforms=refs, feed_platforms=feed_platforms,
     )
 
 
