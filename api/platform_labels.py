@@ -28,6 +28,15 @@ _PATH = os.environ.get("TRANSFR_PLATFORM_LABELS", "platform_labels.json")
 # (better an honest "not covered" than a wrong station's platforms).
 DEFAULT_MAX_DISTANCE_M = 1500.0
 
+# One physical station complex can span several OSM station nodes -- Zürich HB is a
+# "Hauptbahnhof" node plus a "HB SZU" node ~80 m away -- and the harvest keys a
+# platform to whichever node is nearest, so the complex ends up split across a few
+# overlay entries. When serving markers we therefore MERGE every entry within this
+# radius of the nearest one, so a query for the station returns its whole platform
+# set, not just the sub-node it happened to resolve to. Kept well under the spacing
+# to the next distinct station (Zürich HB -> Selnau is ~840 m) to avoid over-merging.
+MERGE_RADIUS_M = 300.0
+
 _lock = threading.Lock()
 _cache: Optional[Dict[str, dict]] = None
 _cache_mtime: Optional[float] = None
@@ -85,12 +94,32 @@ def nearest_station(lat: float, lon: float,
 
 
 def platform_markers(lat: float, lon: float,
-                     max_distance_m: float = DEFAULT_MAX_DISTANCE_M
+                     max_distance_m: float = DEFAULT_MAX_DISTANCE_M,
+                     merge_radius_m: float = MERGE_RADIUS_M
                      ) -> Optional[Tuple[str, List[dict]]]:
-    """(station_name, [ {track, lat, lon, n}, ... ]) for the station nearest
-    (lat, lon), or None when no harvested station is near / no overlay is loaded."""
-    match = nearest_station(lat, lon, max_distance_m)
-    if match is None:
+    """(station_name, [ {track, lat, lon, n}, ... ]) for the station complex nearest
+    (lat, lon), or None when nothing is near / no overlay is loaded.
+
+    Aggregates every overlay entry within `merge_radius_m` of the nearest one (one
+    station split across several OSM nodes -- see MERGE_RADIUS_M), deduping platforms
+    by track. The returned name is the richest entry in the cluster (the main
+    station, e.g. "Zürich Hauptbahnhof" rather than its "HB SZU" sub-node)."""
+    anchor = nearest_station(lat, lon, max_distance_m)
+    if anchor is None:
         return None
-    name, entry = match
-    return name, list(entry.get("platforms", []))
+    _, aentry = anchor
+    alat, alon = aentry["lat"], aentry["lon"]
+    merged: Dict[str, dict] = {}
+    disp_name, disp_count = None, -1
+    for name, entry in _load().items():
+        try:
+            if _haversine_m(alat, alon, entry["lat"], entry["lon"]) > merge_radius_m:
+                continue
+        except (KeyError, TypeError):
+            continue
+        plats = entry.get("platforms", [])
+        for p in plats:
+            merged.setdefault(p.get("track"), p)  # first (nearest-ish) wins on a track clash
+        if len(plats) > disp_count:
+            disp_name, disp_count = name, len(plats)
+    return disp_name, list(merged.values())
