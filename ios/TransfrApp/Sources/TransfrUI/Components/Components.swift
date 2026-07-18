@@ -137,60 +137,6 @@ struct GhostButtonStyle: ButtonStyle {
     }
 }
 
-/// The journey card's "stops rail" — a single-row line diagram. Children alternate
-/// stop / edge / stop / … (even indices are stops, odd are edges). Each stop is
-/// placed centered on its dot; each edge is stretched to span the gap *between* the
-/// two dots it links, so its service label centers over the true leg (not the box
-/// gap) and the edges tile one continuous line. Stops keep their natural (caption)
-/// width; the layout reports the row's intrinsic width, so the caller can center it
-/// when it fits the card or scroll it when a long trip overruns. iOS 16+ `Layout`.
-struct RailLayout: Layout {
-    /// Slack so a service label never sits wall-to-wall in its segment.
-    var labelPad: CGFloat = 10
-    /// Minimum clearance kept between two neighbouring station captions.
-    var capGap: CGFloat = 12
-
-    /// Resolve dot x-positions and segment widths from the children's natural sizes.
-    /// A segment is wide enough for both its label and the half-captions that lean
-    /// into it from either dot, so captions never collide and labels always fit.
-    private func solve(_ sizes: [CGSize]) -> (dotX: [CGFloat], seg: [CGFloat], width: CGFloat) {
-        let dots = (sizes.count + 1) / 2
-        guard dots >= 1 else { return ([], [], 0) }
-        func capHalf(_ d: Int) -> CGFloat { sizes[d * 2].width / 2 }
-        var dotX = [CGFloat](repeating: 0, count: dots)
-        var seg = [CGFloat](repeating: 0, count: max(dots - 1, 0))
-        dotX[0] = capHalf(0)
-        for d in 0 ..< (dots - 1) {
-            let label = sizes[d * 2 + 1].width
-            seg[d] = max(label + labelPad, capHalf(d) + capHalf(d + 1) + capGap)
-            dotX[d + 1] = dotX[d] + seg[d]
-        }
-        return (dotX, seg, dotX[dots - 1] + capHalf(dots - 1))
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        let height = sizes.reduce(CGFloat(0)) { max($0, $1.height) }
-        return CGSize(width: solve(sizes).width, height: height)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
-        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
-        let g = solve(sizes)
-        for i in subviews.indices {
-            let d = i / 2
-            if i.isMultiple(of: 2) {                         // a stop: centered on its dot
-                subviews[i].place(at: CGPoint(x: bounds.minX + g.dotX[d], y: bounds.minY),
-                                  anchor: .top, proposal: ProposedViewSize(sizes[i]))
-            } else {                                         // a leg: spans dot d → dot d+1
-                subviews[i].place(at: CGPoint(x: bounds.minX + g.dotX[d], y: bounds.minY),
-                                  anchor: .topLeading,
-                                  proposal: ProposedViewSize(width: g.seg[d], height: sizes[i].height))
-            }
-        }
-    }
-}
-
 /// A left-aligned wrapping flow layout. Lays subviews out left-to-right and wraps
 /// to a new row when the next subview would overflow the available width. Each
 /// subview keeps its natural (ideal) size — nothing is compressed — so pills flow
