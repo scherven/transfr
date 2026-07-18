@@ -38,8 +38,17 @@ public struct SampleRepository: JourneyRepository {
 
     public func stations(query: String) async throws -> [StationSuggestion] {
         try? await Task.sleep(for: .milliseconds(120))
-        let q = query.lowercased()
-        return Self.stationSeed.filter { $0.name.lowercased().contains(q) }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return [] }
+        // Search the bundled corpus (tens of thousands of real stations) so offline
+        // autocomplete returns real hits. Fall back to the tiny built-in seed only
+        // if the resource is somehow missing, so autocomplete degrades rather than
+        // breaks. (#40)
+        if !Self.stationCatalog.stations.isEmpty {
+            return Self.stationCatalog.search(q)
+        }
+        let lc = q.lowercased()
+        return Self.stationSeed.filter { $0.name.lowercased().contains(lc) }
     }
 
     public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
@@ -189,8 +198,25 @@ public struct SampleRepository: JourneyRepository {
         return try Data(contentsOf: url)
     }
 
-    /// A handful of stations so autocomplete is real offline. Decoded so it goes
-    /// through the same contract as `/stations`.
+    /// The bundled offline autocomplete corpus: `stations.csv`, the
+    /// trainline-eu/stations dataset trimmed to its suggestable stops (see
+    /// `AttributionsView` for the ODbL credit). Parsed once, lazily, on the first
+    /// `stations(query:)`. Empty if the resource is somehow absent, in which case
+    /// `stations(query:)` falls back to `stationSeed`. (#40 / TODO §8)
+    static let stationCatalog: StationCatalog = {
+        guard let url = Bundle.module.url(forResource: "stations", withExtension: "csv"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return StationCatalog(stations: [])
+        }
+        return StationCatalog(csv: text)
+    }()
+
+    /// A handful of stations for the synthesized offline tiers. The bundled
+    /// `stationCatalog` above powers autocomplete now; this seed still backs the
+    /// nearest-coordinate synthesis in `platforms(...)`, `stationHealth(...)` and
+    /// `facilities(...)`, and is the fallback for `stations(query:)` if the corpus
+    /// resource is missing. Decoded so it goes through the same contract as
+    /// `/stations`.
     static let stationSeed: [StationSuggestion] = {
         let json = """
         [
