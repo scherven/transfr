@@ -176,13 +176,16 @@ struct WalkSceneTests {
     @Test func exploded3DFloorsDoNotFuse() throws {
         let s = try Self.scene("viz_berlin_1_16")
         let size = CGSize(width: 360, height: 300)
+        // Frame on the walk box (what the 3D uses in walk mode); the plates are
+        // measured over the *same* box, so the stacking test tracks what's on screen.
+        let box = try #require(s.walkFramingBox)
         for angle in [0.0, 0.5, 1.0, 2.2, 3.9] {
-            let iso = IsoFit(scene: s, size: size, angle: angle, zoom: 1, pad: 24)
-            // The screen-y band a floor's plate occupies, from the scene's own box.
+            let iso = IsoFit(scene: s, box: box, size: size, angle: angle, zoom: 1, pad: 24)
+            // The screen-y band a floor's plate occupies, from the framing box.
             func plateY(_ level: Int) -> (lo: CGFloat, hi: CGFloat) {
                 var lo = CGFloat.greatestFiniteMagnitude, hi = -CGFloat.greatestFiniteMagnitude
-                for x in [s.minX, s.maxX] {
-                    for y in [s.minY, s.maxY] {
+                for x in [box.minX, box.maxX] {
+                    for y in [box.minY, box.maxY] {
                         let p = iso.map(Point3(x: Float(x), y: Float(y),
                                                z: Float(CGFloat(level) * s.floorHeight)))
                         lo = min(lo, p.y); hi = max(hi, p.y)
@@ -204,6 +207,51 @@ struct WalkSceneTests {
                         "angle \(angle): L\(level+1) lift \(lift) < ¼ of plate depth \(depth) — floors nearly fused")
             }
         }
+    }
+
+    /// The 3D must frame the WALK, not the whole station — the Berlin 1→16 "stick".
+    ///
+    /// The scene box spans every context way — ~510 × 814 m on Berlin, partly a
+    /// spurious platform-1 fragment ~500 m south of everything — so framing the 3D on
+    /// it crushed the ~57 × 55 m walk into a near-vertical line (its iso X-span fell
+    /// to ~5 % of the canvas). Walk mode now frames the path's own XY box, grown by a
+    /// margin, so the walk spreads across the canvas; browse (station map) mode still
+    /// frames the whole station.
+    @Test func threeDFramesTheWalkNotTheWholeStation() throws {
+        let s = try Self.scene("viz_berlin_1_16")
+        let size = CGSize(width: 340, height: 360)   // the app's 3D viewport shape
+
+        // Fraction of the canvas width the projected path spans, under a given frame.
+        func pathXFraction(box: CGRect) -> CGFloat {
+            let iso = IsoFit(scene: s, box: box, size: size, angle: 0.5, zoom: 1, pad: 24)
+            let xs = s.pathPoints.map { iso.map($0).x }
+            return (xs.max()! - xs.min()!) / size.width
+        }
+
+        // The walk really is a sliver of the whole-station box — that's the bug.
+        let walkBox = try #require(s.walkFramingBox)
+        #expect(walkBox.width < 0.4 * s.worldBounds.width && walkBox.height < 0.4 * s.worldBounds.height,
+                "the walk box should be a small part of the whole-station box")
+
+        let sceneFrac = pathXFraction(box: s.worldBounds)   // old / browse framing
+        let walkFrac  = pathXFraction(box: walkBox)          // the fix
+        #expect(sceneFrac < 0.12, "whole-scene framing should crush the walk, got \(sceneFrac)")
+        #expect(walkFrac > 0.20, "walk framing left it a stick at \(walkFrac) of canvas width")
+        #expect(walkFrac > 3 * sceneFrac, "the fix should widen the walk several-fold")
+
+        // Browse mode frames the whole station: the scene's own bounding corners (at
+        // every level) all land inside the canvas — nothing clipped — and they fill
+        // it, which the tight walk box never could.
+        let browse = IsoFit(scene: s, box: s.worldBounds, size: size, angle: 0.5, zoom: 1, pad: 24)
+        let corners = [s.minX, s.maxX].flatMap { x in [s.minY, s.maxY].flatMap { y in
+            s.levelsAsc.map { browse.map(Point3(x: Float(x), y: Float(y),
+                                                z: Float(CGFloat($0) * s.floorHeight))) }
+        } }
+        let cxs = corners.map(\.x), cys = corners.map(\.y)
+        #expect(cxs.min()! >= -0.5 && cxs.max()! <= size.width + 0.5, "station clipped horizontally in browse")
+        #expect(cys.min()! >= -0.5 && cys.max()! <= size.height + 0.5, "station clipped vertically in browse")
+        #expect((cxs.max()! - cxs.min()!) > 0.5 * size.width || (cys.max()! - cys.min()!) > 0.5 * size.height,
+                "browse should fill the frame with the whole station")
     }
 
     // MARK: - Facility map (every category POI pinned)
@@ -245,7 +293,7 @@ struct WalkSceneTests {
     /// The map 3D rasterises with a selected pin (all pins + selection run, no crash).
     @Test func facilityMapCanvasRasterises() throws {
         let s = try Self.scene("viz_berlin_facility")
-        try rasterize(IsoGeometryCanvas(scene: s, browse: true, selectedPOI: 1),
+        try rasterize(IsoGeometryCanvas(scene: s, browse: true, animated: false, selectedPOI: 1),
                       size: CGSize(width: 360, height: 340), tag: "iso_facility_map_berlin")
     }
 
@@ -269,7 +317,7 @@ struct WalkSceneTests {
                 try rasterize(PlanGeometryCanvas(scene: s, level: lvl),
                               size: CGSize(width: 360, height: 260), tag: "ghosttab\(lvl)_\(short)")
             }
-            try rasterize(IsoGeometryCanvas(scene: s),
+            try rasterize(IsoGeometryCanvas(scene: s, animated: false),
                           size: CGSize(width: 360, height: 300), tag: "iso_\(short)")
         }
     }

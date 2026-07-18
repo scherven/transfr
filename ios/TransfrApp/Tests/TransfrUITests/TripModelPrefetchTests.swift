@@ -217,8 +217,7 @@ final class TripModelStreamingTests: XCTestCase {
         private var entered = false
         private var calls = 0
 
-        func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+        func journeys(from: String, to: String, when: Date?, assess: Bool, noElevators: Bool = false) async throws -> JourneysResponse {
             calls += 1
             let held = calls == 1
             entered = true
@@ -272,8 +271,7 @@ final class TripModelStreamingTests: XCTestCase {
 
     /// Every `/journeys` fails.
     struct FailingRepo: JourneyRepository {
-        func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+        func journeys(from: String, to: String, when: Date?, assess: Bool, noElevators: Bool = false) async throws -> JourneysResponse {
             throw URLError(.notConnectedToInternet)
         }
         func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
