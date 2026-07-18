@@ -1,0 +1,50 @@
+# MOTIS 2 config for a TIMETABLE-ONLY self-hosted instance.
+#
+# Why timetable-only: transfr calls /api/v5/plan with COORDINATES (it resolves
+# stations itself from stations.csv + the OSM DB) and recomputes every transfer
+# walk over its own pedestrian geometry. So it needs MOTIS purely as a transit
+# router. That lets us OMIT the three layers that make a continental import
+# expensive -- `geocoding` (the address phase Transitous measured blowing past
+# 100 GB on a full-Europe import), `street_routing`, and `tiles`. Access/egress
+# from the query coordinates to nearby stops falls back to geodesic, which is
+# fine because transfr overrides the walk anyway.
+#
+# Schema verified against motis-project/motis docs/setup.md (2026-07). Confirm it
+# still matches the MOTIS image tag you pull in docker-compose.yml before trusting
+# a run -- the config schema does move between releases.
+
+server:
+  port: 8080
+
+timetable:
+  # Keep the loaded window small for a spike; widen for real use.
+  first_day: TODAY
+  num_days: 7
+  # GTFS stop coordinates are enough without an OSM street layer.
+  use_osm_stop_coordinates: false
+  extend_missing_footpaths: true
+  datasets:
+    # Default spike dataset: Switzerland. Platform/track-rich (transfr's
+    # PLATFORM_RICH set includes CH), and small enough to import on a laptop.
+    # fetch-data.sh drops the zip here as ./data/ch.gtfs.zip.
+    ch:
+      path: data/ch.gtfs.zip
+      # Static timetable is enough for the first pass. To add live delays later,
+      # uncomment and supply the current GTFS-RT URL (+ API key header if needed):
+      # rt:
+      #   - url: https://api.opentransportdata.swiss/gtfsrt2020
+      #     protocol: gtfsrt
+      #     headers:
+      #       Authorization: ${OPENTRANSPORT_CH_KEY}
+
+# ---------------------------------------------------------------------------
+# HEAVIER, OPT-IN LAYERS -- leave these OFF for the memory-lean spike. Enabling
+# any of them pulls in the OSM extract and (for geocoding) the address phase that
+# is the known continental-import memory wall. transfr does not need them.
+# ---------------------------------------------------------------------------
+# osm: ch.osm.pbf          # fetch-data.sh can also drop switzerland-latest here
+# street_routing: true     # real (not geodesic) access/egress + transfer paths
+# osr_footpath: true
+# geocoding: true          # name->coordinate lookup; transfr already does this
+# tiles:
+#   profile: tiles-profiles/full.lua

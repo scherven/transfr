@@ -12,8 +12,11 @@ from typing import Dict, List, Any
 import requests
 
 from api.stations import resolve_station
+from api.config import MOTIS_BASE
 
-TRANSITOUS_BASE = "https://api.transitous.org"
+# Resolved once at import from TRANSFR_MOTIS_BASE (api/config.py); defaults to the
+# public Transitous instance, or a self-hosted MOTIS when that env var is set.
+TRANSITOUS_BASE = MOTIS_BASE
 PLAN_URL = f"{TRANSITOUS_BASE}/api/v5/plan"
 
 _session: requests.Session | None = None

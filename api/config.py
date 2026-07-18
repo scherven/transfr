@@ -44,6 +44,16 @@ STITCH_BRIDGES = os.environ.get("TRANSFR_STITCH_BRIDGES", "1") != "0"
 # the CSV). Set TRANSFR_OSM_STATION_INDEX=1 for the Korea (transfr_kr) deployment.
 OSM_STATION_INDEX = os.environ.get("TRANSFR_OSM_STATION_INDEX", "0") != "0"
 
+# Base URL of the Transitous / MOTIS 2 routing service that answers /journeys.
+# Defaults to the public, community-hosted Transitous instance. Point it at a
+# self-hosted MOTIS (see deploy/motis-selfhost/) to step outside Transitous's
+# non-commercial + fair-use terms:  TRANSFR_MOTIS_BASE=http://localhost:8080
+# core/boarding/live_sources.py reads the SAME env var directly (it's core-layer
+# and must not import this api-layer module), so the served path and the tooling
+# path repoint together. Trailing slash is stripped so f"{base}/api/v5/plan" is
+# always well formed.
+MOTIS_BASE = os.environ.get("TRANSFR_MOTIS_BASE", "https://api.transitous.org").rstrip("/")
+
 # Default number of itinerary options requested from the journey provider.
 DEFAULT_MAX_JOURNEYS = _int("TRANSFR_MAX_JOURNEYS", 5)
 MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)
