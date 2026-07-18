@@ -64,10 +64,20 @@ public final class TripModel {
         public var relationId: Int
         public var fromPlatform: String
         public var toPlatform: String
+        // Feed coordinates for platforms OSM doesn't ref (overlay tracks), so the
+        // walk still routes via the WalkKey / core Tier-3 fallback. nil = OSM ref.
+        public var fromLat: Double?
+        public var fromLon: Double?
+        public var toLat: Double?
+        public var toLon: Double?
 
-        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String) {
+        public init(station: String, relationId: Int, fromPlatform: String, toPlatform: String,
+                    fromCoord: (lat: Double, lon: Double)? = nil,
+                    toCoord: (lat: Double, lon: Double)? = nil) {
             self.station = station; self.relationId = relationId
             self.fromPlatform = fromPlatform; self.toPlatform = toPlatform
+            self.fromLat = fromCoord?.lat; self.fromLon = fromCoord?.lon
+            self.toLat = toCoord?.lat; self.toLon = toCoord?.lon
         }
     }
     public var walkLookup: WalkLookup?

@@ -154,11 +154,12 @@ struct StationMapView: View {
         guard let result = await model.walk(for: key), result.ok, let export = result.export else {
             message = "No drawable geometry for this station yet."; return
         }
-        // Overlay the feed's platform labels (the ones OSM lacks). Honest-empty
-        // when the host has no harvested overlay or this station wasn't harvested,
-        // so the map then shows OSM refs only — never fabricated labels.
-        let feed = await model.stationPlatformMarkers(lat: lat, lon: lon)
-        let markers = feed?.found == true ? feed!.platforms : []
+        // Overlay the feed's platform labels (the ones OSM lacks) -- they ride on the
+        // same /station-platforms response (`feedPlatforms`), so no separate call.
+        // Honest-empty when the host has no overlay / this station wasn't harvested,
+        // so the map then shows OSM refs only -- never fabricated labels. `osmRefs`
+        // stays the OSM-only set (`platforms`) so the colour split is correct.
+        let markers = resp.feedPlatforms ?? []
         station = Resolved(name: s.name, platforms: refs,
                            markers: markers, osmRefs: Set(refs))
         scene = WalkScene(export)

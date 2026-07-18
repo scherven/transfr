@@ -182,13 +182,47 @@ public struct StationPlatformsResponse: Codable, Sendable {
     public var relationId: Int?
     public var station: String?
     public var found: Bool
+    /// OSM platform refs (what the map draws). Kept OSM-only so the station map's
+    /// OSM-vs-feed colour split stays correct.
     public var platforms: [String]
+    /// The harvested/ingested overlay tracks — the labels OSM lacks — WITH
+    /// coordinates. Optional so a response/fixture without the field still decodes.
+    /// Don't read directly; use `allPlatforms` (what pickers show) and `feedCoord`.
+    public var feedPlatforms: [PlatformMarker]?
     public var reason: String?
 
     public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
-                found: Bool, platforms: [String] = [], reason: String? = nil) {
+                found: Bool, platforms: [String] = [], feedPlatforms: [PlatformMarker]? = nil,
+                reason: String? = nil) {
         self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
-        self.found = found; self.platforms = platforms; self.reason = reason
+        self.found = found; self.platforms = platforms; self.feedPlatforms = feedPlatforms
+        self.reason = reason
+    }
+
+    /// Every platform to offer in a picker: the OSM refs plus the feed overlay
+    /// tracks, de-duplicated (a shared label collapses) and natural-sorted. This is
+    /// what every platform picker/list in the app should show.
+    public var allPlatforms: [String] {
+        var seen = Set(platforms)
+        var out = platforms
+        for m in (feedPlatforms ?? []) where !seen.contains(m.track) {
+            seen.insert(m.track); out.append(m.track)
+        }
+        return out.sorted(by: StationPlatformsResponse.platformLess)
+    }
+
+    /// The feed coordinate for a track (nil for an OSM-only ref) — lets a walk to an
+    /// overlay-only platform route via the `WalkKey` coords / core Tier-3 fallback.
+    public func feedCoord(_ track: String) -> (lat: Double, lon: Double)? {
+        (feedPlatforms ?? []).first { $0.track == track }.map { ($0.lat, $0.lon) }
+    }
+
+    /// Natural platform order: numeric prefix ascending, then the whole label
+    /// ("2" < "10", "3a" just after "3", lettered/compound labels last).
+    static func platformLess(_ a: String, _ b: String) -> Bool {
+        func key(_ s: String) -> (Int, String) { (Int(s.prefix { $0.isNumber }) ?? Int.max, s) }
+        let ka = key(a), kb = key(b)
+        return ka.0 != kb.0 ? ka.0 < kb.0 : ka.1 < kb.1
     }
 }
 

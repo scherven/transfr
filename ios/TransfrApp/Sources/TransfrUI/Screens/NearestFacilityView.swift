@@ -369,7 +369,7 @@ struct NearestFacilityView: View {
         }
         let platforms = await model.stationPlatforms(lat: lat, lon: lon)
         let r = Resolved(name: platforms?.station ?? top.name, lat: lat, lon: lon,
-                         relationId: platforms?.relationId ?? 0, platforms: platforms?.platforms ?? [])
+                         relationId: platforms?.relationId ?? 0, platforms: platforms?.allPlatforms ?? [])
         resolved = r
         if fromPlatform.isEmpty || !r.platforms.contains(fromPlatform) {
             fromPlatform = r.platforms.first ?? ""

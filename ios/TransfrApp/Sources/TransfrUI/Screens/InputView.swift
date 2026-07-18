@@ -394,7 +394,7 @@ struct InputView: View {
     /// reverts to free-form until re-resolved).
     private var adaptedPlatforms: [String] {
         guard resolvedForStation == lookupStation.trimmingCharacters(in: .whitespaces),
-              let refs = resolved?.platforms, !refs.isEmpty else { return [] }
+              let refs = resolved?.allPlatforms, !refs.isEmpty else { return [] }
         return refs
     }
 
@@ -507,11 +507,12 @@ struct InputView: View {
         defer { resolvingWalk = false }
         stationLatLon = (lat, lon)
         let r = await model.stationPlatforms(lat: lat, lon: lon)
-        guard let r, r.found, !r.platforms.isEmpty else { return r }
+        guard let r, r.found, !r.allPlatforms.isEmpty else { return r }
         resolved = r
         resolvedForStation = name.trimmingCharacters(in: .whitespaces)
-        if !r.platforms.contains(fromPlatform) { fromPlatform = r.platforms.first ?? fromPlatform }
-        if !r.platforms.contains(toPlatform) { toPlatform = r.platforms.last ?? toPlatform }
+        let all = r.allPlatforms
+        if !all.contains(fromPlatform) { fromPlatform = all.first ?? fromPlatform }
+        if !all.contains(toPlatform) { toPlatform = all.last ?? toPlatform }
         return r
     }
 
@@ -540,7 +541,11 @@ struct InputView: View {
             station: station.isEmpty ? (lookup?.station ?? "Walk") : station,
             relationId: lookup?.relationId ?? 0,
             fromPlatform: fromPlatform,
-            toPlatform: toPlatform)
+            toPlatform: toPlatform,
+            // Feed coords for a platform OSM doesn't ref, so the walk still routes
+            // (WalkKey -> core Tier-3). nil for an OSM platform -> ref routing.
+            fromCoord: lookup?.feedCoord(fromPlatform),
+            toCoord: lookup?.feedCoord(toPlatform))
         model.path.append(.walkLookup)
     }
 
