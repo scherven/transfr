@@ -235,7 +235,7 @@ struct JourneyCard: View {
                         Spacer()
                         VerdictBadge(verdict: verdict)
                     }
-                    flow
+                    rail
                     meta
                 }
                 .padding(16)
@@ -245,44 +245,32 @@ struct JourneyCard: View {
         }
     }
 
-    private var flow: some View {
-        // Pills wrap onto multiple rows (issue #19) instead of being crunched into
-        // one. Each arrow travels with its following node so a change never splits
-        // across a row break, and every pill stays on a single line.
-        FlowLayout(spacing: 6, lineSpacing: 6) {
-            legPill(journey.legs.first(where: { $0.trainName != nil })?.trainName ?? "Train")
-            ForEach(Array(journey.transfers.enumerated()), id: \.offset) { _, t in
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.right").font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.ink3)
-                    transferNode(t)
+    /// The route as a little line diagram (issue #19's successor): trains are the
+    /// labelled azure segments, changes are the verdict-ringed dots between them.
+    /// Distinct shapes for distinct things — a leg you ride vs. a point you change —
+    /// where the old design drew both as identical pills. Every train is named (the
+    /// old flow named only the first). `RailStrip` centers the rail when it fits and
+    /// scrolls it back and forth when a long trip overruns the card.
+    private var rail: some View {
+        let names = journey.legs.compactMap(\.trainName)
+        let legNames = names.isEmpty ? ["—"] : names          // a journey always has ≥1 named leg
+        let changes = journey.transfers
+        return RailStrip {
+            RailLayout {
+                RailNode(kind: .origin)
+                ForEach(legNames.indices, id: \.self) { i in
+                    RailEdge(label: legNames[i])
+                    if i < changes.count {
+                        RailNode(kind: .change(
+                            station: shortStation(changes[i].atStation ?? "—"),
+                            plat: "\(changes[i].arrivalPlatform ?? "?")→\(changes[i].departurePlatform ?? "?")",
+                            verdict: changes[i].verdictKind))
+                    }
                 }
-                .fixedSize(horizontal: true, vertical: false)
+                RailNode(kind: .dest)
             }
         }
-    }
-
-    private func legPill(_ name: String) -> some View {
-        Text(name)
-            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-            .foregroundStyle(Theme.ink2)
-            .lineLimit(1)
-            .padding(.horizontal, 8).padding(.vertical, 4)
-            .background(Capsule().fill(Theme.panel2))
-            .fixedSize(horizontal: true, vertical: false)
-    }
-
-    private func transferNode(_ t: Transfer) -> some View {
-        let v = t.verdictKind
-        let plat = "\(t.arrivalPlatform ?? "?")→\(t.departurePlatform ?? "?")"
-        return HStack(spacing: 4) {
-            Text(shortStation(t.atStation ?? "")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-            Text(plat).font(.system(size: 11, weight: .medium, design: .monospaced)).opacity(0.7).lineLimit(1)
-        }
-        .foregroundStyle(v.color)
-        .padding(.horizontal, 8).padding(.vertical, 5)
-        .background(Capsule().fill(v.softColor))
-        .fixedSize(horizontal: true, vertical: false)
+        .padding(.top, 2)
     }
 
     private var meta: some View {
@@ -312,5 +300,141 @@ struct JourneyCard: View {
     private func shortStation(_ s: String) -> String {
         s.replacingOccurrences(of: " Hbf", with: "")
          .replacingOccurrences(of: " (Main)", with: "")
+    }
+}
+
+// MARK: - Stops rail
+
+/// Geometry shared by `RailNode` and `RailEdge` so their bands line up: a fixed
+/// label zone on top, then the track band (dot / line); a change's caption hangs
+/// below. Keeping the top two zones the same height on every child is what keeps the
+/// dots and the edges' line colinear once `RailLayout` top-aligns them.
+private enum Rail {
+    static let labelH: CGFloat = 14
+    static let trackH: CGFloat = 16
+    static let lineH: CGFloat = 3
+    static let dot: CGFloat = 12
+    static let dotChange: CGFloat = 14
+    static let terminalW: CGFloat = 16
+    /// Fixed height of the whole strip (label + track + a two-line caption).
+    static let height: CGFloat = 66
+    /// How long the scroll pauses at each end so the stops there can be read.
+    static let scrollDwell: TimeInterval = 1.0
+}
+
+private enum RailKind {
+    case origin, dest
+    case change(station: String, plat: String, verdict: Verdict)
+}
+
+/// A stop on the rail. Origin/destination are filled accent dots; a change is a
+/// verdict-ringed dot with the station and platform swap centered beneath it. The
+/// stop draws only the dot — the line is drawn by the edges (which meet under each
+/// dot), so the caption's width sets the stop's width and nothing offsets the dot.
+private struct RailNode: View {
+    let kind: RailKind
+
+    private var isTerminal: Bool { if case .change = kind { return false }; return true }
+
+    var body: some View {
+        let node = VStack(spacing: 0) {
+            Color.clear.frame(height: Rail.labelH)          // align the dot band with the edges' label zone
+            dot.frame(height: Rail.trackH)
+            caption
+        }
+        if isTerminal { node.frame(width: Rail.terminalW) } else { node.fixedSize(horizontal: true, vertical: false) }
+    }
+
+    @ViewBuilder private var dot: some View {
+        switch kind {
+        case .origin, .dest:
+            Circle().fill(Theme.accent).frame(width: Rail.dot, height: Rail.dot)
+        case .change(_, _, let verdict):
+            Circle().fill(Theme.panel)
+                .overlay(Circle().strokeBorder(verdict.color, lineWidth: 3))
+                .frame(width: Rail.dotChange, height: Rail.dotChange)
+        }
+    }
+
+    @ViewBuilder private var caption: some View {
+        if case .change(let station, let plat, let verdict) = kind {
+            VStack(spacing: 1) {
+                Text(station).font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(verdict.color).lineLimit(1).fixedSize()
+                Text(plat).font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Theme.ink3).lineLimit(1).fixedSize()
+            }
+            .padding(.top, 5)
+        }
+    }
+}
+
+/// A train leg on the rail: the service name centered above its stretch of line.
+/// `RailLayout` stretches the edge to span the exact gap between the two dots, so
+/// the label lands dead-center over the leg and the lines tile into one rail.
+private struct RailEdge: View {
+    let label: String
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(label)
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(Theme.ink2)
+                .lineLimit(1).fixedSize()
+                .frame(height: Rail.labelH)
+            Color.clear.frame(height: Rail.trackH)
+                .overlay(Rectangle().fill(Theme.accent).frame(height: Rail.lineH))
+        }
+    }
+}
+
+/// Keeps the rail on one line. When it fits the card it's centered; when a long trip
+/// overruns, it eases back and forth so every stop can be read (a plain horizontal
+/// scroll instead, under Reduce Motion). The natural width is measured off a hidden
+/// copy, then compared with the available width to pick the behaviour.
+private struct RailStrip<Content: View>: View {
+    @ViewBuilder var content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var contentW: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { geo in
+            let vw = geo.size.width
+            let overflow = max(contentW - vw, 0)
+            ZStack(alignment: .topLeading) {
+                content.fixedSize().hidden().measureWidth($contentW)   // measure the natural width
+                if overflow == 0 {
+                    content.fixedSize().frame(width: vw, alignment: .center)
+                } else if reduceMotion {
+                    ScrollView(.horizontal, showsIndicators: false) { content.fixedSize() }
+                        .frame(width: vw)
+                } else {
+                    Color.clear.frame(width: vw, height: Rail.height)
+                        .overlay(alignment: .topLeading) {
+                            // Ping-pong between the two ends, dwelling at each (the
+                            // `.delay`) so the stops there can be read before it moves.
+                            content.fixedSize()
+                                .phaseAnimator([false, true]) { view, atEnd in
+                                    view.offset(x: atEnd ? -overflow : 0)
+                                } animation: { _ in
+                                    .easeInOut(duration: max(Double(overflow) / 42, 1.2))
+                                        .delay(Rail.scrollDwell)
+                                }
+                        }
+                        .clipped()
+                }
+            }
+        }
+        .frame(height: Rail.height)
+    }
+}
+
+private extension View {
+    /// Report this view's laid-out width back into a binding.
+    func measureWidth(_ width: Binding<CGFloat>) -> some View {
+        background(GeometryReader { g in
+            Color.clear
+                .onAppear { width.wrappedValue = g.size.width }
+                .onChange(of: g.size.width) { _, newValue in width.wrappedValue = newValue }
+        })
     }
 }
