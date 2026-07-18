@@ -13,11 +13,11 @@ final class PreparingWalksSnapshotTests: XCTestCase {
     /// [feasible, pending].
     actor MixedRepo: JourneyRepository {
         func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+                      noElevators: Bool = false, bufferS: Int? = nil) async throws -> JourneysResponse {
             let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
             return try dec.decode(JourneysResponse.self, from: Data(PreparingWalksSnapshotTests.json.utf8))
         }
-        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) async throws -> [Transfer] {
             var out: [Transfer] = []
             for ic in interchanges {
                 if ic.atStation == "Mannheim Hbf" { try? await Task.sleep(nanoseconds: 60_000_000_000) }

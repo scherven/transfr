@@ -99,8 +99,11 @@ enum Fmt {
 
 extension Transfer {
     /// Layover minus walk, i.e. slack the traveller keeps. Nil if either is unknown.
-    var spareSeconds: Double? {
-        guard let layover = layoverS, let walk = walkTimeS else { return nil }
+    /// `paceFactor` scales the walk by the user's walking-pace preference (#36) so
+    /// the spare shown alongside a paced walk time stays consistent with it; the
+    /// default (1) is the engine's pace. DISPLAY-ONLY — never re-verdicts.
+    func spareSeconds(paceFactor: Double = 1) -> Double? {
+        guard let layover = layoverS, let walk = pacedWalkTimeS(paceFactor) else { return nil }
         return layover - walk
     }
 

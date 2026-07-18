@@ -96,6 +96,13 @@ public final class TripModel {
     /// `/assess` call instead would let a mid-stream toggle flip leave one
     /// itinerary holding a mix of with-lift and lift-free verdicts.
     private var plannedAvoidElevators = false
+    /// The boarding buffer (seconds) the current `response` was searched under,
+    /// captured at `plan()` time for the same reason as `plannedAvoidElevators`:
+    /// the streamed `/assess` verdicts must use the SAME buffer as the search that
+    /// produced the itineraries, or a mid-stream settings change would leave one
+    /// journey holding verdicts judged against two different buffers. `nil` means
+    /// "the server default" (the search sent no buffer).
+    private var plannedBufferS: Int?
     /// Expands a pasted short link (HTTP redirect) before parsing. Injectable so a
     /// test can supply a stub instead of hitting the network.
     private let linkExpander: LinkExpanding
@@ -128,7 +135,7 @@ public final class TripModel {
     /// `response` is cleared up front on purpose: once nav is instant, a previous
     /// search's journeys would otherwise sit on screen — under the new query's
     /// title — reading as results for a search that hasn't happened yet.
-    public func plan(avoidElevators: Bool = false) async {
+    public func plan(avoidElevators: Bool = false, bufferS: Int? = nil) async {
         planGeneration += 1
         let generation = planGeneration
         load = .loading
@@ -136,8 +143,12 @@ public final class TripModel {
         selectedIndex = nil
         response = nil
         path = [.results]
+        // Capture the buffer this search runs under so the streamed /assess
+        // verdicts (below) are judged against the same value, not whatever the
+        // live setting is by the time they land.
+        plannedBufferS = bufferS
         do {
-            let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false, noElevators: avoidElevators)
+            let resp = try await repo.journeys(from: origin, to: destination, when: departure, assess: false, noElevators: avoidElevators, bufferS: bufferS)
             guard generation == planGeneration else { return }
             response = resp
             load = .loaded
@@ -153,7 +164,7 @@ public final class TripModel {
     /// `RouteLinkParser`, and converges on the same `plan()` path as typed input.
     /// Fails soft — a bad or unsupported link surfaces a message on the CTA, never
     /// a crash.
-    public func planFromLink(_ raw: String, avoidElevators: Bool = false) async {
+    public func planFromLink(_ raw: String, avoidElevators: Bool = false, bufferS: Int? = nil) async {
         load = .loading
         let parsed: RouteLinkParser.ParsedRouteLink
         do {
@@ -178,7 +189,7 @@ public final class TripModel {
         usingCurrentLocation = false
         originUserEdited = true
         if let dep = parsed.departure { departure = dep }
-        await plan(avoidElevators: avoidElevators)
+        await plan(avoidElevators: avoidElevators, bufferS: bufferS)
     }
 
     /// Expand (only if a short link) then parse. Pure parsing lives in
@@ -338,11 +349,12 @@ public final class TripModel {
     private func runVerdictStream(_ work: [(j: Int, items: [(t: Int, ic: AssessInterchange)])]) async {
         let repo = self.repo
         let noElevators = plannedAvoidElevators   // the search's profile, not the live setting
+        let bufferS = plannedBufferS              // the search's buffer, not the live setting
         await withTaskGroup(of: (j: Int, indices: [Int], transfers: [Transfer]?).self) { group in
             for (j, items) in work {
                 group.addTask {
                     let assessed = await Self.assessWithRetry(
-                        items.map(\.ic), repo: repo, noElevators: noElevators)
+                        items.map(\.ic), repo: repo, noElevators: noElevators, bufferS: bufferS)
                     return (j, items.map(\.t), assessed)
                 }
             }
@@ -384,14 +396,14 @@ public final class TripModel {
     /// `repo` passed in, so it runs on the task-group child off the main actor (like
     /// the original per-transfer call did) rather than hopping back for each request.
     private nonisolated static func assessWithRetry(_ ics: [AssessInterchange], repo: JourneyRepository,
-                                                    noElevators: Bool) async -> [Transfer]? {
+                                                    noElevators: Bool, bufferS: Int?) async -> [Transfer]? {
         let maxAttempts = 3
         for attempt in 0..<maxAttempts {
             if Task.isCancelled { return nil }
             // Require one transfer back per interchange: a short/empty reply is as
             // useless as a thrown error (it would splice a nil), so treat it as a
             // failed attempt and retry rather than stranding the row.
-            if let transfers = try? await repo.assess(ics, noElevators: noElevators),
+            if let transfers = try? await repo.assess(ics, noElevators: noElevators, bufferS: bufferS),
                transfers.count == ics.count {
                 return transfers
             }

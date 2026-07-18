@@ -102,7 +102,7 @@ struct InputView: View {
             if let q = AppConfig.autoplanQuery, model.load == .idle {
                 model.origin = q.from
                 model.destination = q.to
-                await model.plan(avoidElevators: settings.avoidElevators)
+                await model.plan(avoidElevators: settings.avoidElevators, bufferS: settings.bufferS)
             }
         }
         .onChange(of: location.coordinate?.latitude) { _, _ in applyLocationIfReady() }
@@ -357,7 +357,7 @@ struct InputView: View {
             model.destination = destination
             model.usingCurrentLocation = false
             model.originUserEdited = true
-            Task { await model.plan(avoidElevators: settings.avoidElevators) }
+            Task { await model.plan(avoidElevators: settings.avoidElevators, bufferS: settings.bufferS) }
         } label: {
             HStack(spacing: 10) {
                 SetIcon("clock")
@@ -682,9 +682,9 @@ struct InputView: View {
                 case .paste: Task {
                     resolvingLink = true
                     defer { resolvingLink = false }
-                    await model.planFromLink(link, avoidElevators: settings.avoidElevators)
+                    await model.planFromLink(link, avoidElevators: settings.avoidElevators, bufferS: settings.bufferS)
                 }
-                case .type:  Task { await model.plan(avoidElevators: settings.avoidElevators) }
+                case .type:  Task { await model.plan(avoidElevators: settings.avoidElevators, bufferS: settings.bufferS) }
                 }
             } label: {
                 HStack {

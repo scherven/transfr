@@ -18,11 +18,11 @@ final class TripModelStreamingTests: XCTestCase {
         init(assessDelayNs: UInt64 = 0) { self.assessDelayNs = assessDelayNs }
 
         func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+                      noElevators: Bool = false, bufferS: Int? = nil) async throws -> JourneysResponse {
             let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
             return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
         }
-        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) async throws -> [Transfer] {
             assessCalls += 1
             if assessDelayNs > 0 { try? await Task.sleep(nanoseconds: assessDelayNs) }
             return interchanges.map {
@@ -113,11 +113,11 @@ final class TripModelStreamingTests: XCTestCase {
     actor FailingAssessRepo: JourneyRepository {
         private(set) var assessCalls = 0
         func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+                      noElevators: Bool = false, bufferS: Int? = nil) async throws -> JourneysResponse {
             let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
             return try dec.decode(JourneysResponse.self, from: Data(TripModelStreamingTests.pendingJSON.utf8))
         }
-        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) async throws -> [Transfer] {
             assessCalls += 1
             throw URLError(.timedOut)
         }
@@ -218,7 +218,7 @@ final class TripModelStreamingTests: XCTestCase {
         private var calls = 0
 
         func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+                      noElevators: Bool = false, bufferS: Int? = nil) async throws -> JourneysResponse {
             calls += 1
             let held = calls == 1
             entered = true
@@ -250,7 +250,7 @@ final class TripModelStreamingTests: XCTestCase {
             """
         }
 
-        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) async throws -> [Transfer] { [] }
         func stations(query: String) async throws -> [StationSuggestion] { [] }
         func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
             throw RepositoryError.notAvailable("platforms")
@@ -273,10 +273,10 @@ final class TripModelStreamingTests: XCTestCase {
     /// Every `/journeys` fails.
     struct FailingRepo: JourneyRepository {
         func journeys(from: String, to: String, when: Date?, assess: Bool,
-                      noElevators: Bool = false) async throws -> JourneysResponse {
+                      noElevators: Bool = false, bufferS: Int? = nil) async throws -> JourneysResponse {
             throw URLError(.notConnectedToInternet)
         }
-        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] { [] }
+        func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) async throws -> [Transfer] { [] }
         func stations(query: String) async throws -> [StationSuggestion] { [] }
         func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
             throw RepositoryError.notAvailable("platforms")

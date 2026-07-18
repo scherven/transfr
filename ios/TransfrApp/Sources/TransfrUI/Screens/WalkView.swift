@@ -53,7 +53,7 @@ struct WalkView: View {
         VStack(spacing: 1) {
             Text(transfer?.atStation ?? "Walk").font(.system(size: 16, weight: .semibold))
             if let t = transfer {
-                Text("Platform \(t.arrivalPlatform ?? "?") → \(t.departurePlatform ?? "?") · \(Fmt.distance(t.walkDistanceM, imperial: imperial)) · \(Fmt.walkTime(t.walkTimeS))")
+                Text("Platform \(t.arrivalPlatform ?? "?") → \(t.departurePlatform ?? "?") · \(Fmt.distance(t.walkDistanceM, imperial: imperial)) · \(Fmt.walkTime(t.pacedWalkTimeS(settings.pace.factor)))")
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.ink3)
             }
         }
@@ -179,7 +179,7 @@ struct WalkView: View {
 
     private var statsRow: some View {
         HStack {
-            StatCell(key: "Walk time", value: Fmt.walkTime(transfer?.walkTimeS))
+            StatCell(key: "Walk time", value: Fmt.walkTime(transfer?.pacedWalkTimeS(settings.pace.factor)))
             StatCell(key: "Distance", value: Fmt.distance(transfer?.walkDistanceM, imperial: imperial))
             StatCell(key: "Levels", value: levelsStat)
         }

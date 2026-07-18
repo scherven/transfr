@@ -70,7 +70,7 @@ struct ARView: View {
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Text(distanceText).font(.system(size: 30, weight: .bold, design: .monospaced))
-                        Text("\(distanceUnit) to go · \(Fmt.walkTime(transfer?.walkTimeS))").font(.system(size: 13))
+                        Text("\(distanceUnit) to go · \(Fmt.walkTime(transfer?.pacedWalkTimeS(settings.pace.factor)))").font(.system(size: 13))
                     }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16).padding(.vertical, 8)

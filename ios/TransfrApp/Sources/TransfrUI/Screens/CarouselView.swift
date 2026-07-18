@@ -99,7 +99,7 @@ struct TransferDetailCard: View {
                 Text(layoverLine).font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
             Spacer()
-            WalkRing(usedSeconds: transfer.walkTimeS ?? 0,
+            WalkRing(usedSeconds: transfer.pacedWalkTimeS(settings.pace.factor) ?? 0,
                      totalSeconds: transfer.layoverS ?? 1, verdict: v)
         }
     }
@@ -127,8 +127,8 @@ struct TransferDetailCard: View {
     private var stats: some View {
         HStack {
             StatCell(key: "Distance", value: Fmt.distance(transfer.walkDistanceM, imperial: settings.units == .imperial))
-            StatCell(key: "Walk", value: Fmt.walkTime(transfer.walkTimeS))
-            if let spare = transfer.spareSeconds {
+            StatCell(key: "Walk", value: Fmt.walkTime(transfer.pacedWalkTimeS(settings.pace.factor)))
+            if let spare = transfer.spareSeconds(paceFactor: settings.pace.factor) {
                 StatCell(key: "Spare", value: Fmt.duration(Int(spare)),
                          valueColor: v == .tight ? Theme.tight : Theme.go)
             }

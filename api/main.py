@@ -151,12 +151,18 @@ def get_journeys(
                                "affects each transfer's walkability VERDICT, not just the "
                                "drawn geometry. Selects the same core/ profile `/walk`'s "
                                "`step_free` does, but on the verdict path"),
+    buffer_s: float = Query(default=config.BUFFER_S, ge=0, le=1800,
+                            description="boarding buffer: seconds of slack required on top "
+                            "of the raw walk before a change of train counts as comfortably "
+                            "feasible rather than tight (the client's 'Boarding buffer' "
+                            "setting). Defaults to the server's TRANSFR_BUFFER_S; only shifts "
+                            "the tight/feasible boundary, nothing else"),
     conn=Depends(get_conn),
 ):
     when = _parse_when(time)
     try:
         return plan_journeys(conn, from_, to, when, max_journeys=max,
-                             buffer_s=config.BUFFER_S, assess=assess,
+                             buffer_s=buffer_s, assess=assess,
                              avoid_elevators=no_elevators)
     except ValueError as e:
         # unresolvable origin/destination name
@@ -177,7 +183,11 @@ def post_assess(req: schemas.AssessRequest, conn=Depends(get_conn)):
             status_code=413,
             detail=f"too many interchanges: {len(req.interchanges)} > {config.MAX_ASSESS_BATCH}",
         )
-    return assess_interchanges(conn, req.interchanges, buffer_s=config.BUFFER_S,
+    # The buffer must match the /journeys search this stream backfills (so a
+    # streamed verdict equals the bundled assess=True one); the client carries it
+    # in the request. Absent -> the server's own default, unchanged from before.
+    buffer_s = req.buffer_s if req.buffer_s is not None else config.BUFFER_S
+    return assess_interchanges(conn, req.interchanges, buffer_s=buffer_s,
                                avoid_elevators=req.no_elevators)
 
 

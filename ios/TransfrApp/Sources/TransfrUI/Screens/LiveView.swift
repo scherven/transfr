@@ -9,6 +9,7 @@ import TransfrCore
 /// counting-down clock.
 struct LiveView: View {
     @Environment(TripModel.self) private var model
+    @Environment(SettingsStore.self) private var settings
     @State private var boarding: BoardingGuidance?
 
     // The next at-risk transfer to feature, else simply the first change.
@@ -99,7 +100,7 @@ struct LiveView: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("Walk").font(.system(size: 11)).foregroundStyle(Theme.ink3)
-                        Text(Fmt.walkTime(t.walkTimeS)).font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(Theme.ink)
+                        Text(Fmt.walkTime(t.pacedWalkTimeS(settings.pace.factor))).font(.system(size: 16, weight: .bold, design: .monospaced)).foregroundStyle(Theme.ink)
                     }
                     Button { model.path.append(.carousel(startIndex: 0)) } label: {
                         Label("Preview", systemImage: "cube.transparent").font(.system(size: 13, weight: .semibold))
@@ -113,7 +114,7 @@ struct LiveView: View {
 
     /// Real slack: the journey's own layover minus the routed walk.
     private func spareLine(_ t: Transfer) -> String {
-        guard let spare = t.spareSeconds else { return "Platform change at \(t.atStation ?? "the interchange")" }
+        guard let spare = t.spareSeconds(paceFactor: settings.pace.factor) else { return "Platform change at \(t.atStation ?? "the interchange")" }
         if spare < 0 { return "The walk runs ~\(Fmt.walkTime(-spare)) past the layover" }
         return "~\(Fmt.walkTime(spare)) spare after the platform walk"
     }

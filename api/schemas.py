@@ -95,6 +95,12 @@ class AssessRequest(BaseModel):
     # NB: the same core/ profile WalkKey.step_free below selects, but applied to
     # the verdict path rather than the drawn /walk geometry.
     no_elevators: bool = False
+    # Boarding buffer (seconds): the slack added to the raw walk before a change of
+    # train counts as comfortably feasible rather than tight. Carries the same value
+    # the /journeys search used, so a streamed verdict matches the bundled one. None
+    # -> the endpoint falls back to the server default (TRANSFR_BUFFER_S), keeping a
+    # request that omits it byte-identical to before this field existed.
+    buffer_s: Optional[float] = Field(default=None, ge=0, le=1800)
 
 
 class AssessResponse(BaseModel):

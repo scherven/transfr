@@ -71,6 +71,18 @@ def test_classify(walk, layover, expected):
     assert classify(walk, layover, buffer_s=60) == expected
 
 
+def test_classify_buffer_shifts_the_boundary():
+    """#36: the boarding buffer is what the client's setting feeds. The SAME walk
+    and layover must classify differently as the buffer changes -- otherwise the
+    setting would be inert. Walk 120s into a 200s layover: 80s of slack clears a
+    30s buffer (feasible) but not a 90s one (tight)."""
+    assert classify(120, 200, buffer_s=30) == FEASIBLE
+    assert classify(120, 200, buffer_s=90) == TIGHT
+    # A zero buffer only ever draws the infeasible line (layover < walk).
+    assert classify(120, 120, buffer_s=0) == FEASIBLE
+    assert classify(120, 119, buffer_s=0) == INFEASIBLE
+
+
 @pytest.mark.parametrize("walk_m, gap_m, implausible", [
     (144.0, 0.0, False),      # Munchen Ost 3->5, the longest real transfer measured
     (650.0, 0.0, False),      # a long-but-real transfer stays under the 800 m cap

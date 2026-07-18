@@ -57,6 +57,17 @@ public struct Transfer: Codable, Hashable, Sendable {
 
     /// The typed verdict, combining the raw string with its reason.
     public var verdictKind: Verdict { Verdict(raw: verdict, reason: reason) }
+
+    /// The walk time scaled by the user's walking-pace preference — `factor` is a
+    /// multiplier on the routing engine's assumed pace (1 = as routed, >1 slower,
+    /// <1 faster; see `SettingsStore.Pace.factor`). DISPLAY-ONLY: the server
+    /// `verdict` is unchanged — walking pace scales the *shown* walk time but never
+    /// re-verdicts (issue #36 defers a client re-verdict to keep the server's honest
+    /// `unknown`/`infeasible`). `nil` when no walk time is known (a pending or
+    /// unresolved transfer), so callers fall through to "—" exactly as before.
+    public func pacedWalkTimeS(_ factor: Double) -> Double? {
+        walkTimeS.map { $0 * factor }
+    }
 }
 
 public struct Journey: Codable, Hashable, Sendable, Identifiable {
@@ -117,9 +128,18 @@ public struct AssessRequest: Codable, Sendable {
     /// match what an `assess: true` search would have returned. Encodes to
     /// `no_elevators` via `TransfrJSON`'s `.convertToSnakeCase`.
     public var noElevators: Bool
-    public init(interchanges: [AssessInterchange], noElevators: Bool = false) {
+    /// The boarding-buffer seconds the server adds to the raw walk before a
+    /// transfer counts as comfortably feasible rather than tight (the user's
+    /// "Boarding buffer" setting). Must be the SAME value the `/journeys` search
+    /// was made under, so streamed verdicts match a bundled `assess: true` search.
+    /// `nil` omits it (encoded via `.convertToSnakeCase` to `buffer_s` when set),
+    /// so the server falls back to its own default — byte-identical to the request
+    /// before this field existed.
+    public var bufferS: Int?
+    public init(interchanges: [AssessInterchange], noElevators: Bool = false, bufferS: Int? = nil) {
         self.interchanges = interchanges
         self.noElevators = noElevators
+        self.bufferS = bufferS
     }
 }
 

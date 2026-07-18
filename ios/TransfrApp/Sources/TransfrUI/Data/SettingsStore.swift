@@ -16,6 +16,15 @@ import Observation
 public final class SettingsStore {
     public enum Pace: String, CaseIterable { case relaxed, normal, brisk
         public var label: String { rawValue.capitalized }
+        /// Multiplier applied to a transfer's *displayed* walk time (issue #36).
+        /// `normal` is the routing engine's assumed pace (1×); `relaxed` walks
+        /// slower so the shown walk is longer, `brisk` faster so it's shorter.
+        /// ~±15% around the engine's pace — a sensible default, tunable here.
+        /// DISPLAY-ONLY: this scales the number the traveller reads, never the
+        /// server's verdict (a client re-verdict stays deferred — see #36).
+        public var factor: Double {
+            switch self { case .relaxed: 1.15; case .normal: 1.0; case .brisk: 0.85 }
+        }
     }
     public enum Units: String, CaseIterable { case metric, imperial
         public var label: String { rawValue.capitalized }

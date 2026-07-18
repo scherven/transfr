@@ -14,15 +14,18 @@ public protocol JourneyRepository: Sendable {
     /// false` returns the itineraries instantly with `pending` transfers, to be
     /// filled in via `assess(_:)` — the progressive load. `noElevators` selects the
     /// lift-free routing profile, so each transfer's VERDICT is routed over
-    /// stairs/escalators/ramps rather than through a lift.
+    /// stairs/escalators/ramps rather than through a lift. `bufferS` is the boarding
+    /// buffer (seconds) the server adds to the raw walk before a change of train
+    /// counts as comfortably feasible; `nil` uses the server default.
     func journeys(from: String, to: String, when: Date?, assess: Bool,
-                  noElevators: Bool) async throws -> JourneysResponse
+                  noElevators: Bool, bufferS: Int?) async throws -> JourneysResponse
 
     /// Assess a batch of changes of train, returning the real transfers. The
     /// client fires these per-interchange, concurrently, to stream a journey's
-    /// verdicts in behind a fast `journeys(assess: false)`. `noElevators` must be
-    /// the value the journey was planned under, so the streamed verdicts match.
-    func assess(_ interchanges: [AssessInterchange], noElevators: Bool) async throws -> [Transfer]
+    /// verdicts in behind a fast `journeys(assess: false)`. `noElevators` and
+    /// `bufferS` must be the values the journey was planned under, so the streamed
+    /// verdicts match the bundled ones.
+    func assess(_ interchanges: [AssessInterchange], noElevators: Bool, bufferS: Int?) async throws -> [Transfer]
 
     /// Station autocomplete. (The app also bundles `stations.csv` for instant
     /// offline suggestions; this is the online-refresh path — DESIGN.md §13.2.)
@@ -89,14 +92,14 @@ public struct LiveRepository: JourneyRepository {
     }
 
     public func journeys(from: String, to: String, when: Date?, assess: Bool,
-                         noElevators: Bool) async throws -> JourneysResponse {
+                         noElevators: Bool, bufferS: Int?) async throws -> JourneysResponse {
         let iso = when.map { ISO8601DateFormatter.transfr.string(from: $0) }
         return try await client.journeys(from: from, to: to, when: iso, assess: assess,
-                                         noElevators: noElevators)
+                                         noElevators: noElevators, bufferS: bufferS)
     }
 
-    public func assess(_ interchanges: [AssessInterchange], noElevators: Bool) async throws -> [Transfer] {
-        try await client.assess(interchanges, noElevators: noElevators).transfers
+    public func assess(_ interchanges: [AssessInterchange], noElevators: Bool, bufferS: Int?) async throws -> [Transfer] {
+        try await client.assess(interchanges, noElevators: noElevators, bufferS: bufferS).transfers
     }
 
     public func stations(query: String) async throws -> [StationSuggestion] {

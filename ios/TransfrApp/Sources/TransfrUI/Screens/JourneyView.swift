@@ -224,6 +224,7 @@ private struct TimelineRow: View {
 /// The transfer card inside the timeline: verdict-tinted, walk/layover summary,
 /// tap to open the carousel.
 struct TransferCard: View {
+    @Environment(SettingsStore.self) private var settings
     let transfer: Transfer
     var onTap: () -> Void
 
@@ -246,8 +247,8 @@ struct TransferCard: View {
                 }
                 HStack(spacing: 12) {
                     PlatformChip(text: "Pl \(transfer.arrivalPlatform ?? "?") → \(transfer.departurePlatform ?? "?")")
-                    walkItem("Walk", Fmt.walkTime(transfer.walkTimeS))
-                    if let spare = transfer.spareSeconds {
+                    walkItem("Walk", Fmt.walkTime(transfer.pacedWalkTimeS(settings.pace.factor)))
+                    if let spare = transfer.spareSeconds(paceFactor: settings.pace.factor) {
                         walkItem("Left", Fmt.duration(Int(spare)), color: v == .tight ? Theme.tight : Theme.ink)
                     }
                 }

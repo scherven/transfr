@@ -115,7 +115,7 @@ struct PreparingWalksView: View {
     private func detail(_ t: Transfer) -> String {
         let v = t.verdictKind
         if v.isPending { return "resolving platforms…" }
-        if let walk = t.walkTimeS {
+        if let walk = t.pacedWalkTimeS(settings.pace.factor) {
             return "\(v.label) · \(Fmt.walkTime(walk)) · \(Fmt.distance(t.walkDistanceM, imperial: imperial))"
         }
         return v.label
