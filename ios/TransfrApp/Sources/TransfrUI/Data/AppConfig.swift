@@ -34,7 +34,12 @@ public enum AppConfig {
         let apiKey = env["TRANSFR_API_KEY"]?
             .trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
 
-        return LiveRepository(baseURL: url, apiKey: apiKey)
+        // Wrap the live service in the offline cache (#37, DESIGN.md §13.9): each
+        // planned trip + its walk geometry is persisted on fetch, so reopening a
+        // planned trip works with no signal. Transparent — live always wins; the
+        // cache is only read when the network fails. The sample tier is already
+        // fully offline, so it isn't wrapped.
+        return CachingRepository(wrapping: LiveRepository(baseURL: url, apiKey: apiKey))
     }
 
     /// Dev affordance: when `TRANSFR_AUTOPLAN=1`, the input screen plans a query on

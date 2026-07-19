@@ -16,7 +16,14 @@ struct StationMapView: View {
     @State private var loading = false
     @State private var message: String?
 
-    private struct Resolved { let name: String; let platforms: [String] }
+    private struct Resolved {
+        let name: String
+        let platforms: [String]
+        /// The feed's platform-number labels (the ones OSM lacks) for the overlay.
+        let markers: [PlatformMarker]
+        /// The platform refs OSM already labels — the overlay's neutral/accent split.
+        let osmRefs: Set<String>
+    }
 
     var body: some View {
         Group {
@@ -90,7 +97,8 @@ struct StationMapView: View {
             .padding(.horizontal, 20).padding(.vertical, 12)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.line2).frame(height: 1) }
 
-            IsoGeometryCanvas(scene: sc, browse: true)
+            IsoGeometryCanvas(scene: sc, browse: true,
+                              markers: st.markers, osmPlatforms: st.osmRefs)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             legend
@@ -146,7 +154,14 @@ struct StationMapView: View {
         guard let result = await model.walk(for: key), result.ok, let export = result.export else {
             message = "No drawable geometry for this station yet."; return
         }
-        station = Resolved(name: s.name, platforms: refs)
+        // Overlay the feed's platform labels (the ones OSM lacks) -- they ride on the
+        // same /station-platforms response (`feedPlatforms`), so no separate call.
+        // Honest-empty when the host has no overlay / this station wasn't harvested,
+        // so the map then shows OSM refs only -- never fabricated labels. `osmRefs`
+        // stays the OSM-only set (`platforms`) so the colour split is correct.
+        let markers = resp.feedPlatforms ?? []
+        station = Resolved(name: s.name, platforms: refs,
+                           markers: markers, osmRefs: Set(refs))
         scene = WalkScene(export)
         query = ""; suggestions = []
     }

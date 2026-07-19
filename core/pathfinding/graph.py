@@ -42,6 +42,17 @@ Coords = Dict[int, Tuple[float, float]]  # node_id -> (lat, lon)
 # NOT_WALKABLE_WAY_SQL is a SQL fragment (references `tags`) for queries
 # that fetch ways directly; is_walkable_way() is the equivalent Python
 # predicate for ways already fetched.
+#
+# Deliberately permissive: any non-station way is walkable. This admits tagless
+# geometry (a `source=survey` outline, a building part), which is NOT ideal -- such
+# a stub, routed over as floor, can manufacture a free level change where it meets a
+# leveled way ("vertical" transfers, e.g. Essen Hbf). But tightening to require a
+# positive walkable tag empirically DISCONNECTS ~12% of real transfers: at many
+# stations the tagless polygon is the only mapped connection between platforms
+# (Amsterdam Cs, Erfurt, Leipzig, ...). So walkability stays permissive and the
+# "vertical" problem is solved downstream, by attributing the level change to the
+# mapped stair/escalator/lift beside it (viz_export.connector_kind_near) rather than
+# by pruning the graph.
 NOT_WALKABLE_WAY_SQL = "tags->>'public_transport' IS DISTINCT FROM 'station'"
 
 

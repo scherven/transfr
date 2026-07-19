@@ -9,7 +9,7 @@ the transfer assessment stubbed -- no network, no DB.
 """
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api import schemas
 from api.bridge import map_track_to_ref
@@ -44,7 +44,8 @@ def _place(d: Dict[str, Any]) -> schemas.Place:
     )
 
 
-def _leg(d: Dict[str, Any]) -> schemas.Leg:
+def _leg(d: Dict[str, Any], departure_platform_actual: Optional[str] = None,
+         arrival_platform_actual: Optional[str] = None) -> schemas.Leg:
     return schemas.Leg(
         mode=d.get("mode", ""),
         train_name=d.get("train_name"),
@@ -56,6 +57,8 @@ def _leg(d: Dict[str, Any]) -> schemas.Leg:
         planned_arrival=d.get("planned_arrival"),
         departure_platform=d.get("departure_platform"),
         arrival_platform=d.get("arrival_platform"),
+        departure_platform_actual=departure_platform_actual,
+        arrival_platform_actual=arrival_platform_actual,
         departure_delay_s=d.get("departure_delay_s"),
         arrival_delay_s=d.get("arrival_delay_s"),
         cancelled=bool(d.get("cancelled", False)),
@@ -63,14 +66,20 @@ def _leg(d: Dict[str, Any]) -> schemas.Leg:
     )
 
 
-def _transfer(a: TransferAssessment, fallback_station: Optional[str]) -> schemas.Transfer:
+def _transfer(a: TransferAssessment, fallback_station: Optional[str],
+              arr_lat: Optional[float] = None, arr_lon: Optional[float] = None,
+              dep_lat: Optional[float] = None, dep_lon: Optional[float] = None) -> schemas.Transfer:
     """Shape a TransferAssessment into the wire Transfer (shared by `/journeys`
-    enrichment and the `/assess` streaming endpoint)."""
+    enrichment and the `/assess` streaming endpoint). The stop coordinates are
+    carried through so the client's later `/walk` can forward them (see WalkKey)."""
     return schemas.Transfer(
         at_station=a.station_name or fallback_station,
         relation_id=a.relation_id,
         arrival_platform=a.arrival_platform,
         departure_platform=a.departure_platform,
+        arrival_platform_actual=a.arrival_platform_actual,
+        departure_platform_actual=a.departure_platform_actual,
+        arr_lat=arr_lat, arr_lon=arr_lon, dep_lat=dep_lat, dep_lon=dep_lon,
         layover_s=a.layover_s,
         walk_time_s=a.walk_time_s,
         walk_distance_m=a.walk_distance_m,
@@ -81,7 +90,10 @@ def _transfer(a: TransferAssessment, fallback_station: Optional[str]) -> schemas
 
 def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
             buffer_s: float, algorithm: str, avoid_elevators: bool = False,
-            resolve_cache: Dict[Any, Any] = None) -> schemas.Transfer:
+            resolve_cache: Dict[Any, Any] = None) -> Tuple[schemas.Transfer, TransferAssessment]:
+    """Assess one change of train, returning both the wire Transfer and the raw
+    assessment (the latter so `enrich` can copy the recovered platform sign onto
+    the two legs the change sits between)."""
     arr, dep = arrive.get("destination") or {}, depart.get("origin") or {}
     a = assess_transfer(
         conn,
@@ -92,7 +104,10 @@ def _assess(conn, arrive: Dict[str, Any], depart: Dict[str, Any],
         buffer_s=buffer_s, algorithm=algorithm, avoid_elevators=avoid_elevators,
         resolve_cache=resolve_cache,
     )
-    return _transfer(a, arr.get("name"))
+    t = _transfer(a, arr.get("name"),
+                  arr_lat=arr.get("latitude"), arr_lon=arr.get("longitude"),
+                  dep_lat=dep.get("latitude"), dep_lon=dep.get("longitude"))
+    return t, a
 
 
 def _pending_transfer(arrive: Dict[str, Any], depart: Dict[str, Any]) -> schemas.Transfer:
@@ -132,11 +147,20 @@ def enrich(conn, search_result: Dict[str, Any], *,
     # reuse across every itinerary in this response.
     resolve_cache: Dict[Any, Any] = {}
     for j in search_result.get("journeys", []):
+        # Recovered platform signs, keyed by the leg the change lands on/leaves
+        # from (id() -- interchanges() yields the very leg dicts in j["legs"]), so
+        # a leg boarding at a feed-renumbered platform shows the real Gleis too.
+        arr_actual: Dict[int, str] = {}
+        dep_actual: Dict[int, str] = {}
         if assess:
-            transfers = [
-                _assess(conn, arrive, depart, buffer_s, algorithm, avoid_elevators, resolve_cache)
-                for arrive, depart in interchanges(j)
-            ]
+            transfers = []
+            for arrive, depart in interchanges(j):
+                t, a = _assess(conn, arrive, depart, buffer_s, algorithm, avoid_elevators, resolve_cache)
+                transfers.append(t)
+                if a.arrival_platform_actual:
+                    arr_actual[id(arrive)] = a.arrival_platform_actual
+                if a.departure_platform_actual:
+                    dep_actual[id(depart)] = a.departure_platform_actual
         else:
             transfers = [_pending_transfer(arrive, depart) for arrive, depart in interchanges(j)]
         n_changes = j.get("num_changes")
@@ -148,7 +172,8 @@ def enrich(conn, search_result: Dict[str, Any], *,
             duration_s=j.get("duration_s"),
             num_changes=n_changes,
             verdict=rollup_verdict([t.verdict for t in transfers]),
-            legs=[_leg(leg) for leg in j.get("legs", [])],
+            legs=[_leg(leg, dep_actual.get(id(leg)), arr_actual.get(id(leg)))
+                  for leg in j.get("legs", [])],
             transfers=transfers,
         ))
     return schemas.JourneysResponse(
@@ -182,7 +207,9 @@ def assess_interchanges(conn, interchanges_in: List["schemas.AssessInterchange"]
             buffer_s=buffer_s, algorithm=algorithm, avoid_elevators=avoid_elevators,
             resolve_cache=resolve_cache,
         )
-        out.append(_transfer(a, ic.at_station))
+        out.append(_transfer(a, ic.at_station,
+                             arr_lat=ic.arr_lat, arr_lon=ic.arr_lon,
+                             dep_lat=ic.dep_lat, dep_lon=ic.dep_lon))
     return schemas.AssessResponse(transfers=out)
 
 

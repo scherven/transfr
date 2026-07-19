@@ -337,7 +337,9 @@ struct WalkLookupView: View {
         guard let lk = lookup, lk.relationId != 0 else { scene = nil; return }
         let key = WalkKey(relationId: lk.relationId, fromPlatform: lk.fromPlatform,
                           toPlatform: lk.toPlatform, stepFree: settings.avoidElevators,
-                          allPlatforms: lk.browse, poi: lk.poi)
+                          allPlatforms: lk.browse,
+                          fromLat: lk.fromLat, fromLon: lk.fromLon,
+                          toLat: lk.toLat, toLon: lk.toLon, poi: lk.poi)
         if let result = await model.walk(for: key), result.ok, let export = result.export {
             let s = WalkScene(export)
             scene = s

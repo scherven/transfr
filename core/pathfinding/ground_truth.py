@@ -61,6 +61,8 @@ def find_shortest_path(
     use_adjacency_table: bool = True,
     use_stitch_bridges: bool = False,
     avoid_elevators: bool = False,
+    from_coord: Optional[Tuple[float, float]] = None,
+    to_coord: Optional[Tuple[float, float]] = None,
     **kwargs,
 ) -> Dict[str, Any]:
     """Find the true shortest (by walking time) path between two platform
@@ -82,11 +84,18 @@ def find_shortest_path(
     test station with identical results. Pass False to fall back to the
     GIN scan, e.g. if node_way_ids hasn't been rebuilt after a fresh
     core/etl.py load.
+
+    from_coord / to_coord are the platforms' real (lat, lon), used only as a
+    last-resort anchor when the ref resolves to no OSM platform at this station
+    (a feed whose platform label OSM doesn't carry -- see SearchContext Tier 3).
+    Omitting them (the default) leaves resolution and results byte-for-byte
+    unchanged.
     """
     search_fn = ALGORITHMS[algorithm]
     with conn.cursor() as cur:
         ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_adjacency_table=use_adjacency_table,
-                            use_stitch_bridges=use_stitch_bridges, avoid_elevators=avoid_elevators)
+                            use_stitch_bridges=use_stitch_bridges, avoid_elevators=avoid_elevators,
+                            from_coord=from_coord, to_coord=to_coord)
         if ctx.error is not None:
             return ctx.error
         return search_fn(ctx, **kwargs)

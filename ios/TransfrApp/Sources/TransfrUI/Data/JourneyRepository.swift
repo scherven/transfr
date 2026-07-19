@@ -33,6 +33,11 @@ public protocol JourneyRepository: Sendable {
     /// pickers adapt to the entered station.
     func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse
 
+    /// The feed's platform-number labels (the ones OSM lacks) for the station
+    /// nearest a coordinate — the station-map overlay. May be `found == false`
+    /// with a typed `reason` when no harvested overlay covers the coordinate.
+    func platformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse
+
     /// Every platform's walk FROM one source platform at the station nearest a
     /// coordinate — the "full station walk" Advanced tool (§6.10). One pathfind per
     /// platform, sorted nearest-first.
@@ -75,6 +80,14 @@ public extension JourneyRepository {
     func facilityMap(lat: Double, lon: Double, category: String) async throws -> FacilityMapResponse {
         FacilityMapResponse(lat: lat, lon: lon, category: category, found: false, reason: "no_poi_layer")
     }
+
+    /// Default: the feed's platform-marker overlay is a live-service feature too, so
+    /// offline/sample and test repositories inherit this honest "not available"
+    /// (never fabricate labels) unless they override it — the station map then draws
+    /// OSM refs only. Same rationale as `facilityMap` above.
+    func platformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse {
+        StationPlatformMarkersResponse(lat: lat, lon: lon, found: false, reason: "no_platform_labels")
+    }
 }
 
 // MARK: - Live: the real FastAPI service
@@ -105,6 +118,10 @@ public struct LiveRepository: JourneyRepository {
 
     public func platforms(lat: Double, lon: Double) async throws -> StationPlatformsResponse {
         try await client.stationPlatforms(lat: lat, lon: lon)
+    }
+
+    public func platformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse {
+        try await client.stationPlatformMarkers(lat: lat, lon: lon)
     }
 
     public func stationWalk(lat: Double, lon: Double, fromPlatform: String, stepFree: Bool) async throws -> StationWalkResponse {

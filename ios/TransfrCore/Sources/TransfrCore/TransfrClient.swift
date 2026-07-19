@@ -98,6 +98,21 @@ public struct TransfrClient: Sendable {
         return try await get(comps?.url)
     }
 
+    /// GET /station-platform-markers?lat=&lon= — the feed's platform-number labels
+    /// (the ones OSM lacks) for the station nearest a coordinate, each at its real
+    /// coordinate. Mirrors the `stationPlatforms(...)` fetch. `found == false` (with
+    /// `reason`: `no_platform_labels` when the harvested overlay isn't on this host,
+    /// `station_unresolved` when no harvested station is near) — never an error.
+    public func stationPlatformMarkers(lat: Double, lon: Double) async throws -> StationPlatformMarkersResponse {
+        var comps = URLComponents(url: baseURL.appendingPathComponent("station-platform-markers"),
+                                  resolvingAgainstBaseURL: false)
+        comps?.queryItems = [
+            URLQueryItem(name: "lat", value: String(lat)),
+            URLQueryItem(name: "lon", value: String(lon)),
+        ]
+        return try await get(comps?.url)
+    }
+
     /// GET /station-walk?lat=&lon=&from_platform=&step_free= — the "full station
     /// walk": from one source platform, the real walk to every other platform at
     /// the station nearest a coordinate, one pathfind each, sorted nearest-first.

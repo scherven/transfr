@@ -52,7 +52,7 @@ from api import stations  # CSV autocomplete
 from ground_truth import find_shortest_path
 from search_context import list_platform_refs
 
-from api import config, schemas
+from api import config, platform_labels, schemas
 from api.bridge import resolve_station
 from api.db import close_pool, connection, init_pool
 from api.facilities import build_facilities, build_facility_map
@@ -223,9 +223,44 @@ def get_station_platforms(lat: float, lon: float, conn=Depends(get_conn)):
                 lat=lat, lon=lon, found=False, reason=STATION_UNRESOLVED,
             )
         refs = list_platform_refs(cur, match.relation_id)
+    # Fold in the harvested/ingested overlay tracks (the labels OSM lacks) so every
+    # picker that reads this endpoint offers the full platform set -- with coords, so
+    # a walk to one still routes. Empty when no overlay is present for this station.
+    feed = platform_labels.platform_markers(lat, lon)
+    feed_platforms = [schemas.PlatformMarker(**m) for m in feed[1]] if feed else []
     return schemas.StationPlatformsResponse(
         lat=lat, lon=lon, relation_id=match.relation_id, station=match.name,
-        found=True, platforms=refs,
+        found=True, platforms=refs, feed_platforms=feed_platforms,
+    )
+
+
+# `found=False` reason when the harvested platform-label overlay isn't on this host.
+NO_PLATFORM_LABELS = "no_platform_labels"
+
+
+@app.get("/station-platform-markers", response_model=schemas.StationPlatformMarkersResponse,
+         dependencies=_PROTECTED)
+def get_station_platform_markers(lat: float, lon: float):
+    """The feed's platform labels for the station nearest (lat, lon), as map markers
+    -- every platform's track number at its real coordinate, the labels OSM lacks
+    (see api/platform_labels.py, harvested by core/dbgen/harvest_platform_labels.py).
+    No DB: served from the harvested overlay file, so it works even with the DB
+    down. `found=False` with `no_platform_labels` when that overlay isn't present
+    on this host (nobody has run the harvest), or `station_unresolved` when no
+    harvested station sits near the coordinate."""
+    if not platform_labels.available():
+        return schemas.StationPlatformMarkersResponse(
+            lat=lat, lon=lon, found=False, reason=NO_PLATFORM_LABELS,
+        )
+    match = platform_labels.platform_markers(lat, lon)
+    if match is None:
+        return schemas.StationPlatformMarkersResponse(
+            lat=lat, lon=lon, found=False, reason=STATION_UNRESOLVED,
+        )
+    name, markers = match
+    return schemas.StationPlatformMarkersResponse(
+        lat=lat, lon=lon, station=name, found=True,
+        platforms=[schemas.PlatformMarker(**m) for m in markers],
     )
 
 

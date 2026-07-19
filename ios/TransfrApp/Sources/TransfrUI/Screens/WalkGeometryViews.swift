@@ -190,7 +190,7 @@ struct WalkScene {
                 icon: WalkConnector.icon(t.kind, up: up),
                 color: WalkConnector.color(t.kind),
                 title: WalkConnector.instruction(t.kind, up: up, to: Self.label(forLevel: toLvl)),
-                sub: WalkConnector.label(t.kind)))
+                sub: WalkConnector.subtitle(t.kind)))
         }
         let arrive = WalkStep(icon: "checkmark", color: Theme.accent,
                               title: "Board on Platform \(endRef)",
@@ -254,6 +254,13 @@ enum WalkConnector {
         default: "Level change"
         }
     }
+    /// Turn-by-turn subtitle: the named mode for a connector the map classifies, or
+    /// an honest note when it records a level change but no mechanism (core/'s
+    /// `vertical` — an untagged shared node, e.g. Essen Hbf 10→6's climb to L+2). The
+    /// row then never implies a stair or lift the data can't actually back.
+    static func subtitle(_ kind: String) -> String {
+        isMapped(kind) ? label(kind) : "Level change not mapped — follow station signs"
+    }
     static func verb(_ kind: String) -> String {
         switch kind {
         case "stairs": "Stairs"; case "escalator": "Escalator"
@@ -270,7 +277,9 @@ enum WalkConnector {
         case "escalator":         return "Ride the escalator \(dir) to \(label)"
         case "elevator", "lift":  return "Take the lift \(dir) to \(label)"
         case "ramp":              return "Follow the ramp \(dir) to \(label)"
-        default:                  return "Change level \(dir) to \(label)"
+        // Unclassified level change (core/'s `vertical`): name a direction, never a
+        // mechanism we can't back — the subtitle carries the "not mapped" note.
+        default:                  return "Go \(dir) to \(label)"
         }
     }
     static func icon(_ kind: String, up: Bool) -> String {
@@ -279,7 +288,7 @@ enum WalkConnector {
         case "escalator":         return up ? "arrow.up.forward" : "arrow.down.forward"
         case "elevator", "lift":  return "arrow.up.arrow.down"
         case "ramp":              return up ? "arrow.up.right" : "arrow.down.right"
-        default:                  return "arrow.up.arrow.down"
+        default:                  return up ? "arrow.up" : "arrow.down"
         }
     }
 }
@@ -596,18 +605,21 @@ private func glyphStairs(_ ctx: GraphicsContext, _ a: CGPoint, _ b: CGPoint, _ c
     strokePts(ctx, pts, col.opacity(alpha), w)
 }
 
-/// Escalator — a faint band with chevrons riding from the low end to the high end.
-private func glyphEscalator(_ ctx: GraphicsContext, lo: CGPoint, hi: CGPoint, _ col: Color,
+/// Escalator — a faint band with chevrons riding from `start` toward `end`. On the
+/// ridden route those are the direction of *travel*, so a descending escalator reads
+/// downward and matches its "…down to L0" instruction; off the route (context /
+/// browse, no travel direction) the caller passes low→high.
+private func glyphEscalator(_ ctx: GraphicsContext, start: CGPoint, end: CGPoint, _ col: Color,
                             w: CGFloat, alpha: Double, now: Double, motion: Bool) {
-    let len = hypot(hi.x - lo.x, hi.y - lo.y); guard len > 2 else { return }
-    let ux = (hi.x - lo.x) / len, uy = (hi.y - lo.y) / len
-    strokePts(ctx, [lo, hi], Theme.paper.opacity(0.8 * alpha), w + 3)
-    strokePts(ctx, [lo, hi], col.opacity(0.5 * alpha), w)
+    let len = hypot(end.x - start.x, end.y - start.y); guard len > 2 else { return }
+    let ux = (end.x - start.x) / len, uy = (end.y - start.y) / len
+    strokePts(ctx, [start, end], Theme.paper.opacity(0.8 * alpha), w + 3)
+    strokePts(ctx, [start, end], col.opacity(0.5 * alpha), w)
     let gap = connChevronGap
     let phase = motion ? CGFloat((now * connChevronSpeed).truncatingRemainder(dividingBy: Double(gap))) : gap * 0.5
     var s = phase
     while s <= len - 1.5 {
-        chevron(ctx, at: CGPoint(x: lo.x + ux * s, y: lo.y + uy * s),
+        chevron(ctx, at: CGPoint(x: start.x + ux * s, y: start.y + uy * s),
                 dir: CGPoint(x: ux, y: uy), size: 4.4, col.opacity(alpha), 1.7)
         s += gap
     }
@@ -642,20 +654,26 @@ private func glyphLift(_ ctx: GraphicsContext, lo: CGPoint, hi: CGPoint, _ col: 
     g.stroke(Path(roundedRect: rect, cornerRadius: 2.2), with: .color(Theme.paper.opacity(0.9 * alpha)), lineWidth: 1.2)
 }
 
-/// Draw one connector segment (raw 3D endpoints) as its glyph. `lo`/`hi` are ordered
-/// by height, so escalator chevrons and the lift car always read low → high.
+/// Draw one connector segment (raw 3D endpoints) as its glyph. Height-ordered
+/// `lo`/`hi` drive the physical shaft of the lift. `directed` — set on the ridden
+/// route — makes the escalator's chevrons follow the way you TRAVEL (`a3` from → `b3`
+/// to), so a descending escalator reads downward; off the route (context / browse)
+/// they default to low → high.
 private func connectorSegment(_ ctx: GraphicsContext, _ iso: IsoFit, _ a3: Point3, _ b3: Point3,
-                              kind: String, isRiser: Bool, now: Double, motion: Bool, alphaMul: Double) {
+                              kind: String, isRiser: Bool, now: Double, motion: Bool, alphaMul: Double,
+                              directed: Bool = false) {
     let A = iso.map(a3), B = iso.map(b3)
     let alpha = (isRiser ? 1.0 : 0.62) * alphaMul
     let col = WalkConnector.softColor(kind)
     let lo = a3.z <= b3.z ? A : B
     let hi = a3.z <= b3.z ? B : A
+    let start = directed ? A : lo   // escalator flow: travel direction on the route,
+    let end   = directed ? B : hi   // low → high everywhere else
     switch kind {
     case "stairs":
         glyphStairs(ctx, A, B, col, w: isRiser ? 3 : 1.9, alpha: alpha)
     case "escalator":
-        glyphEscalator(ctx, lo: lo, hi: hi, col, w: isRiser ? 2.4 : 1.7, alpha: alpha, now: now, motion: motion)
+        glyphEscalator(ctx, start: start, end: end, col, w: isRiser ? 2.4 : 1.7, alpha: alpha, now: now, motion: motion)
     case "elevator", "lift":
         glyphLift(ctx, lo: lo, hi: hi, col, alpha: alpha, big: isRiser, now: now, motion: motion)
     default:
@@ -674,6 +692,15 @@ private func connectorSegment(_ ctx: GraphicsContext, _ iso: IsoFit, _ a3: Point
 struct IsoGeometryCanvas: View {
     let scene: WalkScene
     var browse: Bool = false
+    /// The feed's platform-number labels (the labels OSM lacks), overlaid as pills
+    /// on the exploded model — the station map passes these; the walk views leave
+    /// them empty. Each is centred on the nearest platform island, not its raw
+    /// stop-end coordinate.
+    var markers: [PlatformMarker] = []
+    /// The platform refs OpenStreetMap already labels (from `/station-platforms`).
+    /// A feed track in this set is corroborated by OSM and drawn neutral; a track
+    /// only the feed knows is drawn accent-filled — the value the overlay adds.
+    var osmPlatforms: Set<String> = []
     /// Drives the escalator/lift motion. Production leaves it on; headless snapshots
     /// pass `false` for one deterministic, animation-free frame (`reduceMotion` is a
     /// read-only environment value and can't be forced through `.environment`).
@@ -806,34 +833,31 @@ struct IsoGeometryCanvas: View {
             }
         }
 
-        // Every platform the export carries, marked with its ref and lifted to its
-        // floor — not just the two the walk connects. Hidden on other floors when a
-        // level is isolated.
-        for way in ways where way.kind == "platform" {
-            guard let ref = way.ref, !way.points.isEmpty else { continue }
-            let lvl = way.level ?? wayLevel(way, scene)
-            if focus != nil && focus != lvl { continue }
-            let n = CGFloat(way.points.count)
-            let c = Point3(
-                x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
-                y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
-                z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
-            platformTag(ctx, iso.map(c), ref)
-        }
+        // Every platform the export carries, labelled and lifted to its floor — not
+        // just the two the walk connects. Walk views draw its OSM ref; the station
+        // map overlays the feed's real track numbers (the labels OSM lacks) on the
+        // nearest island. Hidden on other floors when a level is isolated.
+        drawPlatformLabels(ctx, iso, ways, focus: focus)
 
         // Route + its level changes (walk mode only; browse shows the station).
         if !browse {
             if scene.found, scene.pathPoints.count >= 2 {
                 let pts = scene.pathPoints
-                var route = Path()
-                route.move(to: iso.map(pts[0]))
-                for pt in pts.dropFirst() { route.addLine(to: iso.map(pt)) }
-                // Recessed treatment: the route is the hero — a touch heavier, with a soft glow.
+                // Draw the route as its flat, on-floor runs only. The level-change
+                // segments are left to the connector glyphs below, so the accent line
+                // no longer lies on top of (and fights) the stair/escalator it rides —
+                // the connector reads as itself. Recessed treatment: the route is the
+                // hero — heavier, with a soft glow.
                 var glow = ctx
                 glow.addFilter(.shadow(color: Theme.accent.opacity(0.55), radius: 4))
-                glow.stroke(route, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+                for run in scene.levelRuns {
+                    var seg = Path()
+                    seg.move(to: iso.map(run.points[0]))
+                    for pt in run.points.dropFirst() { seg.addLine(to: iso.map(pt)) }
+                    glow.stroke(seg, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 4.5, lineCap: .round, lineJoin: .round))
+                }
                 for t in scene.transitions {   // the stair / escalator / lift you actually ride
-                    connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1)
+                    connectorSegment(ctx, iso, t.from, t.to, kind: t.kind, isRiser: true, now: now, motion: motion, alphaMul: 1, directed: true)
                 }
                 endpoint(ctx, iso.map(pts.first!), Theme.go, r: 5)
                 endpoint(ctx, iso.map(pts.last!), Theme.accent, r: 5)
@@ -951,6 +975,60 @@ struct IsoGeometryCanvas: View {
                 .font(.system(size: 9, weight: .bold, design: .monospaced)))
             t.shading = .color(Theme.ink3)
             ctx.draw(t, at: CGPoint(x: 12, y: ref.y), anchor: .leading)
+        }
+    }
+
+    /// Platform labels on the exploded model. Each platform way is an "island" at
+    /// its centroid; the station map's feed `markers` are snapped to the nearest
+    /// island and drawn as one pill per track number, so the labels the feed
+    /// carries land even where OSM tags none. Without markers (the walk views) this
+    /// is exactly the previous behaviour: the plain OSM ref per platform.
+    private func drawPlatformLabels(_ ctx: GraphicsContext, _ iso: IsoFit,
+                                    _ ways: [VizExport.Way], focus: Int?) {
+        struct Island { let center: Point3; let ref: String?; let level: Int }
+        var islands: [Island] = []
+        for way in ways where way.kind == "platform" {
+            guard !way.points.isEmpty else { continue }
+            let n = CGFloat(way.points.count)
+            let c = Point3(
+                x: Float(way.points.reduce(0) { $0 + CGFloat($1.x) } / n),
+                y: Float(way.points.reduce(0) { $0 + CGFloat($1.y) } / n),
+                z: Float(way.points.reduce(0) { $0 + CGFloat($1.z) } / n))
+            islands.append(Island(center: c, ref: way.ref, level: way.level ?? wayLevel(way, scene)))
+        }
+
+        // Feed markers → nearest island (world XY, via the export's ENU origin). A
+        // compound label like "41/42" splits into one pill per track; duplicate
+        // sightings collapse. Assignment ignores the focus level (a marker belongs
+        // to one island); the draw pass hides islands on dimmed floors.
+        var feedByIsland: [Int: [String]] = [:]
+        if !markers.isEmpty, !islands.isEmpty {
+            let lat0 = scene.export.meta.originLat, lon0 = scene.export.meta.originLon
+            let mPerLat = 111_320.0, mPerLon = 111_320.0 * cos(lat0 * .pi / 180)
+            for m in markers {
+                let mx = (m.lon - lon0) * mPerLon, my = (m.lat - lat0) * mPerLat
+                var best = 0, bestD = Double.greatestFiniteMagnitude
+                for (i, isl) in islands.enumerated() {
+                    let dx = Double(isl.center.x) - mx, dy = Double(isl.center.y) - my
+                    let d = dx * dx + dy * dy
+                    if d < bestD { bestD = d; best = i }
+                }
+                for sub in splitTracks(m.track) where !(feedByIsland[best]?.contains(sub) ?? false) {
+                    feedByIsland[best, default: []].append(sub)
+                }
+            }
+        }
+
+        // Feed islands get a small cluster of per-track pills; every other
+        // OSM-labelled island keeps its plain neutral tag.
+        for (i, isl) in islands.enumerated() {
+            if let f = focus, f != isl.level { continue }
+            let at = iso.map(isl.center)
+            if let tracks = feedByIsland[i] {
+                drawFeedCluster(ctx, at: at, tracks: tracks.sorted(by: trackLess), osm: osmPlatforms)
+            } else if let ref = isl.ref {
+                platformTag(ctx, at, ref)
+            }
         }
     }
 }
@@ -1152,6 +1230,63 @@ private func platformTag(_ ctx: GraphicsContext, _ p: CGPoint, _ ref: String) {
     let rect = CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h)
     ctx.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.panel))
     ctx.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(Theme.line), lineWidth: 1)
+    ctx.draw(text, at: p, anchor: .center)
+}
+
+/// Split a feed track label into its individual platform numbers: a compound
+/// "41/42" is the two faces of one island, so it becomes ["41", "42"]; a plain "3"
+/// stays ["3"]. Blanks trimmed, empties dropped; the raw label is the fallback so
+/// nothing silently vanishes.
+private func splitTracks(_ track: String) -> [String] {
+    let parts = track.split(separator: "/")
+        .map { $0.trimmingCharacters(in: .whitespaces) }
+        .filter { !$0.isEmpty }
+    return parts.isEmpty ? [track] : parts
+}
+
+/// Numeric platform order when both parse as ints ("2" before "10"), else a
+/// natural string compare.
+private func trackLess(_ a: String, _ b: String) -> Bool {
+    if let ia = Int(a), let ib = Int(b) { return ia < ib }
+    return a.localizedStandardCompare(b) == .orderedAscending
+}
+
+/// A short horizontal row of feed pills centred on a platform island's centroid,
+/// so a compound "41/42" reads as two pills side by side over the one island.
+private func drawFeedCluster(_ ctx: GraphicsContext, at p: CGPoint,
+                             tracks: [String], osm: Set<String>) {
+    let font = Font.system(size: 10, weight: .bold, design: .monospaced)
+    let gap: CGFloat = 3
+    let widths = tracks.map {
+        ctx.resolve(Text($0).font(font)).measure(in: CGSize(width: 200, height: 40)).width + 10
+    }
+    let total = widths.reduce(0, +) + gap * CGFloat(max(tracks.count - 1, 0))
+    var x = p.x - total / 2
+    for (i, t) in tracks.enumerated() {
+        feedPill(ctx, CGPoint(x: x + widths[i] / 2, y: p.y), t, accent: !osm.contains(t), font: font)
+        x += widths[i] + gap
+    }
+}
+
+/// One feed pill, styled after `PlatformChip` / `FeedCodeChip` (a capsule). A
+/// track only the feed knows (`accent`) fills solid accent with white text; an
+/// OSM-corroborated track gets the neutral panel/outline of `platformTag`, so it
+/// matches the refs already on the model.
+private func feedPill(_ ctx: GraphicsContext, _ p: CGPoint, _ track: String,
+                      accent: Bool, font: Font) {
+    var text = ctx.resolve(Text(track).font(font))
+    let ts = text.measure(in: CGSize(width: 200, height: 40))
+    let w = ts.width + 10, h: CGFloat = 15
+    let shape = Path(roundedRect: CGRect(x: p.x - w / 2, y: p.y - h / 2, width: w, height: h),
+                     cornerRadius: h / 2)
+    if accent {
+        ctx.fill(shape, with: .color(Theme.accent))
+        text.shading = .color(.white)
+    } else {
+        ctx.fill(shape, with: .color(Theme.panel))
+        ctx.stroke(shape, with: .color(Theme.line), lineWidth: 1)
+        text.shading = .color(Theme.ink)
+    }
     ctx.draw(text, at: p, anchor: .center)
 }
 

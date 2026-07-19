@@ -175,6 +175,21 @@ def find_platform_edges(ways: Ways, ref: str) -> List[Tuple[int, List[int]]]:
 # and an osm_nodes coordinate index (core/build_platform_index.py).
 STOP_SNAP_RADIUS_M = 40.0
 
+# Tier 3 snap anchors on a coordinate the caller supplied (not a by-ref stop
+# node), so -- unlike Tier 2, whose stop node sits right on the platform edge --
+# the point can be ambiguous, with several features inside the snap radius. Restrict
+# its snap to genuine pedestrian circulation and platforms (the connective tissue
+# that actually joins one platform to another). This is NARROWER than
+# is_walkable_way / NOT_WALKABLE_WAY_SQL (which admit any non-station polygon, e.g.
+# a public_transport=service_center travel-centre or an untagged area), so the snap
+# can't latch onto an isolated blob beside the track and then read as disconnected.
+_PEDESTRIAN_SNAP_WAY_SQL = (
+    "(tags->>'highway' IN "
+    "('footway','steps','pedestrian','path','corridor','platform','elevator') "
+    "OR tags->>'railway' IN ('platform','platform_edge') "
+    "OR tags->>'public_transport' = 'platform')"
+)
+
 # When a platform is resolved by snapping (Tier 2) we return the snap node's
 # WHOLE way -- so SearchContext loads real geometry to traverse -- but tag the
 # result with the single anchor node the source/target should actually be, so two
@@ -200,7 +215,8 @@ def _nearest_stop_coord(cur, ref: str, bbox) -> Optional[Tuple[float, float]]:
     return (best["lat"], best["lon"])
 
 
-def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords):
+def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords,
+                          way_sql: str = NOT_WALKABLE_WAY_SQL):
     """The walkable way owning the node nearest to (lat, lon) within
     STOP_SNAP_RADIUS_M, as a full (way_id, nodes, tags) triple with its node
     coords cached -- i.e. the platform surface (a footway or a platform area)
@@ -213,7 +229,12 @@ def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords):
     across; two different tracks usually own different ways, so the transfer is
     the real platform-to-platform walk. (Two tracks on a single island platform
     resolve to the same way and read as ~0 m -- correctly 'feasible', just not the
-    few-metre cross-platform figure.)"""
+    few-metre cross-platform figure.)
+
+    way_sql restricts which owning way qualifies (a SQL fragment over `tags`).
+    Tier 2 keeps the permissive NOT_WALKABLE_WAY_SQL default; Tier 3 passes a
+    pedestrian-circulation predicate so an ambiguous caller coordinate can't snap
+    to an isolated non-path polygon (see _PEDESTRIAN_SNAP_WAY_SQL)."""
     min_lat, max_lat, min_lon, max_lon = bbox_from_coords({0: (lat, lon)}, STOP_SNAP_RADIUS_M)
     cur.execute(
         "SELECT id, lat, lon FROM osm_nodes "
@@ -229,7 +250,7 @@ def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords):
         if not nw or not nw["way_ids"]:
             continue
         cur.execute(
-            f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {NOT_WALKABLE_WAY_SQL} LIMIT 1",
+            f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {way_sql} LIMIT 1",
             (list(nw["way_ids"]),),
         )
         w = cur.fetchone()
@@ -343,7 +364,9 @@ class SearchContext:
     """
 
     def __init__(self, cur, relation_id: int, ref_1: str, ref_2: str, use_adjacency_table: bool = True,
-                 use_stitch_bridges: bool = False, avoid_elevators: bool = False):
+                 use_stitch_bridges: bool = False, avoid_elevators: bool = False,
+                 from_coord: Optional[Tuple[float, float]] = None,
+                 to_coord: Optional[Tuple[float, float]] = None):
         self.cur = cur
         self.relation_id = relation_id
         # Step-free routing: when True, neighbors() omits every elevator, both
@@ -393,6 +416,11 @@ class SearchContext:
         self.error: Optional[Dict] = None
         self.edges_1: List[Tuple[int, List[int], dict]] = []
         self.edges_2: List[Tuple[int, List[int], dict]] = []
+        # Whether each end fell back to the Tier 3 coordinate snap (its feed ref
+        # matched no OSM platform at this station). Surfaced in build_result so the
+        # API can show the real platform label next to the feed's -- see _setup.
+        self.source_by_coord = False
+        self.target_by_coord = False
         self.sources: set = set()
         self.targets: set = set()
         # The station's own footprint, resolved once in _setup and shared by
@@ -404,6 +432,11 @@ class SearchContext:
         self._seed_bbox: Optional[Tuple[float, float, float, float]] = None
         self._inbbox_nodes: set = set()
         self._station_way_ids: Optional[set] = None
+        # Tier 3 fallback: each platform's real (lat, lon) if the caller knows it
+        # (a MOTIS journey stop carries one). Used only when the ref itself fails
+        # to resolve to any OSM platform at this station -- see _setup.
+        self._from_coord = from_coord
+        self._to_coord = to_coord
         self._setup(ref_1, ref_2)
 
     def _setup(self, ref_1: str, ref_2: str) -> None:
@@ -449,6 +482,19 @@ class SearchContext:
         # restricted to the station's own ways.
         self.edges_1 = self._find_platform_edges_near(ref_1)
         self.edges_2 = self._find_platform_edges_near(ref_2)
+        # Tier 3: a ref that matched no platform here (e.g. a feed labelling the
+        # platform with an internal code OSM doesn't carry -- Koeln Hbf's DELFI
+        # "84-91" for public tracks 1-11) still has a real coordinate if the
+        # caller passed one. Snap that point straight to the nearest walkable way
+        # -- the Tier 2 mechanism, anchored on the given coordinate instead of a
+        # by-ref stop-node lookup. Fires only on a ref miss, so every station that
+        # already resolves is byte-for-byte unchanged.
+        if not self.edges_1 and self._from_coord is not None:
+            self.edges_1 = self._snap_coord_edges(self._from_coord)
+            self.source_by_coord = bool(self.edges_1)
+        if not self.edges_2 and self._to_coord is not None:
+            self.edges_2 = self._snap_coord_edges(self._to_coord)
+            self.target_by_coord = bool(self.edges_2)
         if not self.edges_1 or not self.edges_2:
             self.error = {
                 "found": False,
@@ -535,6 +581,17 @@ class SearchContext:
                 if snapped is not None:
                     return [snapped]
         return []
+
+    def _snap_coord_edges(self, coord: Tuple[float, float]) -> List[Tuple[int, List[int], Dict[str, str]]]:
+        """Resolve a platform by its known coordinate (Tier 3): snap the point
+        straight to the nearest walkable way, the same snap the Tier 2 stop-node
+        path performs once it has a coordinate -- but here the coordinate comes
+        from the caller (a journey stop's own lat/lon), so it works even when the
+        ref exists nowhere in OSM. Returns one anchored edge triple, or [] when
+        no pedestrian way lies within the snap radius."""
+        snapped = _nearest_walkable_way(self.cur, coord[0], coord[1], self.coord_cache,
+                                        way_sql=_PEDESTRIAN_SNAP_WAY_SQL)
+        return [snapped] if snapped is not None else []
 
     def _candidates_in_station(self, predicate_sql: str, param) -> List[Tuple[int, List[int], Dict[str, str]]]:
         """Ways matching one tag predicate AND belonging to this station's
@@ -817,6 +874,8 @@ class SearchContext:
             "graph_ways_touched": len(self.way_cache),
             "graph_nodes_touched": len(self.coord_cache),
             "search_expansions": expansions,
+            "source_by_coord": self.source_by_coord,
+            "target_by_coord": self.target_by_coord,
         }
 
     def build_not_found(self, reason: str, expansions: int, **extra) -> Dict:

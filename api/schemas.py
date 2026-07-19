@@ -30,6 +30,12 @@ class Leg(BaseModel):
     planned_arrival: Optional[str] = None
     departure_platform: Optional[str] = None
     arrival_platform: Optional[str] = None
+    # Real platform sign when this leg boards/alights at a platform whose feed
+    # label is an internal code OSM doesn't carry (Köln Hbf "89" -> "7"). Recovered
+    # from the adjacent transfer's coordinate resolution; null when the feed's
+    # label already is the real one. Same hint contract as Transfer.
+    departure_platform_actual: Optional[str] = None
+    arrival_platform_actual: Optional[str] = None
     departure_delay_s: Optional[int] = None
     arrival_delay_s: Optional[int] = None
     cancelled: bool = False
@@ -43,6 +49,20 @@ class Transfer(BaseModel):
     relation_id: Optional[int] = None
     arrival_platform: Optional[str] = None
     departure_platform: Optional[str] = None
+    # The real platform sign when the feed's label above is an internal code the
+    # station map doesn't carry (e.g. Köln Hbf reports "89"/"88" for public tracks
+    # 7/6). Recovered by coordinate; null when the feed's label already is the real
+    # one. When present, show "platform <actual>" with <arrival_platform> as a "the
+    # operator lists it as N" hint.
+    arrival_platform_actual: Optional[str] = None
+    departure_platform_actual: Optional[str] = None
+    # The two platforms' real coordinates (the journey stops). Carried so the
+    # client's /walk request can forward them (WalkKey), letting the drawn walk
+    # snap to the real platform when the feed's code isn't in OSM (see WalkKey).
+    arr_lat: Optional[float] = None
+    arr_lon: Optional[float] = None
+    dep_lat: Optional[float] = None
+    dep_lon: Optional[float] = None
     layover_s: Optional[float] = None
     walk_time_s: Optional[float] = None
     walk_distance_m: Optional[float] = None
@@ -132,12 +152,29 @@ class PlatformWalkResponse(BaseModel):
     reason: Optional[str] = None
 
 
+class PlatformMarker(BaseModel):
+    """One platform's label at its real coordinate, from the feed harvest
+    (core/dbgen/harvest_platform_labels.py) or a bulk GTFS ingest. `n` is how many
+    stop observations backed it -- a confidence signal, higher = more sightings."""
+
+    track: str
+    lat: float
+    lon: float
+    n: int = 1
+
+
 class StationPlatformsResponse(BaseModel):
     """The platforms at the station nearest a coordinate. Powers the walk-only
     door: the platform pickers adapt to the entered station, and `relation_id`
     is what a subsequent /walk between two of these refs uses, so the two calls
     resolve the same station. `found=False` (with `reason`) when no station sits
-    near the coordinate."""
+    near the coordinate.
+
+    `platforms` are the OSM refs (what the map draws). `feed_platforms` are the
+    harvested/ingested overlay tracks -- the labels OSM lacks -- WITH coordinates,
+    so every picker reading this endpoint can offer the FULL platform set and still
+    route a walk to one (the coord feeds the WalkKey / core Tier-3 fallback). Kept a
+    separate field so the OSM-only `platforms` still drives the map's colour split."""
 
     lat: float
     lon: float
@@ -145,6 +182,22 @@ class StationPlatformsResponse(BaseModel):
     station: Optional[str] = None
     found: bool
     platforms: List[str] = Field(default_factory=list)
+    feed_platforms: List[PlatformMarker] = Field(default_factory=list)
+    reason: Optional[str] = None
+
+
+class StationPlatformMarkersResponse(BaseModel):
+    """The feed's platform labels for the station nearest a coordinate, as map
+    markers -- the labels OSM lacks, placed at their real positions rather than
+    matched to OSM polygons. `found=False` (with `reason`) when no harvested
+    station is near, or `no_platform_labels` when the overlay isn't present on this
+    host (nobody has run the harvest) -- honest degradation, never an error."""
+
+    lat: float
+    lon: float
+    station: Optional[str] = None
+    found: bool
+    platforms: List[PlatformMarker] = Field(default_factory=list)
     reason: Optional[str] = None
 
 
@@ -336,10 +389,26 @@ class WalkKey(BaseModel):
     # Station-map (browse) mode: include every platform at the station, not just
     # the ones the walked corridor touched.
     all_platforms: bool = False
+    # The platforms' real coordinates (from the journey stop), forwarded from the
+    # Transfer. Only used when from_platform/to_platform match no OSM platform at
+    # the station -- then viz_export snaps them to the real platform (Tier 3), so
+    # the drawn walk matches the verdict. Null for browse mode / normal stations.
+    from_lat: Optional[float] = None
+    from_lon: Optional[float] = None
+    to_lat: Optional[float] = None
+    to_lon: Optional[float] = None
     # A facility to draw in the walk's geometry (the 'walk to nearest' door): the
     # tapped POI, projected into the details layer as the focus. None for a plain
     # transfer walk.
     poi: Optional[WalkPOI] = None
+
+    @property
+    def from_coord(self) -> Optional[tuple]:
+        return (self.from_lat, self.from_lon) if self.from_lat is not None and self.from_lon is not None else None
+
+    @property
+    def to_coord(self) -> Optional[tuple]:
+        return (self.to_lat, self.to_lon) if self.to_lat is not None and self.to_lon is not None else None
 
 
 class BoardingGuidance(BaseModel):

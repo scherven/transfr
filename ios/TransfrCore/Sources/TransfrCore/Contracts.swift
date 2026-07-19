@@ -28,6 +28,10 @@ public struct Leg: Codable, Hashable, Sendable {
     public var plannedArrival: String?
     public var departurePlatform: String?
     public var arrivalPlatform: String?
+    /// Real platform sign when this leg boards/alights at a feed-renumbered
+    /// platform (see `Transfer.arrivalPlatformActual`); nil otherwise.
+    public var departurePlatformActual: String?
+    public var arrivalPlatformActual: String?
     public var departureDelayS: Int?
     public var arrivalDelayS: Int?
     public var cancelled: Bool
@@ -39,6 +43,18 @@ public struct Transfer: Codable, Hashable, Sendable {
     public var relationId: Int?
     public var arrivalPlatform: String?
     public var departurePlatform: String?
+    /// The real platform sign when `arrivalPlatform`/`departurePlatform` above is
+    /// an internal feed code the station map doesn't carry (Köln Hbf "89" -> "7").
+    /// Nil when the feed's label already is the real one; a non-nil value is the
+    /// cue to show the real platform with the feed's code as a hint.
+    public var arrivalPlatformActual: String?
+    public var departurePlatformActual: String?
+    /// The two stops' real coordinates, forwarded onto the `WalkKey` so the drawn
+    /// walk can snap to the real platform when the feed's code isn't in OSM.
+    public var arrLat: Double?
+    public var arrLon: Double?
+    public var depLat: Double?
+    public var depLon: Double?
     public var layoverS: Double?
     public var walkTimeS: Double?
     public var walkDistanceM: Double?
@@ -47,10 +63,16 @@ public struct Transfer: Codable, Hashable, Sendable {
 
     public init(atStation: String? = nil, relationId: Int? = nil,
                 arrivalPlatform: String? = nil, departurePlatform: String? = nil,
+                arrivalPlatformActual: String? = nil, departurePlatformActual: String? = nil,
+                arrLat: Double? = nil, arrLon: Double? = nil,
+                depLat: Double? = nil, depLon: Double? = nil,
                 layoverS: Double? = nil, walkTimeS: Double? = nil, walkDistanceM: Double? = nil,
                 verdict: String, reason: String? = nil) {
         self.atStation = atStation; self.relationId = relationId
         self.arrivalPlatform = arrivalPlatform; self.departurePlatform = departurePlatform
+        self.arrivalPlatformActual = arrivalPlatformActual
+        self.departurePlatformActual = departurePlatformActual
+        self.arrLat = arrLat; self.arrLon = arrLon; self.depLat = depLat; self.depLon = depLon
         self.layoverS = layoverS; self.walkTimeS = walkTimeS; self.walkDistanceM = walkDistanceM
         self.verdict = verdict; self.reason = reason
     }
@@ -160,12 +182,82 @@ public struct StationPlatformsResponse: Codable, Sendable {
     public var relationId: Int?
     public var station: String?
     public var found: Bool
+    /// OSM platform refs (what the map draws). Kept OSM-only so the station map's
+    /// OSM-vs-feed colour split stays correct.
     public var platforms: [String]
+    /// The harvested/ingested overlay tracks — the labels OSM lacks — WITH
+    /// coordinates. Optional so a response/fixture without the field still decodes.
+    /// Don't read directly; use `allPlatforms` (what pickers show) and `feedCoord`.
+    public var feedPlatforms: [PlatformMarker]?
     public var reason: String?
 
     public init(lat: Double, lon: Double, relationId: Int? = nil, station: String? = nil,
-                found: Bool, platforms: [String] = [], reason: String? = nil) {
+                found: Bool, platforms: [String] = [], feedPlatforms: [PlatformMarker]? = nil,
+                reason: String? = nil) {
         self.lat = lat; self.lon = lon; self.relationId = relationId; self.station = station
+        self.found = found; self.platforms = platforms; self.feedPlatforms = feedPlatforms
+        self.reason = reason
+    }
+
+    /// Every platform to offer in a picker: the OSM refs plus the feed overlay
+    /// tracks, de-duplicated (a shared label collapses) and natural-sorted. This is
+    /// what every platform picker/list in the app should show.
+    public var allPlatforms: [String] {
+        var seen = Set(platforms)
+        var out = platforms
+        for m in (feedPlatforms ?? []) where !seen.contains(m.track) {
+            seen.insert(m.track); out.append(m.track)
+        }
+        return out.sorted(by: StationPlatformsResponse.platformLess)
+    }
+
+    /// The feed coordinate for a track (nil for an OSM-only ref) — lets a walk to an
+    /// overlay-only platform route via the `WalkKey` coords / core Tier-3 fallback.
+    public func feedCoord(_ track: String) -> (lat: Double, lon: Double)? {
+        (feedPlatforms ?? []).first { $0.track == track }.map { ($0.lat, $0.lon) }
+    }
+
+    /// Natural platform order: numeric prefix ascending, then the whole label
+    /// ("2" < "10", "3a" just after "3", lettered/compound labels last).
+    static func platformLess(_ a: String, _ b: String) -> Bool {
+        func key(_ s: String) -> (Int, String) { (Int(s.prefix { $0.isNumber }) ?? Int.max, s) }
+        let ka = key(a), kb = key(b)
+        return ka.0 != kb.0 ? ka.0 < kb.0 : ka.1 < kb.1
+    }
+}
+
+/// One platform's label at its real coordinate, harvested from the transit feed
+/// (mirrors `api/schemas.PlatformMarker`) — the labels OpenStreetMap lacks. `n`
+/// is how many stop observations backed it, a confidence signal (higher = more
+/// sightings). `track` may be a compound like `41/42` (two faces of one island).
+public struct PlatformMarker: Codable, Hashable, Sendable {
+    public var track: String
+    public var lat: Double
+    public var lon: Double
+    public var n: Int
+
+    public init(track: String, lat: Double, lon: Double, n: Int = 1) {
+        self.track = track; self.lat = lat; self.lon = lon; self.n = n
+    }
+}
+
+/// The feed's platform labels for the station nearest a coordinate, as map markers
+/// (from `/station-platform-markers`) — the labels OSM lacks, placed at their real
+/// positions rather than matched to OSM polygons. Powers the station-map overlay.
+/// `found == false` (with `reason`) when no harvested station is near
+/// (`station_unresolved`), or `no_platform_labels` when the overlay isn't present
+/// on this host (nobody has run the harvest) — honest degradation, never an error.
+public struct StationPlatformMarkersResponse: Codable, Sendable {
+    public var lat: Double
+    public var lon: Double
+    public var station: String?
+    public var found: Bool
+    public var platforms: [PlatformMarker]
+    public var reason: String?
+
+    public init(lat: Double, lon: Double, station: String? = nil,
+                found: Bool, platforms: [PlatformMarker] = [], reason: String? = nil) {
+        self.lat = lat; self.lon = lon; self.station = station
         self.found = found; self.platforms = platforms; self.reason = reason
     }
 }
@@ -397,28 +489,43 @@ public struct WalkKey: Codable, Hashable, Sendable {
     /// Station-map (browse) mode: include every platform at the station, not just
     /// the walked corridor's. A distinct cache key from the plain walk.
     public var allPlatforms: Bool
+    /// The platforms' real coordinates, forwarded so the server can snap a
+    /// feed-renumbered platform (whose code isn't in OSM) to the real one and draw
+    /// the same walk the verdict resolved. Nil for browse mode / normal stations.
+    public var fromLat: Double?
+    public var fromLon: Double?
+    public var toLat: Double?
+    public var toLon: Double?
     /// A facility to draw beside the walk (the "walk to nearest" door). When set,
     /// the fetched geometry carries this POI in its `details` layer as the focus.
     /// Part of the key, so a walk-with-facility caches apart from the plain walk.
     public var poi: WalkPOI?
 
     public init(relationId: Int, fromPlatform: String, toPlatform: String,
-                stepFree: Bool = false, allPlatforms: Bool = false, poi: WalkPOI? = nil) {
+                stepFree: Bool = false, allPlatforms: Bool = false,
+                fromLat: Double? = nil, fromLon: Double? = nil,
+                toLat: Double? = nil, toLon: Double? = nil, poi: WalkPOI? = nil) {
         self.relationId = relationId
         self.fromPlatform = fromPlatform
         self.toPlatform = toPlatform
         self.stepFree = stepFree
         self.allPlatforms = allPlatforms
+        self.fromLat = fromLat; self.fromLon = fromLon
+        self.toLat = toLat; self.toLon = toLon
         self.poi = poi
     }
 
     /// Build the key straight from a `Transfer` (nil if it never resolved a
-    /// relation/platforms, in which case there is no walk to fetch).
+    /// relation/platforms, in which case there is no walk to fetch). The feed's
+    /// platform refs stay the key (the server resolves them, snapping to the real
+    /// platform via the forwarded coordinates when the ref isn't in OSM).
     public init?(transfer: Transfer, stepFree: Bool = false) {
         guard let rel = transfer.relationId,
               let from = transfer.arrivalPlatform,
               let to = transfer.departurePlatform else { return nil }
-        self.init(relationId: rel, fromPlatform: from, toPlatform: to, stepFree: stepFree)
+        self.init(relationId: rel, fromPlatform: from, toPlatform: to, stepFree: stepFree,
+                  fromLat: transfer.arrLat, fromLon: transfer.arrLon,
+                  toLat: transfer.depLat, toLon: transfer.depLon)
     }
 }
 

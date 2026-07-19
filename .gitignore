@@ -18,4 +18,8 @@ ios/TransfrApp.xcodeproj/
 ios/TransfrApp/.swiftpm/
 ios/TransfrCore/.swiftpm/
 tokenfile
+gtfs_cache/nl.zip
+gtfs_cache/de.zip
+gtfs_cache/ch.zip
+gtfs_cache/be.zip
 .geo-cache/
