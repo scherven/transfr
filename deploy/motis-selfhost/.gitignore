@@ -1,0 +1,3 @@
+# Inputs (GTFS zip, OSM pbf) and MOTIS's built routing graph. Multi-GB; never
+# commit. The pipeline that produces them is fetch-data.sh + docker-compose.yml.
+data/

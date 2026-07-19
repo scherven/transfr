@@ -28,6 +28,7 @@ WHAT ACTUALLY CONNECTS FROM A GENERIC HOST (measured 2026-07-12):
     FormationUnavailable with the concrete reason when blocked.
 """
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -36,11 +37,14 @@ import requests
 from seat import PlatformGeometry
 from formation_model import CoachPlacement, NormalizedFormation, PlatformSectorMap
 
-_UA = "transfr/0.1 (+https://github.com/simonchervenak/transfr) data-process"
+_UA = "transfr/0.1 (+https://github.com/scherven/transfr) data-process"
 _TIMEOUT = 15
 
 DERF_BASE = "https://dbf.finalrewind.org"
-TRANSITOUS_PLAN = "https://api.transitous.org/api/v5/plan"
+# Same TRANSFR_MOTIS_BASE knob as api/config.MOTIS_BASE; core/ must not import the
+# api layer, so the env var is read directly here to keep the two in lockstep. A
+# self-hosted MOTIS (deploy/motis-selfhost/) moves this tooling path too.
+TRANSITOUS_PLAN = os.environ.get("TRANSFR_MOTIS_BASE", "https://api.transitous.org").rstrip("/") + "/api/v5/plan"
 # Canonical DB Wagenreihung endpoint (as used by juliuste/db-wagenreihung).
 # ist-wr.noncd.db.de is the newer host; apps-bahn.de the legacy one. Both are
 # geo-restricted -- see the module docstring.
