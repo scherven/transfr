@@ -273,10 +273,13 @@ def test_platform_centroids_real_berlin():
 
 
 @DB
-def test_build_facilities_degrades_without_pois_table():
-    # This host never loaded the `pois` table, so a real end-to-end call must
-    # degrade to no_poi_layer rather than raise (the honest-degradation contract).
+def test_build_facilities_degrades_when_poi_layer_absent(monkeypatch):
+    # Force the POI layer to report absent so the honest-degradation path runs even
+    # on a host where the `pois` table IS loaded. The station still resolves from the
+    # real DB, so this exercises resolve_station + the no_poi_layer branch together
+    # (hermetic: no dependence on whether this host happens to have a `pois` table).
     import db
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: False)
     conn = db.connect(connect_timeout=5)
     r = facilities.build_facilities(conn, 52.5251, 13.3694, "toilets")  # near Berlin Hbf
     assert not r.found and r.reason == NO_POI_LAYER
@@ -285,12 +288,14 @@ def test_build_facilities_degrades_without_pois_table():
 
 @DB
 def test_gather_pois_reads_the_pois_table():
-    """The DB-backed POI layer: a bbox SELECT over `pois`, no osmium. Creates the
-    table + a row inside a transaction and ROLLS BACK, so it never touches a real
-    loaded table (CREATE TABLE and INSERT both unwind) and needs no planet."""
+    """The DB-backed POI layer: a bbox SELECT over `pois`, no osmium. Inserts one row
+    at a REMOTE coordinate far from any real (regional) POI, inside a transaction it
+    ROLLS BACK -- so gather_pois over that bbox returns exactly our row regardless of
+    what the loaded table holds, and no ambient data leaks into the assertions."""
     import db
     conn = db.connect(connect_timeout=5)
     conn.autocommit = False
+    LAT, LON = 1.5, 1.5   # mid-ocean off West Africa: the (European/Korean) `pois` table has nothing here
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -301,15 +306,14 @@ def test_gather_pois_reads_the_pois_table():
             cur.execute(
                 "INSERT INTO pois (id, category, subtype, name, level, lat, lon) "
                 "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING",
-                (-999_001, "amenity", "toilets", "Test WC", "0", 52.5252, 13.3690),
+                (-999_001, "amenity", "toilets", "Test WC", "0", LAT, LON),
             )
             assert facilities.poi_layer_available(cur) is True
-            got = facilities.gather_pois(cur, facilities.station_bbox(52.5252, 13.3690))
-            assert "Test WC" in [g["name"] for g in got]
-            assert all(g["kind"] == "poi" and g["category"] == "amenity" for g in got)
-            # The bbox actually filters: a box over Madrid finds none of our Berlin row.
-            madrid = facilities.gather_pois(cur, facilities.station_bbox(40.0, -3.0))
-            assert "Test WC" not in [g["name"] for g in madrid]
+            got = facilities.gather_pois(cur, facilities.station_bbox(LAT, LON))
+            assert [g["name"] for g in got] == ["Test WC"]     # only our row is in-bbox
+            assert got[0]["kind"] == "poi" and got[0]["category"] == "amenity"
+            # The bbox actually filters: a box elsewhere finds none of our row.
+            assert facilities.gather_pois(cur, facilities.station_bbox(2.5, 2.5)) == []
     finally:
         conn.rollback()      # never persist the test table/row
         conn.close()
@@ -365,9 +369,11 @@ def test_build_facility_map_end_to_end_via_pois_table():
                 "subtype TEXT, name TEXT, level TEXT, lat DOUBLE PRECISION NOT NULL, "
                 "lon DOUBLE PRECISION NOT NULL)"
             )
-            for row in [(-999_101, "amenity", "toilets", "WC Main", "0", 52.5252, 13.3690),
-                        (-999_102, "amenity", "toilets", "WC Upper", "1", 52.5256, 13.3697),
-                        (-999_103, "amenity", "toilets", None, "-1", 52.5248, 13.3686)]:
+            # Placed on the query point so they rank nearest and survive any ranking
+            # cap, whatever else the loaded `pois` table has near Berlin Hbf.
+            for row in [(-999_101, "amenity", "toilets", "WC Main", "0", 52.5250, 13.3690),
+                        (-999_102, "amenity", "toilets", "WC Upper", "1", 52.5251, 13.3690),
+                        (-999_103, "amenity", "toilets", None, "-1", 52.5249, 13.3690)]:
                 cur.execute(
                     "INSERT INTO pois (id, category, subtype, name, level, lat, lon) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (id) DO NOTHING", row)
@@ -375,21 +381,28 @@ def test_build_facility_map_end_to_end_via_pois_table():
         # these uncommitted rows -- the real poi_layer_available + gather_pois run.
         r = facilities.build_facility_map(conn, 52.525, 13.369, "toilets")
         assert r.found is True and r.station == "Berlin Hauptbahnhof"
-        assert len(r.facilities) == 3
         det = r.export["details"]
-        assert len(det) == 3 and all(d.get("focus") for d in det)
+        # Alignment invariant (holds regardless of ambient rows): one pin per
+        # facility, in the same order, every one flagged focus + given an anchor.
+        assert len(det) == len(r.facilities)
         assert [d.get("name") for d in det] == [f.name for f in r.facilities]
+        assert all(d.get("focus") for d in det)
         assert all(f.nearest_platform for f in r.facilities)
+        # Our inserted rows sit on the query point, so they rank first and appear.
+        names = [f.name for f in r.facilities]
+        assert "WC Main" in names and "WC Upper" in names
+        assert len(r.facilities) >= 3
     finally:
         conn.rollback()      # never persist the test table/rows
         conn.close()
 
 
 @DB
-def test_build_facility_map_degrades_without_pois_table():
-    """The `pois` table was never loaded here -> honest no_poi_layer, station still
-    resolved (the honest-degradation contract, now DB-backed not planet-backed)."""
+def test_build_facility_map_degrades_when_poi_layer_absent(monkeypatch):
+    """Force the POI layer absent so the honest no_poi_layer degradation runs even on
+    a host where the `pois` table IS loaded; the station still resolves from the DB."""
     import db
+    monkeypatch.setattr(facilities, "poi_layer_available", lambda cur: False)
     conn = db.connect(connect_timeout=5)
     r = facilities.build_facility_map(conn, 52.525, 13.369, "toilets")
     assert r.found is False and r.reason == NO_POI_LAYER

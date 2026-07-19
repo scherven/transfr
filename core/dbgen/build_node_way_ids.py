@@ -36,12 +36,17 @@ def main() -> int:
             )
             conn.commit()
 
-            print("Truncating for a clean rebuild ...", flush=True)
-            cur.execute("TRUNCATE TABLE node_way_ids")
-            conn.commit()
-
-            print("Populating from osm_ways (this scans the full table once) ...", flush=True)
+            # TRUNCATE + repopulate in ONE transaction. A separate commit right
+            # after the TRUNCATE would drop the old rows the instant it ran, so any
+            # interrupt (Ctrl-C, crash, OOM, DB restart) during the long INSERT would
+            # leave node_way_ids committed-EMPTY -- and an empty adjacency table makes
+            # the engine return nothing for every platform, i.e. 100% of transfers
+            # become platform_not_found. Kept atomic, the rebuild either lands whole
+            # or the previous contents survive untouched.
+            print("Rebuilding from osm_ways (TRUNCATE + repopulate in one transaction; "
+                  "scans the full table once) ...", flush=True)
             t0 = time.monotonic()
+            cur.execute("TRUNCATE TABLE node_way_ids")
             cur.execute(
                 "INSERT INTO node_way_ids (node_id, way_ids) "
                 "SELECT node_id, array_agg(DISTINCT way_id) "
@@ -50,8 +55,9 @@ def main() -> int:
                 ") x "
                 "GROUP BY node_id"
             )
+            rows = cur.rowcount
             conn.commit()
-            print(f"Done in {time.monotonic() - t0:.1f}s, {cur.rowcount:,} nodes indexed.", flush=True)
+            print(f"Done in {time.monotonic() - t0:.1f}s, {rows:,} nodes indexed.", flush=True)
 
             print("Building index ...", flush=True)
             t0 = time.monotonic()
@@ -60,7 +66,8 @@ def main() -> int:
             print(f"Analyzed in {time.monotonic() - t0:.1f}s.", flush=True)
         return 0
     except KeyboardInterrupt:
-        print("\nInterrupted -- rolling back partial work (table is empty/unaffected).", flush=True)
+        print("\nInterrupted -- rolled back; the previous node_way_ids is left "
+              "intact (the TRUNCATE + repopulate is a single atomic transaction).", flush=True)
         conn.rollback()
         return 130
     finally:

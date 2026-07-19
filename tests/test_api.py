@@ -426,3 +426,98 @@ def test_walks_empty_batch_is_ok(client, monkeypatch):
     r = client.post("/walks", json={"keys": []})
     assert r.status_code == 200
     assert r.json() == {"walks": []}
+
+
+# ---------------------------------------------------------------------------
+# Beta access controls: API key + rate limit (api/security.py, api/config.py).
+# The single gate on the public tunnel -- previously untested, so a regression to
+# "accept any key" or a silent fail-open would have shipped green.
+# ---------------------------------------------------------------------------
+
+def test_api_key_required_when_configured(client, monkeypatch):
+    from api import config
+    monkeypatch.setattr(config, "API_KEY", "s3cret-key")
+    # /stations is a protected, DB-free route (CSV autocomplete).
+    assert client.get("/stations", params={"q": "Frankf"}).status_code == 401           # missing
+    assert client.get("/stations", params={"q": "Frankf"},
+                      headers={"X-API-Key": "nope"}).status_code == 401                  # wrong
+    ok = client.get("/stations", params={"q": "Frankf"}, headers={"X-API-Key": "s3cret-key"})
+    assert ok.status_code == 200                                                         # right
+    # /health stays open even with a key configured, for the tunnel/uptime probe.
+    assert client.get("/health").status_code == 200
+
+
+def test_api_open_when_no_key_configured(client, monkeypatch):
+    from api import config
+    monkeypatch.setattr(config, "API_KEY", "")
+    assert client.get("/stations", params={"q": "Frankf"}).status_code == 200
+
+
+def test_read_api_key_fails_closed_on_unreadable_file(monkeypatch, tmp_path):
+    from api import config
+    monkeypatch.delenv("TRANSFR_API_KEY", raising=False)
+    monkeypatch.setenv("TRANSFR_API_KEY_FILE", str(tmp_path / "does-not-exist"))
+    # A configured-but-unreadable key file must raise, not silently disable auth.
+    with pytest.raises(RuntimeError, match="could not be read"):
+        config._read_api_key()
+
+
+def test_read_api_key_fails_closed_on_empty_file(monkeypatch, tmp_path):
+    from api import config
+    p = tmp_path / "empty_key"
+    p.write_text("   \n")
+    monkeypatch.delenv("TRANSFR_API_KEY", raising=False)
+    monkeypatch.setenv("TRANSFR_API_KEY_FILE", str(p))
+    with pytest.raises(RuntimeError, match="empty"):
+        config._read_api_key()
+
+
+def test_read_api_key_reads_a_configured_file(monkeypatch, tmp_path):
+    from api import config
+    p = tmp_path / "key"
+    p.write_text("file-secret\n")
+    monkeypatch.delenv("TRANSFR_API_KEY", raising=False)
+    monkeypatch.setenv("TRANSFR_API_KEY_FILE", str(p))
+    assert config._read_api_key() == "file-secret"
+
+
+def test_env_api_key_takes_precedence_over_file(monkeypatch, tmp_path):
+    from api import config
+    p = tmp_path / "key"
+    p.write_text("from-file")
+    monkeypatch.setenv("TRANSFR_API_KEY", "from-env")
+    monkeypatch.setenv("TRANSFR_API_KEY_FILE", str(p))
+    assert config._read_api_key() == "from-env"
+
+
+def test_rate_limit_returns_429_with_retry_after():
+    # The app wires api.security.limiter with headers_enabled=True; confirm a limited
+    # route returns 429 + Retry-After once the ceiling is crossed. Uses a throwaway
+    # app + a unique path so it can't interfere with (or be interfered by) the shared
+    # in-memory counter of any other route.
+    from fastapi import FastAPI, Request, Response
+    from fastapi.testclient import TestClient as _TC
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    from slowapi.middleware import SlowAPIMiddleware
+
+    from api.security import limiter
+
+    app = FastAPI()
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
+
+    # `response` is required so slowapi (headers_enabled=True) can attach the
+    # X-RateLimit-* headers to the successful responses too.
+    @app.get("/__rl_probe")
+    @limiter.limit("2/minute")
+    def _probe(request: Request, response: Response):
+        return {"ok": True}
+
+    with _TC(app) as c:
+        assert c.get("/__rl_probe").status_code == 200
+        assert c.get("/__rl_probe").status_code == 200
+        blocked = c.get("/__rl_probe")
+        assert blocked.status_code == 429
+        assert "Retry-After" in blocked.headers
