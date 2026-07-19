@@ -33,10 +33,14 @@ enum Fmt {
     /// `now` is injectable so the boundary is testable.
     static func relativeDay(_ date: Date, now: Date = Date()) -> String {
         let cal = Calendar.current
-        if cal.isDateInToday(date) { return "Today" }
-        if cal.isDateInYesterday(date) { return "Yesterday" }
+        // Resolve "Today"/"Yesterday" against the injected `now`, NOT the system
+        // clock. `isDateInToday`/`isDateInYesterday` ignore `now`, which made the
+        // boundary untestable and returned the wrong label for any caller passing a
+        // `now` other than the real current date.
         let days = cal.dateComponents([.day], from: cal.startOfDay(for: date),
                                       to: cal.startOfDay(for: now)).day ?? 0
+        if days == 0 { return "Today" }
+        if days == 1 { return "Yesterday" }
         return (0...6).contains(days) ? weekday.string(from: date) : dayMonth.string(from: date)
     }
 

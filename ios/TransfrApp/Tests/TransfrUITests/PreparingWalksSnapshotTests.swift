@@ -9,8 +9,9 @@ import TransfrCore
 /// WalkSceneTests uses.
 final class PreparingWalksSnapshotTests: XCTestCase {
 
-    /// Frankfurt assesses instantly; Mannheim hangs, so the screen sits at
-    /// [feasible, pending].
+    /// A repository stub used only to construct the model; the test sets the
+    /// mid-stream [feasible, pending] state directly (see below), so `journeys` /
+    /// `assess` here aren't what drives the render.
     actor MixedRepo: JourneyRepository {
         func journeys(from: String, to: String, when: Date?, assess: Bool,
                       noElevators: Bool = false) async throws -> JourneysResponse {
@@ -20,7 +21,6 @@ final class PreparingWalksSnapshotTests: XCTestCase {
         func assess(_ interchanges: [AssessInterchange], noElevators: Bool = false) async throws -> [Transfer] {
             var out: [Transfer] = []
             for ic in interchanges {
-                if ic.atStation == "Mannheim Hbf" { try? await Task.sleep(nanoseconds: 60_000_000_000) }
                 out.append(Transfer(atStation: ic.atStation, relationId: 42,
                                     arrivalPlatform: ic.arrPlatform, departurePlatform: ic.depPlatform,
                                     layoverS: 600, walkTimeS: 66, walkDistanceM: 92, verdict: "feasible"))
@@ -68,18 +68,25 @@ final class PreparingWalksSnapshotTests: XCTestCase {
     """
 
     @MainActor
-    func testRenderTransitionScreenMidStream() async throws {
-        let model = TripModel(repository: MixedRepo())
-        await model.plan()
+    func testRenderTransitionScreenMidStream() throws {
+        // Construct the mid-stream state directly rather than racing the real verdict
+        // stream. `streamVerdicts` batches per JOURNEY, so a single journey's transfers
+        // resolve atomically (both pending -> both feasible): the transient
+        // [feasible, pending] this screen renders is never observable for one journey by
+        // waiting on the stream. What this test checks is the RENDER of that layout, so
+        // we build the state and render it deterministically -- no timing, no race.
+        let dec = JSONDecoder(); dec.keyDecodingStrategy = .convertFromSnakeCase
+        var resp = try dec.decode(JourneysResponse.self, from: Data(Self.json.utf8))
+        // First change assessed feasible; the second stays pending (as decoded).
+        resp.journeys[0].transfers[0] = Transfer(
+            atStation: "Frankfurt (Main) Hbf", relationId: 42,
+            arrivalPlatform: "6", departurePlatform: "12",
+            layoverS: 600, walkTimeS: 66, walkDistanceM: 92, verdict: "feasible")
 
-        // Wait until the first transfer is assessed while the second still streams.
-        let start = Date()
-        while !(model.journeys.first?.transfers.first?.verdictKind == .feasible
-                && model.journeys.first?.transfers.last?.verdictKind.isPending == true) {
-            if Date().timeIntervalSince(start) > 3 { break }
-            try? await Task.sleep(nanoseconds: 10_000_000)
-        }
-        model.select(try XCTUnwrap(model.journeys.first))
+        let model = TripModel(repository: MixedRepo())
+        model.response = resp
+        model.selectedIndex = 0
+
         XCTAssertEqual(model.transfers.first?.verdictKind, .feasible)
         XCTAssertEqual(model.transfers.last?.verdictKind, .pending)
 

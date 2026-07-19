@@ -75,11 +75,25 @@ def _read_api_key() -> str:
         return key
     path = os.environ.get("TRANSFR_API_KEY_FILE", "").strip()
     if path:
+        # A key FILE was explicitly configured, so auth is meant to be ON. If we
+        # can't read a usable key from it, fail CLOSED (raise) instead of returning
+        # "" -- an empty key silently makes require_api_key a no-op and would serve
+        # the tunnel unauthenticated. Refusing to start is the safe failure here.
         try:
             with open(path) as f:
-                return f.read().strip()
-        except OSError:
-            return ""
+                file_key = f.read().strip()
+        except OSError as e:
+            raise RuntimeError(
+                f"TRANSFR_API_KEY_FILE={path!r} is set but could not be read "
+                f"({type(e).__name__}: {e}); refusing to start with auth silently "
+                f"disabled -- fix the path/permissions or unset the variable."
+            ) from e
+        if not file_key:
+            raise RuntimeError(
+                f"TRANSFR_API_KEY_FILE={path!r} is set but empty; refusing to start "
+                f"with auth silently disabled -- put the key in the file or unset it."
+            )
+        return file_key
     return ""
 
 

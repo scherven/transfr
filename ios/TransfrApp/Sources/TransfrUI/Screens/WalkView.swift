@@ -36,6 +36,7 @@ struct WalkView: View {
                 modePicker
                 stage
                 statsRow
+                guidanceBox
                 steps
             }
             .padding(20)
@@ -196,52 +197,77 @@ struct WalkView: View {
         return d == 0 ? "0" : (d > 0 ? "+\(d)" : "−\(abs(d))")
     }
 
+    /// Turn-by-turn is shown ONLY when we have real `viz_export` geometry — never a
+    /// fabricated walkthrough. When `/walk` returns no geometry we say so in
+    /// `guidanceBox` instead of inventing "sector C / underpass" directions, which
+    /// would read as real wayfinding for a station we haven't actually mapped.
+    @ViewBuilder
     private var steps: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Eyebrow(text: "Turn by turn")
-            ForEach(currentSteps) { step in
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: step.icon).font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(.white)
-                        .frame(width: 26, height: 26)
-                        .background(Circle().fill(step.color))
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(step.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                        Text(step.sub).font(.system(size: 12)).foregroundStyle(Theme.ink3)
+        if let scene {
+            VStack(alignment: .leading, spacing: 10) {
+                Eyebrow(text: "Turn by turn")
+                ForEach(scene.turnByTurn(imperial: imperial, boarding: boarding)) { step in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: step.icon).font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 26, height: 26)
+                            .background(Circle().fill(step.color))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(step.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
+                            Text(step.sub).font(.system(size: 12)).foregroundStyle(Theme.ink3)
+                        }
                     }
                 }
             }
         }
     }
 
-    /// Derived from the real `transitions` when geometry is present; the synthesized
-    /// walkthrough only stands in for the sample tier / off-path lookups.
-    private var currentSteps: [WalkStep] {
-        if let scene { return scene.turnByTurn(imperial: imperial, boarding: boarding) }
-        return schematicSteps
+    /// Honest narration from the REAL geometry, or an honest "no drawable geometry"
+    /// state when `/walk` returned none — mirrors `WalkLookupView.guidanceBox`. The
+    /// schematic stage above is a diagram; this box makes clear it isn't the real path.
+    @ViewBuilder
+    private var guidanceBox: some View {
+        if let scene {
+            if !scene.found {
+                infoBox(icon: "exclamationmark.triangle.fill", tint: Theme.miss, bg: Theme.missSoft,
+                        lead: "These platforms aren't connected on the map.",
+                        body: " The change may still be walkable — the detailed indoor route just isn't mapped.")
+            } else if scene.transitions.isEmpty {
+                infoBox(icon: "figure.walk", tint: Theme.go, bg: Theme.goSoft,
+                        lead: "One level, step-free.",
+                        body: " Walk straight across between the platforms — no stairs.")
+            } else {
+                infoBox(icon: settings.avoidElevators ? "figure.stairs" : "figure.walk", tint: Theme.go, bg: Theme.goSoft,
+                        lead: connectorSummary(scene.transitions) + ".",
+                        body: settings.avoidElevators
+                            ? " Routed without lifts (Avoid lifts is on in Settings)."
+                            : " \(WalkScene.label(forLevel: scene.startLevel)) → \(WalkScene.label(forLevel: scene.endLevel)).")
+            }
+        } else if !loading {
+            infoBox(icon: "map", tint: Theme.ink2, bg: Theme.panel2,
+                    lead: "No drawable walk for this transfer yet.",
+                    body: " The platforms and timing are correct; this station just isn't mapped in enough detail to draw the indoor route. The diagram above is a schematic, not the real path.")
+        }
     }
 
-    private var schematicSteps: [WalkStep] {
-        guard let t = transfer else { return [] }
-        let from = t.arrivalPlatform ?? "?", to = t.departurePlatform ?? "?"
-        if !hasLevelChange {
-            return [
-                WalkStep(icon: "figure.walk", color: Theme.go,
-                         title: "Step off onto Platform \(from)", sub: "Platform \(to) is directly across the island"),
-                WalkStep(icon: "checkmark", color: Theme.accent,
-                         title: "Board on Platform \(to)", sub: "Same island — no stairs"),
-            ]
+    /// Distinct connector kinds along the path, e.g. "Escalator + lift".
+    private func connectorSummary(_ transitions: [VizExport.Transition]) -> String {
+        var seen: [String] = []
+        for t in transitions where !seen.contains(WalkConnector.verb(t.kind)) {
+            seen.append(WalkConnector.verb(t.kind))
         }
-        return [
-            WalkStep(icon: "clock", color: Theme.go,
-                     title: "Walk toward sector C", sub: "Platform \(from) · the stairwell is at C"),
-            WalkStep(icon: "stairs", color: Theme.stair,
-                     title: "Take the stairs down to the underpass", sub: "escalator alongside · level 0 → −1"),
-            WalkStep(icon: "arrow.right", color: Theme.accent,
-                     title: "Follow the underpass to the Platform \(to) stairwell", sub: "level −1"),
-            WalkStep(icon: "checkmark", color: Theme.accent,
-                     title: "Climb the stairs to Platform \(to)", sub: "your train boards here"),
-        ]
+        return seen.joined(separator: " + ")
+    }
+
+    private func infoBox(icon: String, tint: Color, bg: Color, lead: String, body: String) -> some View {
+        HStack(spacing: 10) {
+            SetIcon(icon, tint: tint, bg: bg)
+            (Text(lead).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.ink)
+             + Text(body).font(.system(size: 13)).foregroundColor(Theme.ink2))
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(bg))
     }
 
     /// The keystone hook. Asks the repository for real `viz_export` geometry and
