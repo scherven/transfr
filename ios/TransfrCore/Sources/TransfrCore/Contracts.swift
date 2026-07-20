@@ -49,6 +49,14 @@ public struct Transfer: Codable, Hashable, Sendable {
     /// cue to show the real platform with the feed's code as a hint.
     public var arrivalPlatformActual: String?
     public var departurePlatformActual: String?
+    /// Accessibility fact for this change of train, from DB InfraGO's CC0
+    /// OpenStation crosswalk (server `api/openstation.py`): `stepFree` is true only
+    /// when BOTH platforms are step-free, `hasLift` true when a lift serves either.
+    /// Nil where the overlay doesn't cover the platforms (outside Germany, or an
+    /// unrated quay) — an honest unknown, never a claim of "no". A true `stepFree`
+    /// is the cue to show the step-free / lift badge. Optional so old fixtures decode.
+    public var stepFree: Bool?
+    public var hasLift: Bool?
     /// The two stops' real coordinates, forwarded onto the `WalkKey` so the drawn
     /// walk can snap to the real platform when the feed's code isn't in OSM.
     public var arrLat: Double?
@@ -64,6 +72,7 @@ public struct Transfer: Codable, Hashable, Sendable {
     public init(atStation: String? = nil, relationId: Int? = nil,
                 arrivalPlatform: String? = nil, departurePlatform: String? = nil,
                 arrivalPlatformActual: String? = nil, departurePlatformActual: String? = nil,
+                stepFree: Bool? = nil, hasLift: Bool? = nil,
                 arrLat: Double? = nil, arrLon: Double? = nil,
                 depLat: Double? = nil, depLon: Double? = nil,
                 layoverS: Double? = nil, walkTimeS: Double? = nil, walkDistanceM: Double? = nil,
@@ -72,6 +81,7 @@ public struct Transfer: Codable, Hashable, Sendable {
         self.arrivalPlatform = arrivalPlatform; self.departurePlatform = departurePlatform
         self.arrivalPlatformActual = arrivalPlatformActual
         self.departurePlatformActual = departurePlatformActual
+        self.stepFree = stepFree; self.hasLift = hasLift
         self.arrLat = arrLat; self.arrLon = arrLon; self.depLat = depLat; self.depLon = depLon
         self.layoverS = layoverS; self.walkTimeS = walkTimeS; self.walkDistanceM = walkDistanceM
         self.verdict = verdict; self.reason = reason

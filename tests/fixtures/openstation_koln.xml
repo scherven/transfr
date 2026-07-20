@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Trimmed test fixture: one real StopPlace (Koeln Hbf, DHID de:05315:11201) from
+  DB InfraGO's CC0 "OpenStation" NeTEx export (https://bahnhof.de/daten/netex),
+  cut down to the elements core/dbgen/ingest_openstation_netex.py reads. Real
+  values throughout: island quays "Bahnsteig Gleis 1 / 6/7 / 8/9" carry their
+  equipment (lift) Centroid, an AccessibilityAssessment, and a LiftEquipmentRef;
+  the bare-number sub-quay "7" carries no coordinate and is dropped. The full
+  StopPlace is ~0.5 MB; this keeps only what the parser and its test exercise.
+  Source licence: DB InfraGO OpenStation, CC0 1.0 (public domain).
+-->
+<PublicationDelivery xmlns="http://www.netex.org.uk/netex" version="1784509331">
+  <dataObjects>
+    <CompositeFrame version="1784509331" id="epd:de:DB:CompositeFrame:EU_PI_STOP_OFFER:DB:test">
+      <frames>
+        <SiteFrame version="1784509331" id="epd:de:DB:SiteFrame:EU_PI_STOP_OFFER:DB:test">
+          <stopPlaces>
+            <StopPlace version="1781398893" id="dhid:de:05315:11201:EdB">
+              <keyList>
+                <KeyValue><Key>EVA</Key><Value>8000207</Value></KeyValue>
+              </keyList>
+              <Name lang="de">Köln Hbf</Name>
+              <AccessibilityAssessment version="0" id="dbinfrago:sp-a11y">
+                <MobilityImpairedAccess>partial</MobilityImpairedAccess>
+                <limitations>
+                  <AccessibilityLimitation id="dbinfrago:sp-lim">
+                    <WheelchairAccess>true</WheelchairAccess>
+                    <StepFreeAccess>true</StepFreeAccess>
+                  </AccessibilityLimitation>
+                </limitations>
+              </AccessibilityAssessment>
+              <ParentSiteRef ref="dhid:de:05315:11201" versionRef="any"/>
+              <quays>
+                <Quay version="1781398893" id="dhid:de:05315:11201:71">
+                  <Name lang="de">Bahnsteig Gleis 1</Name>
+                  <AccessibilityAssessment version="0" id="dbinfrago:q1-a11y">
+                    <MobilityImpairedAccess>true</MobilityImpairedAccess>
+                    <limitations>
+                      <AccessibilityLimitation id="dbinfrago:q1-lim">
+                        <WheelchairAccess>true</WheelchairAccess>
+                        <StepFreeAccess>true</StepFreeAccess>
+                      </AccessibilityLimitation>
+                    </limitations>
+                  </AccessibilityAssessment>
+                  <equipmentPlaces>
+                    <EquipmentPlace version="0" id="diid:q1-ep1">
+                      <Centroid><Location><Longitude>6.9578014</Longitude><Latitude>50.9430751</Latitude></Location></Centroid>
+                      <placeEquipments><LiftEquipmentRef ref="diid:q1-lift-a"/></placeEquipments>
+                    </EquipmentPlace>
+                    <EquipmentPlace version="0" id="diid:q1-ep2">
+                      <Centroid><Location><Longitude>6.956500</Longitude><Latitude>50.943903</Latitude></Location></Centroid>
+                      <placeEquipments><LiftEquipmentRef ref="diid:q1-lift-b"/></placeEquipments>
+                    </EquipmentPlace>
+                  </equipmentPlaces>
+                </Quay>
+                <Quay version="1781398893" id="dhid:de:05315:11201:76">
+                  <Name lang="de">Bahnsteig Gleis 6/7</Name>
+                  <AccessibilityAssessment version="0" id="dbinfrago:q67-a11y">
+                    <MobilityImpairedAccess>true</MobilityImpairedAccess>
+                    <limitations>
+                      <AccessibilityLimitation id="dbinfrago:q67-lim">
+                        <WheelchairAccess>true</WheelchairAccess>
+                        <StepFreeAccess>true</StepFreeAccess>
+                      </AccessibilityLimitation>
+                    </limitations>
+                  </AccessibilityAssessment>
+                  <equipmentPlaces>
+                    <EquipmentPlace version="0" id="diid:q67-ep1">
+                      <Centroid><Location><Longitude>6.9585662</Longitude><Latitude>50.9434381</Latitude></Location></Centroid>
+                      <placeEquipments><LiftEquipmentRef ref="diid:q67-lift"/></placeEquipments>
+                    </EquipmentPlace>
+                  </equipmentPlaces>
+                </Quay>
+                <Quay version="1781398893" id="dhid:de:05315:11201:77">
+                  <Name lang="de">7</Name>
+                </Quay>
+                <Quay version="1781398893" id="dhid:de:05315:11201:78">
+                  <Name lang="de">Bahnsteig Gleis 8/9</Name>
+                  <AccessibilityAssessment version="0" id="dbinfrago:q89-a11y">
+                    <MobilityImpairedAccess>true</MobilityImpairedAccess>
+                    <limitations>
+                      <AccessibilityLimitation id="dbinfrago:q89-lim">
+                        <WheelchairAccess>true</WheelchairAccess>
+                        <StepFreeAccess>true</StepFreeAccess>
+                      </AccessibilityLimitation>
+                    </limitations>
+                  </AccessibilityAssessment>
+                  <equipmentPlaces>
+                    <EquipmentPlace version="0" id="diid:q89-ep1">
+                      <Centroid><Location><Longitude>6.958803</Longitude><Latitude>50.9435372</Latitude></Location></Centroid>
+                      <placeEquipments><LiftEquipmentRef ref="diid:q89-lift"/></placeEquipments>
+                    </EquipmentPlace>
+                  </equipmentPlaces>
+                </Quay>
+              </quays>
+            </StopPlace>
+          </stopPlaces>
+        </SiteFrame>
+      </frames>
+    </CompositeFrame>
+  </dataObjects>
+</PublicationDelivery>

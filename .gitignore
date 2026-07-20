@@ -22,4 +22,8 @@ gtfs_cache/nl.zip
 gtfs_cache/de.zip
 gtfs_cache/ch.zip
 gtfs_cache/be.zip
+# DB OpenStation NeTEx download cache (~18 MB gz). The parsed overlay
+# openstation_labels.json (~0.5 MB) IS committed; regenerate it with
+# core/dbgen/ingest_openstation_netex.py when DB republishes.
+gtfs_cache/openstation_netex.xml.gz
 .geo-cache/

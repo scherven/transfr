@@ -70,6 +70,37 @@ struct ContractDecodeTests {
         #expect(t.verdictKind.raw == "unknown")
     }
 
+    /// The recovered platform sign + the DB OpenStation accessibility fact decode
+    /// off the wire (snake_case → camelCase). Köln's renumbered "89"/"88" carry the
+    /// real "7"/"6" and a step-free/lift flag.
+    @Test func decodesTransferActualAndAccessibility() throws {
+        let json = """
+        {"at_station":"Köln Hbf","relation_id":6875142,
+         "arrival_platform":"89","departure_platform":"88",
+         "arrival_platform_actual":"7","departure_platform_actual":"6",
+         "step_free":true,"has_lift":true,
+         "walk_time_s":12.8,"verdict":"feasible"}
+        """.data(using: .utf8)!
+        let t = try TransfrJSON.decode(Transfer.self, from: json)
+        #expect(t.arrivalPlatform == "89" && t.arrivalPlatformActual == "7")
+        #expect(t.departurePlatform == "88" && t.departurePlatformActual == "6")
+        #expect(t.stepFree == true)
+        #expect(t.hasLift == true)
+    }
+
+    /// A transfer without the new optional fields (an older server / fixture) still
+    /// decodes, with the accessibility flags nil — never a decode failure.
+    @Test func decodesTransferWithoutAccessibilityFields() throws {
+        let json = """
+        {"at_station":"Stuttgart Hbf","arrival_platform":"5","departure_platform":"14",
+         "verdict":"tight"}
+        """.data(using: .utf8)!
+        let t = try TransfrJSON.decode(Transfer.self, from: json)
+        #expect(t.stepFree == nil && t.hasLift == nil)
+        #expect(t.arrivalPlatformActual == nil)
+        #expect(t.verdictKind == .tight)
+    }
+
     // MARK: - /stations and /transfer contracts
 
     @Test func decodesStationSuggestions() throws {
