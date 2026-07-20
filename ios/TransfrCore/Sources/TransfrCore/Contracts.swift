@@ -28,6 +28,13 @@ public struct Leg: Codable, Hashable, Sendable {
     public var plannedArrival: String?
     public var departurePlatform: String?
     public var arrivalPlatform: String?
+    /// The SCHEDULED platform from the timetable (MOTIS `scheduledTrack`), distinct
+    /// from the LIVE `*Platform` above (`track`). Both are feed-supplied — present
+    /// for DACH/BeNeLux, nil for FR/IT/ES. `PlatformDisplay.make` turns the pair
+    /// into a planned / live / changed rendering. A different axis from
+    /// `*PlatformActual` below (a label correction), never conflated.
+    public var plannedDeparturePlatform: String?
+    public var plannedArrivalPlatform: String?
     /// Real platform sign when this leg boards/alights at a feed-renumbered
     /// platform (see `Transfer.arrivalPlatformActual`); nil otherwise.
     public var departurePlatformActual: String?
@@ -43,6 +50,14 @@ public struct Transfer: Codable, Hashable, Sendable {
     public var relationId: Int?
     public var arrivalPlatform: String?
     public var departurePlatform: String?
+    /// The SCHEDULED platform (MOTIS `scheduledTrack`) for each end, distinct from
+    /// the LIVE `*Platform` above (`track`). Feed-supplied (DACH/BeNeLux; nil for
+    /// FR/IT/ES) and mapped the same way, so they compare directly: live == planned
+    /// (or live nil) is the schedule's guess, live present and != planned is a
+    /// platform change. Feed into `PlatformDisplay.make`. A separate axis from the
+    /// `*PlatformActual` renumbering fields below.
+    public var plannedArrivalPlatform: String?
+    public var plannedDeparturePlatform: String?
     /// The real platform sign when `arrivalPlatform`/`departurePlatform` above is
     /// an internal feed code the station map doesn't carry (Köln Hbf "89" -> "7").
     /// Nil when the feed's label already is the real one; a non-nil value is the
@@ -63,6 +78,7 @@ public struct Transfer: Codable, Hashable, Sendable {
 
     public init(atStation: String? = nil, relationId: Int? = nil,
                 arrivalPlatform: String? = nil, departurePlatform: String? = nil,
+                plannedArrivalPlatform: String? = nil, plannedDeparturePlatform: String? = nil,
                 arrivalPlatformActual: String? = nil, departurePlatformActual: String? = nil,
                 arrLat: Double? = nil, arrLon: Double? = nil,
                 depLat: Double? = nil, depLon: Double? = nil,
@@ -70,6 +86,8 @@ public struct Transfer: Codable, Hashable, Sendable {
                 verdict: String, reason: String? = nil) {
         self.atStation = atStation; self.relationId = relationId
         self.arrivalPlatform = arrivalPlatform; self.departurePlatform = departurePlatform
+        self.plannedArrivalPlatform = plannedArrivalPlatform
+        self.plannedDeparturePlatform = plannedDeparturePlatform
         self.arrivalPlatformActual = arrivalPlatformActual
         self.departurePlatformActual = departurePlatformActual
         self.arrLat = arrLat; self.arrLon = arrLon; self.depLat = depLat; self.depLon = depLon
@@ -122,13 +140,21 @@ public struct AssessInterchange: Codable, Hashable, Sendable {
     public var depLon: Double?
     public var depPlatform: String?
     public var depTime: String?
+    /// The SCHEDULED platform (MOTIS `scheduledTrack`) for each end, forwarded from
+    /// the journey's legs so the streamed `/assess` verdict surfaces the same
+    /// planned-vs-live signal the bundled `/journeys` enrichment would. Encodes to
+    /// `planned_arr_platform` / `planned_dep_platform` via `.convertToSnakeCase`.
+    public var plannedArrPlatform: String?
+    public var plannedDepPlatform: String?
 
     public init(atStation: String? = nil,
                 arrLat: Double? = nil, arrLon: Double? = nil, arrPlatform: String? = nil, arrTime: String? = nil,
-                depLat: Double? = nil, depLon: Double? = nil, depPlatform: String? = nil, depTime: String? = nil) {
+                depLat: Double? = nil, depLon: Double? = nil, depPlatform: String? = nil, depTime: String? = nil,
+                plannedArrPlatform: String? = nil, plannedDepPlatform: String? = nil) {
         self.atStation = atStation
         self.arrLat = arrLat; self.arrLon = arrLon; self.arrPlatform = arrPlatform; self.arrTime = arrTime
         self.depLat = depLat; self.depLon = depLon; self.depPlatform = depPlatform; self.depTime = depTime
+        self.plannedArrPlatform = plannedArrPlatform; self.plannedDepPlatform = plannedDepPlatform
     }
 }
 

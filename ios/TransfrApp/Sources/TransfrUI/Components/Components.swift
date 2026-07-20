@@ -56,6 +56,49 @@ struct FeedCodeChip: View {
     }
 }
 
+/// A prominent "platform change" pill — the high-value realtime signal when the
+/// live platform diverges from the timetable's scheduled one. Warn-tinted
+/// (Theme.tight) with a swap glyph, so it reads as an alert distinct from the calm
+/// PlatformChip and the muted FeedCodeChip (a renumber note, a different axis).
+struct PlatformChangeChip: View {
+    let text: String
+    var accessibility: String? = nil
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.triangle.swap").font(.system(size: 10, weight: .bold))
+            Text(text).font(.system(size: 11, weight: .semibold, design: .monospaced))
+        }
+        .foregroundStyle(Theme.tight)
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(Capsule().fill(Theme.tightSoft))
+        .accessibilityElement()
+        .accessibilityLabel(accessibility ?? text)
+    }
+}
+
+/// One platform end: the number in a `PlatformChip`, plus a change pill when the live
+/// track diverged from the schedule. Renders nothing for `.none` (the honest empty
+/// state — FR/IT/ES carry no platform). We deliberately don't caption unchanged
+/// platforms as "planned": MOTIS echoes the scheduled track into the live one, so a
+/// scheduled platform can't be told from a confirmed one — only a genuine change is
+/// surfaced. Used for a leg's origin departure / terminal arrival, where the signal
+/// isn't already carried by an adjacent transfer card.
+struct PlatformEndStatus: View {
+    let display: PlatformDisplay
+    var prefix: String = "Platform"
+    var body: some View {
+        if let shown = display.shownNumber {
+            HStack(spacing: 8) {
+                PlatformChip(text: "\(prefix) \(shown)")
+                if case .changed(_, let from) = display {
+                    PlatformChangeChip(text: "was Pl \(from)",
+                                       accessibility: "platform changed from \(from)")
+                }
+            }
+        }
+    }
+}
+
 /// A rounded panel — the prototype's card surface, with the shared radius, a
 /// hairline border, and a soft shadow.
 struct Panel<Content: View>: View {

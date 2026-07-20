@@ -30,6 +30,15 @@ class Leg(BaseModel):
     planned_arrival: Optional[str] = None
     departure_platform: Optional[str] = None
     arrival_platform: Optional[str] = None
+    # The SCHEDULED platform from the timetable (MOTIS `scheduledTrack`), as opposed
+    # to the LIVE `*_platform` above (MOTIS `track`). Both come straight from the
+    # feed -- populated for DACH/BeNeLux, null for FR/IT/ES. The client renders the
+    # planned platform as a "planned · may change" guess, the live one overrides it,
+    # and a divergence (live present and != planned) is a platform change. This is a
+    # different axis from the `*_actual` fields below (a data-quality label
+    # correction), NOT planned-vs-live -- the two never conflate.
+    planned_departure_platform: Optional[str] = None
+    planned_arrival_platform: Optional[str] = None
     # Real platform sign when this leg boards/alights at a platform whose feed
     # label is an internal code OSM doesn't carry (Köln Hbf "89" -> "7"). Recovered
     # from the adjacent transfer's coordinate resolution; null when the feed's
@@ -49,6 +58,14 @@ class Transfer(BaseModel):
     relation_id: Optional[int] = None
     arrival_platform: Optional[str] = None
     departure_platform: Optional[str] = None
+    # The SCHEDULED platform (MOTIS `scheduledTrack`) for each end, as opposed to the
+    # LIVE `*_platform` above (`track`). Both are feed-supplied (DACH/BeNeLux; null
+    # for FR/IT/ES) and mapped the same way, so they compare directly: live == planned
+    # (or live absent) is the schedule's guess ("planned · may change"); live present
+    # and != planned is a platform change. A different axis from the `*_actual`
+    # renumbering fields below -- the client keeps them distinct.
+    planned_arrival_platform: Optional[str] = None
+    planned_departure_platform: Optional[str] = None
     # The real platform sign when the feed's label above is an internal code the
     # station map doesn't carry (e.g. Köln Hbf reports "89"/"88" for public tracks
     # 7/6). Recovered by coordinate; null when the feed's label already is the real
@@ -104,6 +121,12 @@ class AssessInterchange(BaseModel):
     dep_lon: Optional[float] = None
     dep_platform: Optional[str] = None
     dep_time: Optional[str] = None
+    # The SCHEDULED platform (MOTIS `scheduledTrack`) for each end, carried from the
+    # journey's legs so a streamed /assess verdict's Transfer surfaces the same
+    # planned-vs-live platform signal the bundled /journeys enrichment would.
+    # Display-only: the live platform, not the planned one, is what gets routed.
+    planned_arr_platform: Optional[str] = None
+    planned_dep_platform: Optional[str] = None
 
 
 class AssessRequest(BaseModel):

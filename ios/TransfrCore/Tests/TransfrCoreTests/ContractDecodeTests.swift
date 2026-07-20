@@ -36,6 +36,25 @@ struct ContractDecodeTests {
         #expect(j.legs[1].arrivalDelayS == 120)
         #expect(j.transfers[1].departurePlatform == "5")
         #expect(j.transfers[1].walkTimeS == 181.0)
+        // Scheduled platforms decode too (planned_departure_platform → camelCase).
+        #expect(j.legs[0].plannedDeparturePlatform == "7")   // live == planned (a guess)
+        #expect(j.legs[2].plannedDeparturePlatform == "8")   // live "5" != planned "8" (a change)
+        #expect(j.transfers[1].plannedDeparturePlatform == "8")
+        #expect(j.transfers[1].plannedArrivalPlatform == "4")
+    }
+
+    /// The decoded scheduled platform drives the planned/live/changed rendering:
+    /// the Mannheim onward train is a real platform change (live 5, planned 8).
+    @Test func plannedPlatformDrivesChangeDisplay() throws {
+        let data = try Self.fixture("journeys_hamburg_stuttgart")
+        let j = try #require(try TransfrJSON.decode(JourneysResponse.self, from: data).journeys.first)
+        let t = j.transfers[1]
+        let dep = PlatformDisplay.make(live: t.departurePlatform, planned: t.plannedDeparturePlatform,
+                                       actual: t.departurePlatformActual)
+        #expect(dep == .changed(current: "5", from: "8"))
+        let arr = PlatformDisplay.make(live: t.arrivalPlatform, planned: t.plannedArrivalPlatform,
+                                       actual: t.arrivalPlatformActual)
+        #expect(arr == .planned("4"))   // arrival unchanged ⇒ still the schedule's guess
     }
 
     // MARK: - worst-wins verdict (port of api/pipeline.py:rollup_verdict)
