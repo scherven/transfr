@@ -121,6 +121,18 @@ def map_track_to_ref(track: Optional[str]) -> Optional[str]:
     return stripped or ref
 
 
+def relation_coord(cur, relation_id: int) -> Optional[Tuple[float, float]]:
+    """The `station_points` centroid of a stop_area relation, or None.
+
+    The platform-label overlay is keyed by COORDINATE (see api/platform_labels),
+    but `/walk` and `/walks` identify a station only by `relation_id` -- this is
+    the hop between them, so a walk keyed by relation can still reach the overlay
+    coordinate of a platform OSM does not label."""
+    cur.execute("SELECT lat, lon FROM station_points WHERE relation_id = %s", (relation_id,))
+    row = cur.fetchone()
+    return (row["lat"], row["lon"]) if row else None
+
+
 # The real platform sign a traveller reads lives on a stop_position / railway=stop
 # NODE tagged with the public track number. When a feed labels the platform with a
 # code OSM doesn't carry (Koeln Hbf's DELFI "84-91" for public tracks 1-11), the

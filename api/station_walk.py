@@ -24,7 +24,7 @@ from typing import List
 from ground_truth import find_shortest_path  # resolved via api/__init__ sys.path
 from search_context import _natural_key, list_platform_refs
 
-from api import config, schemas
+from api import config, platform_labels, schemas
 from api.bridge import resolve_station
 from api.transfers import STATION_UNRESOLVED
 
@@ -58,6 +58,20 @@ def build_station_walk(conn, lat: float, lon: float, from_platform: str,
             )
         refs = list_platform_refs(cur, match.relation_id)
 
+    # Fold in the harvested overlay tracks (the labels OSM lacks) so this tool
+    # covers the SAME platform set the station map and /station-platforms offer --
+    # at Zürich HB OSM labels only 5 of ~25 tracks, so without this the tool
+    # silently omits most of the station. Each row is then anchored on its overlay
+    # coordinate, so a track OSM doesn't label still routes (core/ Tier-3) instead
+    # of returning platform_not_found.
+    feed = platform_labels.platform_markers(lat, lon)
+    if feed:
+        refs = sorted(
+            {*refs, *(str(p["track"]) for p in feed[1] if p.get("track") is not None)},
+            key=_natural_key,
+        )
+    from_coord = platform_labels.track_coord(lat, lon, from_platform)
+
     rows: List[schemas.StationWalkRow] = []
     for ref in refs:
         if ref == from_platform:
@@ -66,6 +80,8 @@ def build_station_walk(conn, lat: float, lon: float, from_platform: str,
             conn, match.relation_id, from_platform, ref,
             algorithm=_ALGORITHM, use_stitch_bridges=config.STITCH_BRIDGES,
             avoid_elevators=step_free,
+            from_coord=from_coord,
+            to_coord=platform_labels.track_coord(lat, lon, ref),
         )
         found = bool(result.get("found"))
         rows.append(schemas.StationWalkRow(
