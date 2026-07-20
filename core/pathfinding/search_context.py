@@ -215,8 +215,85 @@ def _nearest_stop_coord(cur, ref: str, bbox) -> Optional[Tuple[float, float]]:
     return (best["lat"], best["lon"])
 
 
+# Isolated-platform snap (see SearchContext._snap_isolated_platform): a resolved
+# platform that shares no node with any non-own walkable way is an OSM island
+# (Bruxelles-Midi pf 1, Koeln 'A' wing) -- A* from it returns `disconnected` even
+# though a same-level footway/platform lies metres away, unjoined. We bridge it to
+# the nearest walkable way, but only one whose level matches the platform's (the
+# LEVEL guard): the closest way is often a lower-level concourse footway a few
+# metres away, and snapping to it would fabricate a cross-level teleport with no
+# stairs. A candidate qualifies as "on level" when the level at its snapped node is
+# within this many floors of the platform's.
+ISOLATED_LEVEL_SNAP_DELTA = 0.5
+
+
+def _anchor_way(cur, way_row, anchor_node: int, coord_cache: Coords):
+    """Shape a fetched way row into the (way_id, nodes, tags) snap triple, tagging
+    it with the single node the source/target should anchor on (see _ANCHOR_KEY)
+    and loading any of the way's node coords still missing so the search can
+    measure edges from it immediately."""
+    nodes = list(way_row["nodes"])
+    missing = [n for n in nodes if n not in coord_cache]
+    if missing:
+        cur.execute("SELECT id, lat, lon FROM osm_nodes WHERE id = ANY(%s)", (missing,))
+        for x in cur.fetchall():
+            coord_cache[x["id"]] = (x["lat"], x["lon"])
+    return (way_row["id"], nodes, {**(way_row["tags"] or {}), _ANCHOR_KEY: anchor_node})
+
+
+def _way_level_at_node(triple, node: int, coord_cache: Coords) -> Optional[float]:
+    """The level a snapped way sits at, at its anchor node -- a flat way's own
+    level, or the interpolated level of a multi-level connector at that node
+    (mirrors SearchContext._level_at). None if the node's coord is unknown."""
+    _, nodes, tags = triple
+    return way_node_levels(nodes, coord_cache, parse_levels(tags.get("level"))).get(node)
+
+
+def _qualifying_walkable_way(cur, node: int, coord_cache: Coords, way_sql: str,
+                             level: Optional[float] = None,
+                             level_delta: float = ISOLATED_LEVEL_SNAP_DELTA,
+                             exclude_way_ids=None):
+    """The walkable way (matching way_sql) owning `node`, as a full anchored
+    triple -- or None.
+
+    With `level` None and no exclusions this is the original single-way lookup,
+    byte-for-byte: the first way_sql-matching way touching the node. When `level`
+    is given, only a way whose level AT this node is within `level_delta` floors
+    of it qualifies -- the LEVEL guard that stops an isolated upper-level platform
+    from snapping to a lower-level footway metres away. `exclude_way_ids` drops the
+    platform's own island polygon(s) so the snap escapes rather than latching back
+    onto them."""
+    cur.execute("SELECT way_ids FROM node_way_ids WHERE node_id = %s", (node,))
+    nw = cur.fetchone()
+    if not nw or not nw["way_ids"]:
+        return None
+    way_ids = [w for w in nw["way_ids"] if not exclude_way_ids or w not in exclude_way_ids]
+    if not way_ids:
+        return None
+    if level is None:
+        cur.execute(
+            f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {way_sql} LIMIT 1",
+            (way_ids,),
+        )
+        w = cur.fetchone()
+        return _anchor_way(cur, w, node, coord_cache) if w else None
+    cur.execute(
+        f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {way_sql}",
+        (way_ids,),
+    )
+    for w in cur.fetchall():
+        triple = _anchor_way(cur, w, node, coord_cache)
+        node_level = _way_level_at_node(triple, node, coord_cache)
+        if node_level is not None and abs(node_level - level) <= level_delta:
+            return triple
+    return None
+
+
 def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords,
-                          way_sql: str = NOT_WALKABLE_WAY_SQL):
+                          way_sql: str = NOT_WALKABLE_WAY_SQL,
+                          level: Optional[float] = None,
+                          level_delta: float = ISOLATED_LEVEL_SNAP_DELTA,
+                          exclude_way_ids=None):
     """The walkable way owning the node nearest to (lat, lon) within
     STOP_SNAP_RADIUS_M, as a full (way_id, nodes, tags) triple with its node
     coords cached -- i.e. the platform surface (a footway or a platform area)
@@ -234,7 +311,11 @@ def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords,
     way_sql restricts which owning way qualifies (a SQL fragment over `tags`).
     Tier 2 keeps the permissive NOT_WALKABLE_WAY_SQL default; Tier 3 passes a
     pedestrian-circulation predicate so an ambiguous caller coordinate can't snap
-    to an isolated non-path polygon (see _PEDESTRIAN_SNAP_WAY_SQL)."""
+    to an isolated non-path polygon (see _PEDESTRIAN_SNAP_WAY_SQL).
+
+    `level` / `exclude_way_ids` are the isolated-platform snap's extras (see
+    _qualifying_walkable_way): with both at their defaults the behaviour -- and
+    every result of the Tier 2 / Tier 3 caller that passes neither -- is unchanged."""
     min_lat, max_lat, min_lon, max_lon = bbox_from_coords({0: (lat, lon)}, STOP_SNAP_RADIUS_M)
     cur.execute(
         "SELECT id, lat, lon FROM osm_nodes "
@@ -245,23 +326,10 @@ def _nearest_walkable_way(cur, lat: float, lon: float, coord_cache: Coords,
     for r in rows:
         if haversine_meters(lat, lon, r["lat"], r["lon"]) > STOP_SNAP_RADIUS_M:
             break
-        cur.execute("SELECT way_ids FROM node_way_ids WHERE node_id = %s", (r["id"],))
-        nw = cur.fetchone()
-        if not nw or not nw["way_ids"]:
-            continue
-        cur.execute(
-            f"SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) AND {way_sql} LIMIT 1",
-            (list(nw["way_ids"]),),
-        )
-        w = cur.fetchone()
-        if w:
-            nodes = list(w["nodes"])
-            missing = [n for n in nodes if n not in coord_cache]
-            if missing:
-                cur.execute("SELECT id, lat, lon FROM osm_nodes WHERE id = ANY(%s)", (missing,))
-                for x in cur.fetchall():
-                    coord_cache[x["id"]] = (x["lat"], x["lon"])
-            return (w["id"], nodes, {**(w["tags"] or {}), _ANCHOR_KEY: r["id"]})
+        hit = _qualifying_walkable_way(cur, r["id"], coord_cache, way_sql,
+                                       level, level_delta, exclude_way_ids)
+        if hit is not None:
+            return hit
     return None
 
 
@@ -515,6 +583,25 @@ class SearchContext:
         if not self.sources or not self.targets:
             self.error = {"found": False, "reason": "no_coordinates_for_platform_nodes"}
             return
+
+        # Isolated-platform recovery: a platform resolved to an OSM island polygon
+        # (shares no node with the footway network -- Bruxelles-Midi pf 1, Koeln
+        # 'A' wing) makes A* return `disconnected` even though a same-level way lies
+        # metres away, just unjoined. Snap each such side onto the nearest ON-LEVEL
+        # walkable way so the search can leave it. A platform that already routes
+        # touches some non-own walkable way, so it is never isolated -- keeping this
+        # strictly additive (already-routing stations are byte-for-byte unchanged).
+        # source/target_by_coord is set so the display-label recovery still surfaces
+        # the real platform sign (api/transfers._recover_display_labels).
+        recovered = self._recover_isolated_platform(self.edges_1, self.sources)
+        if recovered is not None:
+            self.edges_1, self.sources = recovered
+            self.source_by_coord = True
+        recovered = self._recover_isolated_platform(self.edges_2, self.targets)
+        if recovered is not None:
+            self.edges_2, self.targets = recovered
+            self.target_by_coord = True
+
         if self.use_stitch_bridges:
             self._load_stitch_bridges()
 
@@ -592,6 +679,123 @@ class SearchContext:
         snapped = _nearest_walkable_way(self.cur, coord[0], coord[1], self.coord_cache,
                                         way_sql=_PEDESTRIAN_SNAP_WAY_SQL)
         return [snapped] if snapped is not None else []
+
+    # ---- Isolated-platform recovery (see _setup) --------------------------------
+
+    def _platform_level(self, edges) -> Optional[float]:
+        """The single level the resolved platform is tagged at, or None when it
+        carries no level tag or spans several. None means the isolated-platform
+        snap stays 2D (nearest walkable, any level) -- we don't invent a level.
+        Only an explicit tag counts: an untagged way *parses* to ground (0.0), but
+        'untagged' has to mean 'unknown' here, or every untagged island would
+        demand a ground-level join and reject a genuine same-level way above it."""
+        levels = set()
+        for _, _, tags in edges:
+            raw = tags.get("level")
+            if raw not in (None, ""):
+                levels.update(parse_levels(raw))
+        return next(iter(levels)) if len(levels) == 1 else None
+
+    def _way_connects_beyond(self, way_nodes, exclude_way_ids) -> bool:
+        """True when any walkable way OTHER than `exclude_way_ids` shares a node
+        with `way_nodes` -- i.e. this geometry is joined to the wider network, not
+        an island. One GIN `nodes && ARRAY` overlap probe (like _expand_via_gin_scan),
+        so it needs no adjacency table."""
+        self.cur.execute(
+            "SELECT 1 FROM osm_ways "
+            f"WHERE nodes && %s::bigint[] AND NOT (id = ANY(%s::bigint[])) AND {NOT_WALKABLE_WAY_SQL} "
+            "LIMIT 1",
+            (list(way_nodes), list(exclude_way_ids) or [0]),
+        )
+        return self.cur.fetchone() is not None
+
+    def _is_isolated_platform(self, edges) -> bool:
+        """True when the platform's edge geometry touches no walkable way other than
+        its own resolved edge(s) -- an OSM island polygon that shares no node with
+        the footway network. Such a platform makes A* return `disconnected` at once,
+        so it is exactly (and only) where the snap below may fire. A platform that
+        already routes must touch some non-own walkable way, so it is never flagged
+        -- which is what keeps the recovery strictly additive.
+
+        Tests the edge's WHOLE node set (not just the source anchor): a Tier 2/3
+        snapped edge anchors on one mid-way node, but the footway it sits on is
+        joined to the network elsewhere along its length, so anchor-only would
+        wrongly flag it and re-snap an already-connected platform."""
+        own = {w for w, _, _ in edges}
+        all_nodes = {n for _, nodes, _ in edges for n in nodes}
+        if not all_nodes:
+            return False
+        return not self._way_connects_beyond(all_nodes, own)
+
+    def _snap_isolated_platform(self, edges, anchor_nodes):
+        """Bridge an isolated platform onto the nearest ON-LEVEL, CONNECTED walkable
+        way.
+
+        Unlike the coordinate snap (a single point), this searches from the WHOLE
+        platform: a long island platform's join to the network can be at either
+        end, far from its centroid (Bruxelles-Midi pf 1 is ~570 m long), so we take
+        the nearest qualifying node over all of the platform's own nodes. Two
+        guards make the join real rather than a teleport:
+
+          * the LEVEL guard rejects the lower-level concourse footway a few metres
+            away in favour of the same-level way (Bruxelles pf 1 is level 1; the
+            footway 4 m off is level 0);
+          * the CONNECTED guard skips a candidate way that is itself an island --
+            pf 1's very nearest same-level neighbour (way 116006722, 7 m) shares no
+            node with the concourse either, so snapping onto it is no escape; the
+            nearest way that actually reaches the network is ~19 m out.
+
+        Returns one anchored edge triple, or [] when nothing on the platform's level
+        AND joined to the network is within STOP_SNAP_RADIUS_M -- then the search
+        stays honestly `disconnected` rather than teleporting across levels."""
+        own = {w for w, _, _ in edges}
+        level = self._platform_level(edges)
+        pts = {n: self.coord_cache[n] for n in anchor_nodes if n in self.coord_cache}
+        if not pts:
+            return []
+        min_lat, max_lat, min_lon, max_lon = bbox_from_coords(pts, STOP_SNAP_RADIUS_M)
+        self.cur.execute(
+            "SELECT id, lat, lon FROM osm_nodes WHERE lat BETWEEN %s AND %s AND lon BETWEEN %s AND %s",
+            (min_lat, max_lat, min_lon, max_lon),
+        )
+        candidates = []
+        for r in self.cur.fetchall():
+            if r["id"] in pts:
+                continue  # the platform's own nodes -- snapping to itself is no escape
+            dist = min(haversine_meters(r["lat"], r["lon"], p[0], p[1]) for p in pts.values())
+            if dist <= STOP_SNAP_RADIUS_M:
+                candidates.append((dist, r["id"]))
+        candidates.sort()  # nearest to the platform first
+        rejected: set = set()  # candidate ways already found to be islands themselves
+        for _, node in candidates:
+            hit = _qualifying_walkable_way(self.cur, node, self.coord_cache,
+                                           _PEDESTRIAN_SNAP_WAY_SQL, level,
+                                           ISOLATED_LEVEL_SNAP_DELTA, own)
+            if hit is None or hit[0] in rejected:
+                continue
+            if self._way_connects_beyond(hit[1], own | {hit[0]}):
+                return [hit]
+            rejected.add(hit[0])
+        return []
+
+    def _recover_isolated_platform(self, edges, anchor_nodes):
+        """If this side is an isolated island, snap it onto the connected network
+        and return (new_edges, new_anchor_nodes); else None. Registers the snapped
+        way in the caches so the search traverses out of it from the anchor node."""
+        if not self._is_isolated_platform(edges):
+            return None
+        snapped = self._snap_isolated_platform(edges, anchor_nodes)
+        if not snapped:
+            return None
+        for way_id, nodes, tags in snapped:
+            self.way_cache[way_id] = {"nodes": nodes, "tags": tags}
+            self.known_way_ids.add(way_id)
+            for n in set(nodes):
+                self.node_to_ways.setdefault(n, set()).add(way_id)
+        new_anchor = self._anchor_nodes(snapped)
+        if not new_anchor:
+            return None
+        return snapped, new_anchor
 
     def _candidates_in_station(self, predicate_sql: str, param) -> List[Tuple[int, List[int], Dict[str, str]]]:
         """Ways matching one tag predicate AND belonging to this station's
