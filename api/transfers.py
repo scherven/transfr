@@ -92,10 +92,18 @@ class TransferAssessment:
     station_name: Optional[str] = None
     arrival_platform: Optional[str] = None
     departure_platform: Optional[str] = None
+    # The SCHEDULED platform (MOTIS scheduledTrack) each end, mapped to a ref the
+    # same way as the live arrival/departure_platform above (which come from `track`).
+    # Display-only passthrough -- it does NOT affect the walk resolution (that routes
+    # the live platform). live == planned (or live absent) -> the schedule's guess;
+    # live present and != planned -> a platform change. See platform_display().
+    planned_arrival_platform: Optional[str] = None
+    planned_departure_platform: Optional[str] = None
     # The real platform sign, recovered by coordinate, when the feed's label above
     # is an internal code OSM doesn't carry (Koeln Hbf "89" -> actual "7"). None
     # when the feed label already is the real one -- so a non-None value is exactly
-    # the signal to show "platform <actual>" with the feed's code as a hint.
+    # the signal to show "platform <actual>" with the feed's code as a hint. This is
+    # a SEPARATE axis from planned-vs-live above (a label correction), never conflated.
     arrival_platform_actual: Optional[str] = None
     departure_platform_actual: Optional[str] = None
 
@@ -150,6 +158,54 @@ def classify(walk_time_s: Optional[float], layover_s: Optional[float],
     if layover_s < walk_time_s + buffer_s:
         return TIGHT
     return FEASIBLE
+
+
+# ---------------------------------------------------------------------------
+# Planned-vs-live platform display
+#
+# Each platform end carries a LIVE value (MOTIS `track`) and a PLANNED value
+# (`scheduledTrack`). This pure function is the single spec for how to render the
+# pair honestly; the iOS `PlatformDisplay` (TransfrCore) mirrors it exactly, the
+# way `Verdict` mirrors `classify`. It NEVER invents a number -- every `shown`
+# value it returns is one the feed supplied (live, planned, or the coordinate-
+# recovered `actual` sign). `actual` is the orthogonal renumbering correction
+# (Koeln "89" -> "7"): it relabels the LIVE platform for display but is never used
+# to decide whether a change happened (that compares the raw live/planned codes),
+# so a station whose feed merely renumbers a platform is not mistaken for a change.
+# ---------------------------------------------------------------------------
+
+# platform_display states
+PLATFORM_NONE = "none"            # neither live nor planned -> render nothing (FR/IT/ES)
+PLATFORM_CONFIRMED = "confirmed"  # live present, planned absent -> confirmed, no qualifier
+PLATFORM_PLANNED = "planned"      # planned present and (live absent or ==) -> "may change"
+PLATFORM_CHANGED = "changed"      # live present and != planned -> a platform change
+
+
+@dataclass
+class PlatformDisplay:
+    state: str                          # one of the PLATFORM_* constants
+    shown: Optional[str] = None         # the platform number to render (None for PLATFORM_NONE)
+    changed_from: Optional[str] = None  # the planned platform a change diverged from
+
+
+def _nonempty(s: Optional[str]) -> Optional[str]:
+    return s if s else None  # treat "" (and None) as absent
+
+
+def platform_display(live: Optional[str], planned: Optional[str],
+                     actual: Optional[str] = None) -> PlatformDisplay:
+    """Decide how to render one platform end from its live + planned (+ actual)
+    values. Pure; the rendering-decision spec both the API tests and the iOS
+    client (`PlatformDisplay.make`) follow."""
+    live, planned, actual = _nonempty(live), _nonempty(planned), _nonempty(actual)
+    shown_live = actual or live  # the actual sign relabels the live platform for display
+    if live is None and planned is None:
+        return PlatformDisplay(PLATFORM_NONE)
+    if live is not None and planned is not None and live != planned:
+        return PlatformDisplay(PLATFORM_CHANGED, shown=shown_live, changed_from=planned)
+    if planned is not None:  # live is None, or live == planned
+        return PlatformDisplay(PLATFORM_PLANNED, shown=shown_live or planned)
+    return PlatformDisplay(PLATFORM_CONFIRMED, shown=shown_live)  # planned None, live present
 
 
 def _recover_display_labels(conn, res: "WalkResolution", result: dict,
@@ -300,6 +356,8 @@ def assess_transfer(
     arr_platform: Optional[str], arr_time: Optional[str],
     dep_lat: Optional[float], dep_lon: Optional[float],
     dep_platform: Optional[str], dep_time: Optional[str],
+    planned_arr_platform: Optional[str] = None,
+    planned_dep_platform: Optional[str] = None,
     buffer_s: float = DEFAULT_BUFFER_S,
     algorithm: str = DEFAULT_ALGORITHM,
     max_search_seconds: Optional[float] = None,
@@ -318,7 +376,11 @@ def assess_transfer(
     The walk resolution (the costly part) is clock-independent; pass a shared
     `resolve_cache` dict to memoize it across every journey in one search, so a
     change of train appearing in several itineraries is pathfound once. Only the
-    layover and the final verdict are recomputed per call."""
+    layover and the final verdict are recomputed per call.
+
+    `planned_arr_platform`/`planned_dep_platform` (MOTIS scheduledTrack) are carried
+    onto the assessment for display only -- the live `arr_platform`/`dep_platform`
+    are what resolve_walk routes -- so they never enter the walk or its cache key."""
     lay = layover_seconds(arr_time, dep_time)
     if resolve_cache is None:
         r = resolve_walk(
@@ -344,6 +406,12 @@ def assess_transfer(
         verdict=UNKNOWN, layover_s=lay,
         relation_id=r.relation_id, station_name=r.station_name,
         arrival_platform=r.arrival_platform, departure_platform=r.departure_platform,
+        # Planned platforms are display-only: mapped the same way as the live refs
+        # (so they compare directly) but never routed, so they sit outside the walk
+        # resolution and its cache -- two itineraries sharing a walk can still differ
+        # here without a cache collision.
+        planned_arrival_platform=map_track_to_ref(planned_arr_platform),
+        planned_departure_platform=map_track_to_ref(planned_dep_platform),
         arrival_platform_actual=r.arrival_platform_actual,
         departure_platform_actual=r.departure_platform_actual,
         walk_time_s=r.walk_time_s, walk_distance_m=r.walk_distance_m,

@@ -39,6 +39,9 @@ def write(name: str, text: str) -> None:
 # --- /journeys: the canonical Hamburg -> Stuttgart ICE ----------------------
 # Göttingen 7->8 feasible + Mannheim 4->5 tight => journey verdict "tight"
 # (worst-wins). This is the throughline case DESIGN.md is grounded in.
+# Planned platforms mirror the live ones EXCEPT the final leg's departure, where
+# live "5" != planned "8" -- a platform change, exercising the planned/live/changed
+# rendering (PlatformDisplay) end to end. Every other end is a live==planned guess.
 resp = JourneysResponse(
     origin=Place(id="8002549", name="Hamburg Hbf", latitude=53.552736, longitude=10.006909),
     destination=Place(id="8098096", name="Stuttgart Hbf", latitude=48.784084, longitude=9.181635),
@@ -52,6 +55,7 @@ resp = JourneysResponse(
                 departure="2026-07-16T08:02:00+02:00", arrival="2026-07-16T09:47:00+02:00",
                 planned_departure="2026-07-16T08:02:00+02:00", planned_arrival="2026-07-16T09:47:00+02:00",
                 departure_platform="7", arrival_platform="7",
+                planned_departure_platform="7", planned_arrival_platform="7",
                 departure_delay_s=0, arrival_delay_s=0, distance_m=248000),
             Leg(mode="TRANSIT", train_name="ICE 273",
                 origin=Place(id="8000128", name="Göttingen"),
@@ -59,6 +63,7 @@ resp = JourneysResponse(
                 departure="2026-07-16T09:55:00+02:00", arrival="2026-07-16T12:19:00+02:00",
                 planned_departure="2026-07-16T09:55:00+02:00", planned_arrival="2026-07-16T12:19:00+02:00",
                 departure_platform="8", arrival_platform="4",
+                planned_departure_platform="8", planned_arrival_platform="4",
                 departure_delay_s=0, arrival_delay_s=120, distance_m=331000),
             Leg(mode="TRANSIT", train_name="ICE 592",
                 origin=Place(id="8000244", name="Mannheim Hbf"),
@@ -66,14 +71,18 @@ resp = JourneysResponse(
                 departure="2026-07-16T12:24:00+02:00", arrival="2026-07-16T13:03:00+02:00",
                 planned_departure="2026-07-16T12:24:00+02:00", planned_arrival="2026-07-16T13:03:00+02:00",
                 departure_platform="5", arrival_platform="16",
+                planned_departure_platform="8", planned_arrival_platform="16",
                 departure_delay_s=0, arrival_delay_s=0, distance_m=72000),
         ],
         transfers=[
             Transfer(at_station="Göttingen", relation_id=1234567, arrival_platform="7",
-                     departure_platform="8", layover_s=480, walk_time_s=42.0,
+                     departure_platform="8", planned_arrival_platform="7",
+                     planned_departure_platform="8", layover_s=480, walk_time_s=42.0,
                      walk_distance_m=18.0, verdict="feasible"),
+            # Mannheim onward train re-tracked 8 -> 5: departure is a platform change.
             Transfer(at_station="Mannheim Hbf", relation_id=2345678, arrival_platform="4",
-                     departure_platform="5", layover_s=300, walk_time_s=181.0,
+                     departure_platform="5", planned_arrival_platform="4",
+                     planned_departure_platform="8", layover_s=300, walk_time_s=181.0,
                      walk_distance_m=95.0, verdict="tight"),
         ],
     )],

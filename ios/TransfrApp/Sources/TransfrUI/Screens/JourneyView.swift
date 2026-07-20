@@ -77,7 +77,11 @@ struct JourneyView: View {
         var delay: String? = nil
         var late: Bool = false
         var station: String? = nil
-        var platform: String? = nil
+        /// Origin-departure / terminal-arrival platform with its planned/live/changed
+        /// state (nil for train/transfer rows, which surface platforms elsewhere).
+        var platformDisplay: PlatformDisplay? = nil
+        /// Terminal rows read "Arrives Pl N"; the origin reads "Platform N".
+        var arrivesPrefix = false
         var trainName: String? = nil
         var trainSub: String? = nil
         var trainDur: String? = nil
@@ -99,7 +103,10 @@ struct JourneyView: View {
 
         // Origin
         out.append(RowItem(kind: .station, time: Fmt.time(first.departure),
-                           station: first.origin.name, platform: first.departurePlatform,
+                           station: first.origin.name,
+                           platformDisplay: .make(live: first.departurePlatform,
+                                                  planned: first.plannedDeparturePlatform,
+                                                  actual: first.departurePlatformActual),
                            isFirst: true))
         out.append(RowItem(kind: .train, trainName: first.trainName,
                            trainSub: "dir. \(first.destination.name ?? "—")",
@@ -129,8 +136,10 @@ struct JourneyView: View {
         if let last = trains.last {
             out.append(RowItem(kind: .terminal, time: Fmt.time(last.arrival),
                                station: last.destination.name,
-                               platform: last.arrivalPlatform.map { "Arrives Pl \($0)" },
-                               isLast: true))
+                               platformDisplay: .make(live: last.arrivalPlatform,
+                                                      planned: last.plannedArrivalPlatform,
+                                                      actual: last.arrivalPlatformActual),
+                               arrivesPrefix: true, isLast: true))
         }
         return out
     }
@@ -186,8 +195,8 @@ private struct TimelineRow: View {
         case .station, .terminal:
             VStack(alignment: .leading, spacing: 6) {
                 Text(row.station ?? "—").font(.system(size: 17, weight: .bold)).foregroundStyle(Theme.ink)
-                if let p = row.platform {
-                    PlatformChip(text: p.hasPrefix("Arrives") ? p : "Platform \(p)")
+                if let pd = row.platformDisplay {
+                    PlatformEndStatus(display: pd, prefix: row.arrivesPrefix ? "Arrives Pl" : "Platform")
                 }
             }
         case .train:
@@ -229,10 +238,44 @@ struct TransferCard: View {
 
     private var v: Verdict { transfer.verdictKind }
 
-    // Show the real platform sign when the feed's code was recovered by
-    // coordinate (Köln Hbf "89" -> "7"); fall back to the feed's own label.
-    private var shownArr: String { transfer.arrivalPlatformActual ?? transfer.arrivalPlatform ?? "?" }
-    private var shownDep: String { transfer.departurePlatformActual ?? transfer.departurePlatform ?? "?" }
+    // Planned-vs-live state per end. `PlatformDisplay` folds in the actual-sign
+    // correction (Köln "89" -> "7") as the display label AND decides whether the
+    // live platform diverged from the schedule (a change). `shownArr`/`shownDep`
+    // are the current numbers for the "Pl A → D" chip.
+    private var arrDisp: PlatformDisplay {
+        .make(live: transfer.arrivalPlatform, planned: transfer.plannedArrivalPlatform,
+              actual: transfer.arrivalPlatformActual)
+    }
+    private var depDisp: PlatformDisplay {
+        .make(live: transfer.departurePlatform, planned: transfer.plannedDeparturePlatform,
+              actual: transfer.departurePlatformActual)
+    }
+    private var shownArr: String { arrDisp.shownNumber ?? "?" }
+    private var shownDep: String { depDisp.shownNumber ?? "?" }
+
+    private var anyChange: Bool { arrDisp.isChange || depDisp.isChange }
+
+    // The platform each re-tracked end diverged FROM (nil for an unchanged end).
+    private var changedFromArr: String? { if case .changed(_, let f) = arrDisp { return f }; return nil }
+    private var changedFromDep: String? { if case .changed(_, let f) = depDisp { return f }; return nil }
+
+    private var changeText: String? {
+        switch (changedFromArr, changedFromDep) {
+        case let (a?, d?): return "Platform change · arr was \(a), dep was \(d)"
+        case let (a?, nil): return "Platform change · arrival was Pl \(a)"
+        case let (nil, d?): return "Platform change · departure was Pl \(d)"
+        default: return nil
+        }
+    }
+    private var changeSpoken: String {
+        switch (changedFromArr, changedFromDep) {
+        case let (a?, d?):
+            return "Platform change: arrival now platform \(shownArr), was \(a); departure now platform \(shownDep), was \(d)"
+        case let (a?, nil): return "Platform change: arrival now platform \(shownArr), was platform \(a)"
+        case let (nil, d?): return "Platform change: departure now platform \(shownDep), was platform \(d)"
+        default: return ""
+        }
+    }
 
     // The timetable's own codes, for the hint pill -- only the ends that were
     // actually renumbered (an end left on its real label contributes nothing).
@@ -281,6 +324,14 @@ struct TransferCard: View {
                             walkItem("Left", Fmt.duration(Int(spare)), color: v == .tight ? Theme.tight : Theme.ink)
                         }
                     }
+                    // Only a real platform change is surfaced. MOTIS echoes the
+                    // scheduled track into the live one, so an unchanged platform
+                    // can't be told from a confirmed one -- we show the number bare
+                    // and flag only a genuine divergence (track != scheduled).
+                    if anyChange, let ct = changeText {
+                        PlatformChangeChip(text: ct, accessibility: changeSpoken)
+                    }
+                    // The feed-renumber hint (a separate axis) still rides along.
                     if let note = feedNote {
                         FeedCodeChip(text: note, accessibility: "The timetable lists \(feedNoteSpoken)")
                     }

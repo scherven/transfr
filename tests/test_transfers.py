@@ -20,7 +20,8 @@ from api.bridge import StationMatch  # noqa: E402
 from api.transfers import (  # noqa: E402
     FEASIBLE, INFEASIBLE, TIGHT, UNKNOWN,
     NO_PLATFORM_DATA, STATION_UNRESOLVED, CROSS_STATION, IMPLAUSIBLE_WALK,
-    assess_transfer, classify, layover_seconds, walk_is_implausible,
+    PLATFORM_NONE, PLATFORM_CONFIRMED, PLATFORM_PLANNED, PLATFORM_CHANGED,
+    assess_transfer, classify, layover_seconds, walk_is_implausible, platform_display,
     LiveTransfer, reassess,
 )
 
@@ -82,6 +83,35 @@ def test_classify(walk, layover, expected):
 ])
 def test_walk_is_implausible(walk_m, gap_m, implausible):
     assert walk_is_implausible(walk_m, gap_m) is implausible
+
+
+# ---------------------------------------------------------------------------
+# platform_display: the planned-vs-live rendering decision (pure; mirrored by
+# the iOS PlatformDisplay). Covers the four render cases the semantics name.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("live, planned, actual, state, shown, changed_from", [
+    # neither present -> render nothing (the FR/IT/ES honest empty state)
+    (None, None, None, PLATFORM_NONE, None, None),
+    ("", "", None, PLATFORM_NONE, None, None),          # empty strings count as absent
+    # planned only -> the schedule's guess
+    (None, "5", None, PLATFORM_PLANNED, "5", None),
+    # live == planned -> still just the schedule's guess (realtime hasn't moved it)
+    ("5", "5", None, PLATFORM_PLANNED, "5", None),
+    # live present and != planned -> a platform CHANGE, remembering the old one
+    ("8", "5", None, PLATFORM_CHANGED, "8", "5"),
+    # live present, planned absent -> confirmed, no "planned" qualifier
+    ("5", None, None, PLATFORM_CONFIRMED, "5", None),
+    # actual (renumber correction) relabels the live platform but must NOT be read
+    # as a change: Koeln feed "89" == planned "89", real sign "7" -> planned "7".
+    ("89", "89", "7", PLATFORM_PLANNED, "7", None),
+    ("89", None, "7", PLATFORM_CONFIRMED, "7", None),
+    # a genuine change AND a renumber compose: show the real sign, from the planned.
+    ("9", "5", "7", PLATFORM_CHANGED, "7", "5"),
+])
+def test_platform_display(live, planned, actual, state, shown, changed_from):
+    d = platform_display(live, planned, actual)
+    assert (d.state, d.shown, d.changed_from) == (state, shown, changed_from)
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +300,56 @@ def test_cache_result_matches_uncached(monkeypatch):
     uncached = assess_transfer(_FakeConn(), **kw)
     cached = assess_transfer(_FakeConn(), resolve_cache={}, **kw)
     assert uncached == cached
+
+
+# ---------------------------------------------------------------------------
+# Planned platform threading (scheduledTrack -> the assessment, display-only)
+# ---------------------------------------------------------------------------
+
+def test_planned_platforms_threaded_and_mapped(monkeypatch):
+    """The scheduled platforms reach the assessment, mapped to refs the same way
+    the live ones are (a 'Gl '/'Voie ' prefix stripped), so live and planned
+    compare directly downstream."""
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(1, "X", 50.1, 8.6, 5.0)],
+           lambda *a, **k: {"found": True, "walking_time_seconds": 90.0, "walking_distance_meters": 120.0})
+    a = assess_transfer(_FakeConn(), **_kw_layover(
+        600, arr_platform="7", dep_platform="9",
+        planned_arr_platform="7", planned_dep_platform="Gl 5"))
+    assert a.verdict == FEASIBLE
+    assert a.arrival_platform == "7" and a.departure_platform == "9"      # live
+    assert a.planned_arrival_platform == "7"                             # live == planned
+    assert a.planned_departure_platform == "5"                           # "Gl 5" -> "5" (a change)
+
+
+def test_planned_platforms_ride_outside_the_walk_cache(monkeypatch):
+    """Two itineraries sharing the same LIVE platforms (hence the same walk) but
+    carrying different PLANNED platforms must hit the one cached walk, yet each
+    keeps its own planned value -- proving planned sits outside the cache key."""
+    finds = []
+    _patch(monkeypatch, lambda *a, **k: [StationMatch(1, "X", 50.1, 8.6, 5.0)],
+           lambda *a, **k: finds.append(1) or {"found": True, "walking_time_seconds": 120.0, "walking_distance_meters": 150.0})
+    cache = {}
+    a = assess_transfer(_FakeConn(), resolve_cache=cache,
+                        **_kw_layover(600, planned_dep_platform="9"))   # planned == live -> guess
+    b = assess_transfer(_FakeConn(), resolve_cache=cache,
+                        **_kw_layover(600, planned_dep_platform="3"))   # planned != live -> change
+    assert len(finds) == 1 and len(cache) == 1, "the shared walk is resolved once"
+    assert a.planned_departure_platform == "9"
+    assert b.planned_departure_platform == "3"
+    assert a.walk_time_s == b.walk_time_s == 120.0
+
+
+def test_planned_platform_surfaces_even_without_a_live_platform(monkeypatch):
+    """A stop with only a scheduled platform (no live track) can't be routed, so the
+    verdict is honestly no_platform_data -- but the planned platform is still carried
+    so the client can show it as the schedule's guess."""
+    _patch(monkeypatch,
+           lambda *a, **k: pytest.fail("must not resolve a station without a live platform"),
+           lambda *a, **k: pytest.fail("must not route"))
+    a = assess_transfer(_FakeConn(), **_kw_layover(
+        600, arr_platform="7", dep_platform=None, planned_dep_platform="5"))
+    assert a.verdict == UNKNOWN and a.reason == NO_PLATFORM_DATA
+    assert a.planned_departure_platform == "5"
 
 
 # ---------------------------------------------------------------------------

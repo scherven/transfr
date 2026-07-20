@@ -433,7 +433,9 @@ public final class TripModel {
                 arrLat: arriving.destination.latitude, arrLon: arriving.destination.longitude,
                 arrPlatform: arriving.arrivalPlatform, arrTime: arriving.arrival,
                 depLat: departing.origin.latitude, depLon: departing.origin.longitude,
-                depPlatform: departing.departurePlatform, depTime: departing.departure
+                depPlatform: departing.departurePlatform, depTime: departing.departure,
+                plannedArrPlatform: arriving.plannedArrivalPlatform,
+                plannedDepPlatform: departing.plannedDeparturePlatform
             )
         }
     }
