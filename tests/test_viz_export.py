@@ -80,6 +80,18 @@ def test_platform_ref_prefers_ref_then_local_then_track():
     assert vx.platform_ref({}) is None                               # bare area
 
 
+def test_is_non_rail_platform_flags_other_modes_not_rail():
+    # A rail station map must not draw tram/bus platforms even though they share
+    # the station footprint. Explicit non-rail modes are dropped by kind...
+    assert vx._is_non_rail_platform({"railway": "platform", "tram": "yes"}) is True
+    assert vx._is_non_rail_platform({"railway": "platform", "bus": "yes"}) is True
+    assert vx._is_non_rail_platform({"railway": "platform", "trolleybus": "yes"}) is True
+    assert vx._is_non_rail_platform({"highway": "platform"}) is True   # bus island
+    # ...while a rail platform (tagged train=yes or nothing) is kept.
+    assert vx._is_non_rail_platform({"railway": "platform", "train": "yes"}) is False
+    assert vx._is_non_rail_platform({"railway": "platform"}) is False
+
+
 def test_seg_dist2_point_to_segment():
     # point on the segment -> 0
     assert vx._seg_dist2(1, 0, 0, 0, 2, 0) == 0.0
@@ -239,3 +251,98 @@ def test_way_for_hop_prefers_level_tagged_over_untagged_stub():
     node_to_ways = {10: {100, 200}, 11: {100, 200}, 12: {100}}
     assert vx.way_for_hop(10, 11, way_cache, node_to_ways) == 100
     assert vx.way_for_hop(11, 10, way_cache, node_to_ways) == 100
+
+
+# ---------------------------------------------------------------------------
+# DB-gated (TRANSFR_DB=1): the station-map export against transfr_eu --
+# GTFS-overlay track markers, the tram/bus declutter, and the degenerate
+# same-island walk that used to crash. Zurich HB carries the full overlay
+# (~25 tracks) and the '1;2' shared-island refs, so it exercises all three.
+# ---------------------------------------------------------------------------
+
+import pytest  # noqa: E402
+
+DB = pytest.mark.skipif(
+    os.environ.get("TRANSFR_DB") != "1",
+    reason="needs the transfr_eu DB; set TRANSFR_DB=1",
+)
+
+ZURICH_HB = 1532513   # stop_area relation; OSM refs only ~3 platforms, GTFS all ~25
+
+
+def _platform_ways(data):
+    return [w for w in data["ways"] if w["kind"] == "platform"]
+
+
+def _centroid(pts):
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
+@DB
+def test_all_platforms_markers_outnumber_osm_refs():
+    import db
+    conn = db.connect(connect_timeout=5)
+    data = vx.export(conn, ZURICH_HB, "3", "21", all_platforms=True)
+    meta, markers = data["meta"], data["platform_markers"]
+
+    assert meta["all_platforms"] is True
+    assert meta["n_platform_markers"] == len(markers)
+    # OSM tags only a few platform geometries with a ref; the GTFS overlay labels
+    # every track, so the map carries many more track labels than OSM alone.
+    osm_refs = {w.get("ref") for w in _platform_ways(data) if w.get("ref")}
+    assert len(markers) > len(osm_refs)
+    assert len(markers) >= 20          # Zurich HB has ~25 tracks
+    # One label per track, each with a projected coordinate and a level slot.
+    assert len({m["track"] for m in markers}) == len(markers)
+    for m in markers:
+        assert m["track"]
+        assert all(isinstance(m[k], (int, float)) for k in ("x", "y", "z"))
+        assert m["level"] is None or isinstance(m["level"], int)   # None -> ground
+
+
+@DB
+def test_no_platform_markers_when_all_platforms_false():
+    import db
+    conn = db.connect(connect_timeout=5)
+    data = vx.export(conn, ZURICH_HB, "3", "21")     # all_platforms defaults False
+    assert data["platform_markers"] == []
+    assert data["meta"]["all_platforms"] is False
+    assert data["meta"]["n_platform_markers"] == 0
+
+
+@DB
+def test_station_map_draws_no_tram_or_bus_platforms():
+    """Declutter: the station map is bounded to rail platforms near the tracks, so
+    no tram/bus platform surface is drawn even though the ~600 m footprint is full
+    of them, and every drawn platform sits at the rail core (not 700 m out)."""
+    import db
+    conn = db.connect(connect_timeout=5)
+    data = vx.export(conn, ZURICH_HB, "3", "21", all_platforms=True)
+    plats = _platform_ways(data)
+    assert plats, "the station map should draw at least the rail platforms it has"
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT id, tags FROM osm_ways WHERE id = ANY(%s)", ([w["id"] for w in plats],))
+        tags = {r["id"]: (r["tags"] or {}) for r in cur.fetchall()}
+    # Neither gate leaks: no drawn platform is tagged for another mode...
+    assert not [w["id"] for w in plats if vx._is_non_rail_platform(tags.get(w["id"], {}))]
+    # ...and none is centred out with the far tram stops (Stauffacher ~870 m away).
+    for w in plats:
+        cx, cy = _centroid(w["points"])
+        assert (cx * cx + cy * cy) ** 0.5 < 400.0
+
+
+@DB
+def test_same_island_platform_walk_is_degenerate_not_a_crash():
+    """Zurich HB '1' and '2' resolve to the one shared '1;2' island polygon, so the
+    search returns a found, zero-hop path with no drawn points. Building the
+    endpoints from pts[0] used to IndexError; it must now flag the path degenerate
+    and skip the endpoints instead."""
+    import db
+    conn = db.connect(connect_timeout=5)
+    data = vx.export(conn, ZURICH_HB, "1", "2")      # must not raise
+    path = data["path"]
+    assert path["found"] is True
+    assert path["points"] == []
+    assert path.get("degenerate") is True
+    assert "endpoints" not in path

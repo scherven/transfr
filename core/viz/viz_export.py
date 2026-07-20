@@ -50,7 +50,7 @@ for _p in (_VIZ_DIR, _CORE_DIR, os.path.join(_CORE_DIR, "pathfinding")):
 
 from algorithms import ALGORITHMS  # noqa: E402
 from db import connect  # noqa: E402
-from graph import is_walkable_way, load_station_ways, way_direction  # noqa: E402
+from graph import haversine_meters, is_walkable_way, load_station_ways, way_direction  # noqa: E402
 from search_context import SearchContext, list_platform_refs  # noqa: E402
 
 DEFAULT_FLOOR_HEIGHT_M = 4.0
@@ -327,6 +327,69 @@ def platform_level_from_graph(cur, node_ids: List[int]) -> Optional[float]:
     return None
 
 
+# --- GTFS platform-label overlay -------------------------------------------
+# OSM tags only a handful of platforms with a `ref` (Zurich HB: 3 of ~40 track
+# surfaces), so a map drawn from OSM alone shows almost no track numbers. The GTFS
+# feed carries a track number AND a real coordinate for EVERY track, harvested
+# offline into platform_labels.json by core/dbgen/harvest_platform_labels.py. In
+# station-map mode we place a label at each track's true coordinate -- the platform
+# edge, where the train stops -- so an island platform's two tracks get distinct,
+# correctly positioned labels (a polygon centroid could not). This is the station-
+# map twin of api/platform_labels.py's /station-platform-markers overlay.
+_PLATFORM_LABELS_PATH = os.environ.get("TRANSFR_PLATFORM_LABELS", "platform_labels.json")
+_PLATFORM_LABEL_MAX_M = 1500.0    # no overlay if the station is farther than this from every harvested one
+_PLATFORM_LABEL_MERGE_M = 300.0   # merge a complex's sub-nodes (Zurich HB + HB SZU); matches api/platform_labels
+_MARKER_LEVEL_SNAP_M = 60.0       # inherit a track's floor from a drawn platform this near, else ground
+_STATION_PLATFORM_KEEP_M = 200.0  # in station-map mode keep a platform surface only this near a rail anchor
+
+
+def _station_platform_tracks(station_lat: float, station_lon: float) -> List[Dict]:
+    """The GTFS-harvested tracks ({track, lat, lon, ...}) for the station complex
+    nearest (station_lat, station_lon): pick the nearest harvested entry, then merge
+    every entry within _PLATFORM_LABEL_MERGE_M of it (one complex is split across
+    several OSM station nodes), deduping by track. [] when the overlay file is
+    absent -- honest degradation, exactly like api/platform_labels."""
+    try:
+        with open(_PLATFORM_LABELS_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return []
+    anchor, best_d = None, _PLATFORM_LABEL_MAX_M
+    for entry in data.values():
+        try:
+            d = haversine_meters(station_lat, station_lon, entry["lat"], entry["lon"])
+        except (KeyError, TypeError):
+            continue
+        if d <= best_d:
+            anchor, best_d = entry, d
+    if anchor is None:
+        return []
+    merged: Dict[str, Dict] = {}
+    for entry in data.values():
+        try:
+            if haversine_meters(anchor["lat"], anchor["lon"], entry["lat"], entry["lon"]) > _PLATFORM_LABEL_MERGE_M:
+                continue
+        except (KeyError, TypeError):
+            continue
+        for p in entry.get("platforms", []):
+            track = p.get("track")
+            if track is not None and track not in merged and "lat" in p and "lon" in p:
+                merged[track] = p
+    return list(merged.values())
+
+
+def _is_non_rail_platform(tags: Dict) -> bool:
+    """True for a platform way that explicitly serves a NON-rail mode -- tram, bus,
+    trolleybus, or a highway=platform (bus island). In station-map mode these share
+    the rail station's ~600 m footprint, and a forecourt tram platform can sit metres
+    from a track (Zurich HB's Bahnhofquai/Bahnhofplatz trams), too close for the
+    distance gate to separate -- so they're dropped by kind. A plain
+    `railway=platform` with no mode tag is treated as rail (kept iff it is near a
+    track), so a sparsely tagged real rail platform is never lost."""
+    return (tags.get("tram") == "yes" or tags.get("bus") == "yes"
+            or tags.get("trolleybus") == "yes" or "highway" in tags)
+
+
 def _seg_dist2(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
     """Squared distance from point (px,py) to segment (ax,ay)-(bx,by)."""
     dx, dy = bx - ax, by - ay
@@ -601,6 +664,10 @@ def export(
     model. Unlike the `details=True` layer it needs NO planet extract, so it works
     on any host; and it's always kept (never radius-clipped), because the user
     chose it."""
+    # Reused across the two cursor blocks below: the GTFS track overlay for the
+    # station complex, resolved once in station-map mode (the all_platforms branch)
+    # and consumed again when the markers are projected. Empty otherwise.
+    station_tracks: List[Dict] = []
     with conn.cursor() as cur:
         name = _station_name(cur, relation_id)
         ctx = SearchContext(cur, relation_id, ref_1, ref_2, use_stitch_bridges=stitch,
@@ -612,12 +679,96 @@ def export(
         # not just the ones on the walked corridor. The whole-station radius
         # closure would also do this but is far too slow for a live request.
         if all_platforms:
+            # Track labels for the whole complex (GTFS overlay). Resolved once here,
+            # from the station's own seed-geometry centre (so it's independent of
+            # whether the walk resolved), and reused below both to ANCHOR the platform
+            # geometry and to place the markers -- one source of truth, one file read.
+            if ctx._seed_bbox is not None:
+                s_lat = (ctx._seed_bbox[0] + ctx._seed_bbox[1]) / 2.0
+                s_lon = (ctx._seed_bbox[2] + ctx._seed_bbox[3]) / 2.0
+                station_tracks = _station_platform_tracks(s_lat, s_lon)
+
+            # Rail anchors: where the tracks actually are -- the GTFS track coordinates
+            # (one per rail track, the definitive positions); or, where the overlay is
+            # absent, the two resolved endpoint platforms (always at the core, always
+            # rail). A station-map platform is drawn only if it runs within
+            # _STATION_PLATFORM_KEEP_M of an anchor AND is not tagged for another mode.
+            # Both gates are needed at a big hub: OSM ref resolution reaches into the
+            # padded seed bbox, so it pulls neighbouring same-numbered platforms (Zurich
+            # HB 'ref 1;2' lands on an SZU platform ~650 m south) and every tram/bus
+            # platform in the ~600 m footprint -- a forecourt tram sits metres from a
+            # track (too close for distance to separate) while an outer tram stop is an
+            # untagged railway=platform (invisible to the mode tag), so each gate
+            # catches what the other cannot.
+            anchor_ll = [(t["lat"], t["lon"]) for t in station_tracks]
+            if not anchor_ll:
+                anchor_ll = [ctx.coord_cache[n] for e in (ctx.edges_1 + ctx.edges_2)
+                             for n in e[1] if n in ctx.coord_cache]
+            _abox = None
+            if anchor_ll:
+                a_lats = [a[0] for a in anchor_ll]
+                a_lons = [a[1] for a in anchor_ll]
+                pad_lat = _STATION_PLATFORM_KEEP_M / 111_320.0
+                pad_lon = _STATION_PLATFORM_KEEP_M / (111_320.0 * max(0.1, math.cos(math.radians(sum(a_lats) / len(a_lats)))))
+                _abox = (min(a_lats) - pad_lat, max(a_lats) + pad_lat, min(a_lons) - pad_lon, max(a_lons) + pad_lon)
+
+            def _near_rail(nodes) -> bool:
+                """Any of `nodes` within _STATION_PLATFORM_KEEP_M of a rail anchor. A
+                cheap union-bbox pre-reject (any real hit lies inside it) guards the
+                precise per-anchor haversine, so a city's worth of far nodes costs a
+                couple of float compares each. No anchors -> nothing to gate on."""
+                if _abox is None:
+                    return True
+                for n in nodes:
+                    c = ctx.coord_cache.get(n)
+                    if c is None or not (_abox[0] <= c[0] <= _abox[1] and _abox[2] <= c[1] <= _abox[3]):
+                        continue
+                    if any(haversine_meters(c[0], c[1], a[0], a[1]) <= _STATION_PLATFORM_KEEP_M for a in anchor_ll):
+                        return True
+                return False
+
+            # Every platform ref at the station -> its (well-mapped, ref-bearing)
+            # platform-edge ways, through the two gates so a ref resolving into a
+            # neighbour is not force-drawn. The two walk endpoints are already in
+            # way_cache from _setup and so always drawn, consistent with the walk.
             for ref in list_platform_refs(cur, relation_id):
                 for way_id, nodes, tags in ctx._find_platform_edges_near(ref):
-                    if way_id not in ctx.way_cache:
-                        ctx.way_cache[way_id] = {"nodes": nodes, "tags": tags}
-        # Combined geometry pool: everything the search touched, in lat/lon.
-        ways: Dict[int, Dict] = {wid: dict(info) for wid, info in ctx.way_cache.items()}
+                    if way_id in ctx.way_cache:
+                        continue
+                    if _is_non_rail_platform(tags) or not _near_rail(nodes):
+                        continue
+                    ctx.way_cache[way_id] = {"nodes": nodes, "tags": tags}
+
+            # Most platform SURFACES carry no `ref`, so the ref loop misses them
+            # (Zurich HB: 3 of ~40). Pull the rail platform ways in the footprint so
+            # the map shows the shapes the labels sit on, through the same two gates.
+            station_way_ids = [w for w in (ctx._station_way_ids or set()) if w not in ctx.way_cache]
+            if station_way_ids:
+                cur.execute(
+                    "SELECT id, nodes, tags FROM osm_ways WHERE id = ANY(%s) "
+                    "AND tags->>'railway' IN ('platform', 'platform_edge')",
+                    (station_way_ids,),
+                )
+                candidates = [(r["id"], list(r["nodes"]), r["tags"] or {}) for r in cur.fetchall()
+                              if not _is_non_rail_platform(r["tags"] or {})]
+                ctx._load_nodes([n for _, nodes, _ in candidates for n in nodes if n not in ctx.coord_cache])
+                for wid, nodes, tags in candidates:
+                    if _near_rail(nodes):
+                        ctx.way_cache[wid] = {"nodes": nodes, "tags": tags}
+        # Combined geometry pool: everything the search touched, in lat/lon. In
+        # station-map mode drop any tram/bus platform, whichever code path put it in
+        # the cache -- the anchor/mode gates above screen the platforms we add, but
+        # the A* search's expand() also caches every way touching the walk's nodes, so
+        # a forecourt tram platform sharing a node with the concourse (Zurich HB's
+        # Bahnhofplatz) slips in behind them. A way actually ON the walk path is always
+        # kept (never leave the drawn route floating over a hole). Walk exports
+        # (all_platforms False) keep every touched way, byte-for-byte as before.
+        walk_way_ids = set(result.get("way_path") or [])
+        ways: Dict[int, Dict] = {
+            wid: dict(info) for wid, info in ctx.way_cache.items()
+            if wid in walk_way_ids or not (all_platforms and _is_non_rail_platform(info["tags"] or {})
+                                           and (info["tags"] or {}).get("railway") in ("platform", "platform_edge"))
+        }
         coords: Dict[int, Tuple[float, float]] = dict(ctx.coord_cache)
         context_mode = "touched"
 
@@ -790,11 +941,21 @@ def export(
             "stitch_segments": stitch_segments,
             "walking_time_seconds": result["walking_time_seconds"],
             "walking_distance_meters": result["walking_distance_meters"],
-            "endpoints": {
+        })
+        # Endpoints are the first/last drawn vertices -- but a degenerate walk has
+        # none. When both refs resolve to the SAME platform surface (Zurich HB '1'
+        # and '2' both live on the one '1;2' island polygon) the search returns a
+        # found, zero-hop path: node_path is a single node, so the hop loop above
+        # produces no points. Indexing pts[0] then raised IndexError. Flag it as
+        # degenerate and skip the endpoints rather than crash; a real (>=1 hop)
+        # walk is unaffected.
+        if pts:
+            path_json["endpoints"] = {
                 "start": {"ref": ref_1, "xyz": pts[0]},
                 "end": {"ref": ref_2, "xyz": pts[-1]},
-            },
-        })
+            }
+        else:
+            path_json["degenerate"] = True
     else:
         path_json["reason"] = result.get("reason")
 
@@ -832,6 +993,35 @@ def export(
             z = round(proj.z(lvl_i), 2)
             w["points"] = [[p[0], p[1], z] for p in w["points"]]
             levels_seen.add(float(lvl_i))
+
+    # Station-map platform labels: put every GTFS-harvested track (see
+    # _station_platform_tracks) at its true coordinate. OSM `ref` tags cover only a
+    # few platforms, so without this the map is nearly unlabelled; the feed has them
+    # all, positioned at the platform edge. Each marker inherits the level of the
+    # nearest drawn platform way within _MARKER_LEVEL_SNAP_M so it lands on the right
+    # floor of a multi-level station; beyond that it defaults to the ground plane,
+    # its horizontal position still exact. all_platforms (station-map) mode only, so
+    # a plain walk export is byte-for-byte unchanged.
+    platform_markers: List[Dict] = []
+    if all_platforms:
+        plat_pts = [(pt[0], pt[1], w["level"]) for w in ways_json
+                    if w["kind"] == "platform" and w.get("level") is not None
+                    for pt in w["points"]]
+        snap2 = _MARKER_LEVEL_SNAP_M ** 2
+        for tr in station_tracks:
+            mx, my = proj.xy(tr["lat"], tr["lon"])
+            level, best_d2 = None, snap2
+            for px, py, lv in plat_pts:
+                d2 = (px - mx) ** 2 + (py - my) ** 2
+                if d2 < best_d2:
+                    best_d2, level = d2, lv
+            z = round(proj.z(level), 2) if level is not None else 0.0
+            platform_markers.append({
+                "track": tr["track"], "x": round(mx, 2), "y": round(my, 2),
+                "z": z, "level": level,
+            })
+            if level is not None:
+                levels_seen.add(float(level))
 
     # Connector walk-relevance: flag each stairs/escalator/elevator/ramp the walk
     # actually TRAVERSES -- decided by topology (the connector way lies on the
@@ -908,10 +1098,13 @@ def export(
             "has_details": bool(details_json),
             "detail_radius_m": min(detail_radius_m, MAX_DETAIL_RADIUS_M) if details else 0,
             "n_details": len(details_json),
+            "all_platforms": all_platforms,
+            "n_platform_markers": len(platform_markers),
         },
         "ways": ways_json,
         "path": path_json,
         "details": details_json,
+        "platform_markers": platform_markers,
     }
 
 
@@ -935,6 +1128,9 @@ def main():
                          "route over stairs/escalators/ramps only")
     ap.add_argument("--detail-radius", type=float, default=DEFAULT_DETAIL_RADIUS_M,
                     help=f"how far out (metres) to gather details (<= {int(MAX_DETAIL_RADIUS_M)})")
+    ap.add_argument("--all-platforms", action="store_true",
+                    help="station-map mode: draw every platform surface at the station and label every "
+                         "track from the GTFS overlay (platform_labels.json), not just the OSM-tagged few")
     ap.add_argument("--out", default=None, help="output json path (default core/viz_out/<rel>_<ref1>_<ref2>.json)")
     args = ap.parse_args()
 
@@ -950,7 +1146,8 @@ def main():
                       algorithm=args.algorithm, radius_m=args.radius,
                       floor_height_m=args.floor_height,
                       details=args.details, detail_radius_m=args.detail_radius,
-                      stitch=args.stitch, avoid_elevators=args.avoid_elevators)
+                      stitch=args.stitch, avoid_elevators=args.avoid_elevators,
+                      all_platforms=args.all_platforms)
     except KeyboardInterrupt:
         print("\ninterrupted before export completed; nothing written.", file=sys.stderr)
         return

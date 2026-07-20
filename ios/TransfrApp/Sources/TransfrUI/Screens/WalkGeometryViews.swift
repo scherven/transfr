@@ -985,6 +985,21 @@ struct IsoGeometryCanvas: View {
     /// is exactly the previous behaviour: the plain OSM ref per platform.
     private func drawPlatformLabels(_ ctx: GraphicsContext, _ iso: IsoFit,
                                     _ ways: [VizExport.Way], focus: Int?) {
+        // Station-map export: the server already placed one label per track at its
+        // true position and floor (`platform_markers`, the GTFS overlay). Draw those
+        // directly — no island-snapping needed — one pill per track, hidden on other
+        // floors when a level is isolated. This supersedes the lat/lon feed-marker
+        // path below (used by walk views and older exports). A track OSM also labels
+        // is drawn neutral; a feed-only track is accent-filled (drawFeedCluster).
+        if let trackMarkers = scene.export.platformMarkers, !trackMarkers.isEmpty {
+            for m in trackMarkers {
+                if let f = focus, f != (m.level ?? 0) { continue }
+                let at = iso.map(Point3(x: Float(m.x), y: Float(m.y), z: Float(m.z)))
+                drawFeedCluster(ctx, at: at, tracks: [m.track], osm: osmPlatforms)
+            }
+            return
+        }
+
         struct Island { let center: Point3; let ref: String?; let level: Int }
         var islands: [Island] = []
         for way in ways where way.kind == "platform" {

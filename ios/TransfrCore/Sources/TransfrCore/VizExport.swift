@@ -33,6 +33,11 @@ public struct VizExport: Codable, Sendable {
     public var ways: [Way]
     public var path: Path
     public var details: [Detail]
+    /// Station-map (`meta.allPlatforms`) mode only: one label per platform track,
+    /// from the GTFS overlay, at its true projected position. OSM tags only a
+    /// handful of platforms with a `ref`, so these carry the track numbers the map
+    /// would otherwise lack. `nil` on walk exports and on older exports.
+    public var platformMarkers: [PlatformTrackMarker]?
 
     public struct Meta: Codable, Sendable {
         public var relationId: Int
@@ -53,6 +58,11 @@ public struct VizExport: Codable, Sendable {
         public var hasDetails: Bool
         public var detailRadiusM: Float
         public var nDetails: Int
+        /// True on a station-map export (browse mode), where `platformMarkers` is
+        /// populated and every platform is pulled in, not just the walked corridor.
+        /// `nil` on walk exports and on older exports.
+        public var allPlatforms: Bool?
+        public var nPlatformMarkers: Int?
     }
 
     public struct BBox: Codable, Sendable {
@@ -149,5 +159,23 @@ public struct VizExport: Codable, Sendable {
             self.dist = dist; self.xyz = xyz; self.points = points; self.outline = outline
             self.focus = focus
         }
+    }
+}
+
+/// One platform track's label on a station-map export (`VizExport.platformMarkers`),
+/// already projected into the export's local-ENU metres and lifted onto its floor
+/// (`z`) — the server-side twin of the lat/lon `PlatformMarker` feed overlay, so the
+/// client can draw it without re-projecting or snapping. `track` may be a compound
+/// like `41/42` (two faces of one island); `level` is the OSM floor it sits on, or
+/// `nil` when the data can't place it (then `z == 0`, the ground plane).
+public struct PlatformTrackMarker: Codable, Hashable, Sendable {
+    public var track: String
+    public var x: Double
+    public var y: Double
+    public var z: Double
+    public var level: Int?
+
+    public init(track: String, x: Double, y: Double, z: Double, level: Int? = nil) {
+        self.track = track; self.x = x; self.y = y; self.z = z; self.level = level
     }
 }
