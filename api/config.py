@@ -44,6 +44,16 @@ STITCH_BRIDGES = os.environ.get("TRANSFR_STITCH_BRIDGES", "1") != "0"
 # the CSV). Set TRANSFR_OSM_STATION_INDEX=1 for the Korea (transfr_kr) deployment.
 OSM_STATION_INDEX = os.environ.get("TRANSFR_OSM_STATION_INDEX", "0") != "0"
 
+# Base URL of the Transitous / MOTIS 2 routing service that answers /journeys.
+# Defaults to the public, community-hosted Transitous instance. Point it at a
+# self-hosted MOTIS (see deploy/motis-selfhost/) to step outside Transitous's
+# non-commercial + fair-use terms:  TRANSFR_MOTIS_BASE=http://localhost:8080
+# core/boarding/live_sources.py reads the SAME env var directly (it's core-layer
+# and must not import this api-layer module), so the served path and the tooling
+# path repoint together. Trailing slash is stripped so f"{base}/api/v5/plan" is
+# always well formed.
+MOTIS_BASE = os.environ.get("TRANSFR_MOTIS_BASE", "https://api.transitous.org").rstrip("/")
+
 # Default number of itinerary options requested from the journey provider.
 DEFAULT_MAX_JOURNEYS = _int("TRANSFR_MAX_JOURNEYS", 5)
 MAX_JOURNEYS_LIMIT = _int("TRANSFR_MAX_JOURNEYS_LIMIT", 10)
@@ -75,11 +85,25 @@ def _read_api_key() -> str:
         return key
     path = os.environ.get("TRANSFR_API_KEY_FILE", "").strip()
     if path:
+        # A key FILE was explicitly configured, so auth is meant to be ON. If we
+        # can't read a usable key from it, fail CLOSED (raise) instead of returning
+        # "" -- an empty key silently makes require_api_key a no-op and would serve
+        # the tunnel unauthenticated. Refusing to start is the safe failure here.
         try:
             with open(path) as f:
-                return f.read().strip()
-        except OSError:
-            return ""
+                file_key = f.read().strip()
+        except OSError as e:
+            raise RuntimeError(
+                f"TRANSFR_API_KEY_FILE={path!r} is set but could not be read "
+                f"({type(e).__name__}: {e}); refusing to start with auth silently "
+                f"disabled -- fix the path/permissions or unset the variable."
+            ) from e
+        if not file_key:
+            raise RuntimeError(
+                f"TRANSFR_API_KEY_FILE={path!r} is set but empty; refusing to start "
+                f"with auth silently disabled -- put the key in the file or unset it."
+            )
+        return file_key
     return ""
 
 

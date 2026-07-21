@@ -1,0 +1,42 @@
+# Timetable-only MOTIS 2 for the transfr self-host spike.
+#
+# Two steps share one ./data mount (gitignored):
+#   1. build the routing graph once:   docker compose --profile import run --rm import
+#   2. serve it:                        docker compose up motis
+# Then point transfr at it:            TRANSFR_MOTIS_BASE=http://localhost:8080
+#
+# UNVERIFIED, confirm before running (this file was written, not executed):
+#   * IMAGE TAG. `ghcr.io/motis-project/motis:latest` is the expected GHCR image;
+#     check the current tag/registry in the motis-project/motis README and pin a
+#     digest for reproducibility.
+#   * SUBCOMMAND SHAPE. MOTIS is `motis <config> <import|server>` per the docs;
+#     some builds want `-c config.yml`. Adjust `command:` to match the image you
+#     pull. The container reads config.yml from the working dir (/motis).
+#   * OUTPUT DIR. `motis import` writes the built graph into ./data; `server`
+#     reads it back. Both services mount the same volume so the graph persists.
+
+x-motis-common: &motis-common
+  image: ghcr.io/motis-project/motis:latest
+  working_dir: /motis
+  volumes:
+    - .:/motis          # config.yml + ./data/{ch.gtfs.zip, built graph}
+
+services:
+  # One-shot: ingest GTFS and build the graph, then exit. Give it plenty of RAM
+  # headroom -- timetable-only is light, but import is the peak. Bump if it OOMs.
+  import:
+    <<: *motis-common
+    profiles: ["import"]
+    command: ["config.yml", "import"]
+    deploy:
+      resources:
+        limits:
+          memory: 12g
+
+  # Long-running HTTP router on :8080. Serving a small timetable is <2 GB RAM.
+  motis:
+    <<: *motis-common
+    command: ["config.yml", "server"]
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

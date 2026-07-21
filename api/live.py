@@ -32,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional
 import requests
 
 from api.transfers import LiveTransfer, LiveVerdict, reassess
+from api.config import MOTIS_BASE
 
 _WALK_MODES = {"WALK", "BIKE", "CAR", "BIKE_SHARING", "CAR_SHARING", "SCOOTER_SHARING"}
 
@@ -110,7 +111,7 @@ def reassess_journey(
 
 
 def refresh_itinerary(itinerary_id: str, *,
-                      base_url: str = "https://api.transitous.org",
+                      base_url: str = MOTIS_BASE,
                       session: Optional[requests.Session] = None,
                       timeout: float = 15.0) -> Dict[str, Any]:
     """Fetch a realtime-refreshed itinerary from MOTIS. Experimental endpoint
