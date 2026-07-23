@@ -123,57 +123,111 @@ struct StatCell: View {
 }
 
 /// A circular countdown ring: `used`/`total` of the layover, coloured by verdict.
+///
+/// **Neither half is ever fabricated.** Both are optional and a `0` reads the same as
+/// `nil` (the server returns `walk_time_s: 0.0` for a walk it couldn't measure — the
+/// rule `Fmt.walkTime` and `Transfer.spareSeconds` already apply). The arc is a
+/// *proportion*, so it can only be stroked when both numbers are real; otherwise the
+/// track goes dashed and the missing half reads "—". An empty ring over a fabricated
+/// "0s" said the opposite of the truth — that this change needs no walking at all —
+/// and a `layover ?? 1` gave the same ring a confident "of 0m" beneath it.
 struct WalkRing: View {
-    let usedSeconds: Double
-    let totalSeconds: Double
+    let usedSeconds: Double?
+    let totalSeconds: Double?
     let verdict: Verdict
 
+    /// The walk time only when it's a usable figure; nil when it was never measured.
+    private var measured: Double? {
+        guard let s = usedSeconds, s > 0 else { return nil }
+        return s
+    }
+
+    /// The layover only when the journey actually carries one.
+    private var total: Double? {
+        guard let s = totalSeconds, s > 0 else { return nil }
+        return s
+    }
+
     private var fraction: Double {
-        guard totalSeconds > 0 else { return 0 }
-        return min(max(usedSeconds / totalSeconds, 0), 1)
+        guard let m = measured, let t = total else { return 0 }
+        return min(max(m / t, 0), 1)
     }
 
     var body: some View {
         ZStack {
-            Circle().stroke(Theme.panel2, lineWidth: 4)
-            Circle()
-                .trim(from: 0, to: fraction)
-                .stroke(verdict.color, style: StrokeStyle(lineWidth: 4, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 0) {
-                Text("\(Int(usedSeconds.rounded()))s")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Theme.ink)
-                Text("of \(Fmt.duration(Int(totalSeconds)))")
-                    .font(.system(size: 9)).foregroundStyle(Theme.ink3)
+            if let m = measured, total != nil {
+                Circle().stroke(Theme.panel2, lineWidth: 4)
+                Circle()
+                    .trim(from: 0, to: fraction)
+                    .stroke(verdict.color, style: StrokeStyle(lineWidth: 4, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                ringText("\(Int(m.rounded()))s")
+            } else {
+                Circle().stroke(Theme.nodata.opacity(0.45),
+                                style: StrokeStyle(lineWidth: 4, dash: [3, 5]))
+                ringText(measured.map { "\(Int($0.rounded()))s" } ?? "—")
             }
         }
         .frame(width: 62, height: 62)
     }
+
+    private func ringText(_ used: String) -> some View {
+        VStack(spacing: 0) {
+            Text(used)
+                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                .foregroundStyle(Theme.ink)
+            Text("of \(Fmt.duration(total.map { Int($0) }))")
+                .font(.system(size: 9)).foregroundStyle(Theme.ink3)
+        }
+    }
 }
 
 /// Primary / ghost button styling used on the CTAs.
+///
+/// Both render a real disabled state. They used to read only `isPressed`, so a
+/// `.disabled(…)` CTA — "Find connections" with an empty field, most visibly — was
+/// pixel-identical to a live one: the tap simply did nothing, with no cue as to why.
+/// `isEnabled` has to be read from a **View's** environment rather than the style's
+/// own (a `ButtonStyle` isn't a view, so an `@Environment` property on it doesn't
+/// track `.disabled`), hence the small inner body view in each.
 struct PrimaryButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 15)
-            .background(RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.accent))
-            .opacity(configuration.isPressed ? 0.85 : 1)
+    func makeBody(configuration: Configuration) -> some View { Content(configuration: configuration) }
+
+    // Not named `Body`: that's `ButtonStyle`'s own associated type, and a private
+    // nested type of that name is inferred as the conformance's `Body`.
+    private struct Content: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(isEnabled ? Color.white : Theme.ink3)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+                .background(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(isEnabled ? Theme.accent : Theme.panel3))
+                .opacity(isEnabled && configuration.isPressed ? 0.85 : 1)
+        }
     }
 }
 
 struct GhostButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 15, weight: .semibold))
-            .foregroundStyle(Theme.ink)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 13)
-            .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.panel2))
-            .opacity(configuration.isPressed ? 0.85 : 1)
+    func makeBody(configuration: Configuration) -> some View { Content(configuration: configuration) }
+
+    private struct Content: View {
+        let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+
+        var body: some View {
+            configuration.label
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(isEnabled ? Theme.ink : Theme.ink3)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.panel2))
+                .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.6)
+        }
     }
 }
 

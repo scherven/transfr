@@ -370,7 +370,7 @@ struct MapStop {
         for (i, t) in journey.transfers.enumerated() {
             guard let place = journey.legs[safe: i]?.destination,
                   let la = place.latitude, let lo = place.longitude else { continue }
-            let plat = "\(t.arrivalPlatform ?? "?")→\(t.departurePlatform ?? "?")"
+            let plat = "\(t.shownArrivalPlatform ?? "?")→\(t.shownDeparturePlatform ?? "?")"
             out.append(MapStop(lat: la, lon: lo, kind: .transfer(t.verdictKind),
                                name: t.atStation ?? place.name ?? "", plat: plat))
         }

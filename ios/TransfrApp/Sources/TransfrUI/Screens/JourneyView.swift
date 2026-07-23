@@ -39,7 +39,7 @@ struct JourneyView: View {
         VStack(spacing: 1) {
             Text("Your connection").font(.system(size: 16, weight: .semibold))
             if let j = journey {
-                Text("\(Fmt.time(j.departureISO)) → \(Fmt.time(j.arrivalISO)) · \(Fmt.duration(j.durationS)) · \(j.numChanges) changes")
+                Text("\(Fmt.time(j.departureISO)) → \(Fmt.time(j.arrivalISO)) · \(Fmt.duration(j.durationS)) · \(j.numChanges) change\(j.numChanges == 1 ? "" : "s")")
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.ink3)
             }
         }
@@ -54,12 +54,16 @@ struct JourneyView: View {
             }
             .buttonStyle(GhostButtonStyle())
 
-            Button {
-                model.path.append(.carousel(startIndex: 0))
-            } label: {
-                Label("Transfers (\(model.transfers.count))", systemImage: "figure.walk")
+            // A direct journey has no transfers, and the carousel over an empty list
+            // is a blank screen with nothing to swipe — so there's nothing to offer.
+            if !model.transfers.isEmpty {
+                Button {
+                    model.path.append(.carousel(startIndex: 0))
+                } label: {
+                    Label("Transfers (\(model.transfers.count))", systemImage: "figure.walk")
+                }
+                .buttonStyle(PrimaryButtonStyle())
             }
-            .buttonStyle(PrimaryButtonStyle())
         }
         .padding(.horizontal, 20).padding(.vertical, 12)
         .background(.thinMaterial)
@@ -97,9 +101,10 @@ struct JourneyView: View {
         let trains = j.legs.filter { $0.trainName != nil }
         guard let first = trains.first else { return out }
 
-        // Origin
+        // Origin. The shown platform, not the feed's raw code — the same rule the
+        // transfer cards below follow, so one journey reads one set of numbers.
         out.append(RowItem(kind: .station, time: Fmt.time(first.departure),
-                           station: first.origin.name, platform: first.departurePlatform,
+                           station: first.origin.name, platform: first.shownDeparturePlatform,
                            isFirst: true))
         out.append(RowItem(kind: .train, trainName: first.trainName,
                            trainSub: "dir. \(first.destination.name ?? "—")",
@@ -119,7 +124,7 @@ struct JourneyView: View {
                 out.append(RowItem(kind: .train,
                                    time: Fmt.time(departing.departure),
                                    trainName: departing.trainName,
-                                   trainSub: "Pl \(departing.departurePlatformActual ?? departing.departurePlatform ?? "—") · dir. \(departing.destination.name ?? "—")",
+                                   trainSub: "Pl \(departing.shownDeparturePlatform ?? "—") · dir. \(departing.destination.name ?? "—")",
                                    trainDur: dur(departing)))
             }
         }
@@ -129,7 +134,7 @@ struct JourneyView: View {
         if let last = trains.last {
             out.append(RowItem(kind: .terminal, time: Fmt.time(last.arrival),
                                station: last.destination.name,
-                               platform: last.arrivalPlatform.map { "Arrives Pl \($0)" },
+                               platform: last.shownArrivalPlatform.map { "Arrives Pl \($0)" },
                                isLast: true))
         }
         return out
@@ -231,8 +236,8 @@ struct TransferCard: View {
 
     // Show the real platform sign when the feed's code was recovered by
     // coordinate (Köln Hbf "89" -> "7"); fall back to the feed's own label.
-    private var shownArr: String { transfer.arrivalPlatformActual ?? transfer.arrivalPlatform ?? "?" }
-    private var shownDep: String { transfer.departurePlatformActual ?? transfer.departurePlatform ?? "?" }
+    private var shownArr: String { transfer.shownArrivalPlatform ?? "?" }
+    private var shownDep: String { transfer.shownDeparturePlatform ?? "?" }
 
     // The timetable's own codes, for the hint pill -- only the ends that were
     // actually renumbered (an end left on its real label contributes nothing).

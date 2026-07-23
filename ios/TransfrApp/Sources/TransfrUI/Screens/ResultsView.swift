@@ -64,7 +64,12 @@ struct ResultsView: View {
             Button {
                 model.select(journey)
             } label: {
-                JourneyCard(journey: journey, isBest: idx == 0)
+                // "Best" is a claim about the whole option, so it waits until this
+                // journey's verdicts are all in. Painted at `idx == 0` alone it
+                // appeared while the walks were still streaming — and was never
+                // revised, so a first option that settled `tight` (or with a change
+                // we couldn't assess) kept a badge saying it was the one to take.
+                JourneyCard(journey: journey, isBest: idx == 0 && !journey.hasPendingTransfers)
             }
             .buttonStyle(.plain)
         }
@@ -139,7 +144,9 @@ struct ResultsView: View {
     private var settledSubtitle: String {
         let f = DateFormatter(); f.locale = Locale(identifier: "en_GB"); f.dateFormat = "HH:mm"
         let n = model.journeys.count
-        return "Today · from \(f.string(from: model.departure)) · \(n) option\(n == 1 ? "" : "s")"
+        // The real departure day, not a hardcoded "Today" — the picker happily
+        // searches tomorrow or next week, and the header was calling all of it today.
+        return "\(Fmt.relativeFutureDay(model.departure)) · from \(f.string(from: model.departure)) · \(n) option\(n == 1 ? "" : "s")"
     }
 
     private func short(_ s: String) -> String {
@@ -276,8 +283,8 @@ struct JourneyCard: View {
         let v = t.verdictKind
         // Prefer the recovered public platform sign over the feed's internal code,
         // so a renumbered change (Köln "89→88") reads as the real "7→6".
-        let arr = t.arrivalPlatformActual ?? t.arrivalPlatform ?? "?"
-        let dep = t.departurePlatformActual ?? t.departurePlatform ?? "?"
+        let arr = t.shownArrivalPlatform ?? "?"
+        let dep = t.shownDeparturePlatform ?? "?"
         return HStack(spacing: 4) {
             Text(shortStation(t.atStation ?? "")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
             Text("\(arr)→\(dep)").font(.system(size: 11, weight: .medium, design: .monospaced)).opacity(0.7).lineLimit(1)
@@ -306,15 +313,10 @@ struct JourneyCard: View {
         .foregroundStyle(Theme.ink3)
     }
 
-    private var metaTag: String {
-        let pending = journey.transfers.filter { $0.verdictKind.isPending }.count
-        if pending > 0 { return "checking…" }
-        let tights = journey.transfers.filter { $0.verdictKind == .tight }.count
-        let unknowns = journey.transfers.filter { if case .unknown = $0.verdictKind { return true }; return false }.count
-        if unknowns > 0 { return "\(unknowns) unknown" }
-        if tights > 0 { return "\(tights) tight" }
-        return "all clear"
-    }
+    /// Shared with the transition screen (`Collection<Transfer>.verdictSummary`): an
+    /// `infeasible` change used to fall through every count here and print "all
+    /// clear" — in red, since the tint follows the rolled-up verdict.
+    private var metaTag: String { journey.transfers.verdictSummary }
 
     private func shortStation(_ s: String) -> String {
         s.replacingOccurrences(of: " Hbf", with: "")

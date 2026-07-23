@@ -99,8 +99,13 @@ struct TransferDetailCard: View {
                 Text(layoverLine).font(.system(size: 12)).foregroundStyle(Theme.ink3)
             }
             Spacer()
-            WalkRing(usedSeconds: transfer.walkTimeS ?? 0,
-                     totalSeconds: transfer.layoverS ?? 1, verdict: v)
+            // Both numbers are passed through as-is. An unmeasured walk used to
+            // arrive here as `?? 0`, which the ring drew as an empty arc reading
+            // "0s of 3m" — indistinguishable from a walk that takes no time at all;
+            // an unknown layover arrived as `?? 1` and read "of 0m", which is the
+            // same fabrication about the other half of the ring.
+            WalkRing(usedSeconds: transfer.walkTimeS,
+                     totalSeconds: transfer.layoverS, verdict: v)
         }
     }
 
@@ -110,9 +115,12 @@ struct TransferDetailCard: View {
 
     private var platformMove: some View {
         HStack(spacing: 14) {
-            platBig("Arrive", transfer.arrivalPlatform ?? "?", Theme.go)
+            // The recovered public sign, like every other screen — these are the
+            // biggest numbers in the app, so a feed code here contradicted the
+            // timeline card the user tapped to get in.
+            platBig("Arrive", transfer.shownArrivalPlatform ?? "?", Theme.go)
             Image(systemName: "arrow.right").font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.ink3)
-            platBig("Depart", transfer.departurePlatform ?? "?", Theme.accent)
+            platBig("Depart", transfer.shownDeparturePlatform ?? "?", Theme.accent)
             Spacer()
         }
     }

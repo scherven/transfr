@@ -75,8 +75,13 @@ struct PreparingWalksView: View {
         }
     }
 
+    /// `allSettled` only says the verdicts have landed — never that they were good.
+    /// This used to read "all clear" the moment the last one arrived, whatever it
+    /// said, so a change we'd just assessed as missed announced itself as fine on the
+    /// way to the timeline. The settled half is now the real worst-wins summary, the
+    /// same sentence the results card shows (`verdictSummary`).
     private var subtitle: String {
-        allSettled ? "all clear · \(transfers.count) transfer\(transfers.count == 1 ? "" : "s") assessed"
+        allSettled ? "\(transfers.verdictSummary) · \(transfers.count) transfer\(transfers.count == 1 ? "" : "s") assessed"
                    : "\(settled) of \(transfers.count) assessed"
     }
 
@@ -91,7 +96,7 @@ struct PreparingWalksView: View {
                 Text(detail(t)).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.ink3)
             }
             Spacer()
-            PlatformChip(text: "\(t.arrivalPlatform ?? "?")→\(t.departurePlatform ?? "?")")
+            PlatformChip(text: "\(t.shownArrivalPlatform ?? "?")→\(t.shownDeparturePlatform ?? "?")")
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 16, style: .continuous)

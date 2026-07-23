@@ -14,7 +14,10 @@ public final class TripModel {
     // example query that reads as something the user chose.
     public var origin: String = ""
     public var destination: String = ""
-    public var departure: Date = TripModel.defaultDeparture()
+    /// Now. A search opens on the next departures, not on a fixed wall-clock time —
+    /// the picker's "Leave now" is the same value, and the "Depart" chip reads it
+    /// back either way.
+    public var departure: Date = Date()
 
     // Current-location origin (agents/design/route-maps.html §3). `usingCurrentLocation`
     // drives the "From" field's location treatment and the route map's live origin
@@ -151,6 +154,12 @@ public final class TripModel {
             guard generation == planGeneration else { return }
             response = resp
             load = .loaded
+            // Remember the route only now the search has actually returned, so
+            // "Recent" is a list of queries that worked — never one the user typed
+            // and got an error for. Re-running the same route doesn't duplicate a
+            // row: `record` already drops the existing entry and re-inserts it at
+            // the front (`Array.recordingSearch`), which is also where the cap lives.
+            recents?.record(origin: origin, destination: destination)
             streamVerdicts()
         } catch {
             guard generation == planGeneration else { return }
@@ -460,13 +469,6 @@ public final class TripModel {
         }
         if error is URLError { return "No connection to the planning service." }
         return error.localizedDescription
-    }
-
-    private static func defaultDeparture() -> Date {
-        // The prototype opens at "Today · 08:34"; anchor to that wall-clock time.
-        var c = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        c.hour = 8; c.minute = 34
-        return Calendar.current.date(from: c) ?? Date()
     }
 }
 

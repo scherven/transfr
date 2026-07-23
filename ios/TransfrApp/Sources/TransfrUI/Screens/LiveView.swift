@@ -86,16 +86,17 @@ struct LiveView: View {
                     Text(spareLine(t)).font(.system(size: 13))
                         .foregroundStyle(v == .tight || v == .infeasible ? v.color : Theme.ink2)
                 }
-                // Step-off cue — real boarding once the walk resolves it.
-                BoardingStepoffCue(guidance: boarding, departurePlatform: t.departurePlatform ?? "?")
+                // Step-off cue — real boarding once the walk resolves it. Platforms
+                // read the recovered public sign, like every other screen.
+                BoardingStepoffCue(guidance: boarding, departurePlatform: t.shownDeparturePlatform ?? "?")
                     .padding(11)
                     .background(RoundedRectangle(cornerRadius: 11).fill(Theme.accentSoft))
 
                 // Platform move + Preview
                 HStack(spacing: 12) {
-                    moveEnd("Arrive", t.arrivalPlatform ?? "?")
+                    moveEnd("Arrive", t.shownArrivalPlatform ?? "?")
                     Image(systemName: "arrow.right").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink3)
-                    moveEnd("Depart", t.departurePlatform ?? "?")
+                    moveEnd("Depart", t.shownDeparturePlatform ?? "?")
                     Spacer()
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("Walk").font(.system(size: 11)).foregroundStyle(Theme.ink3)

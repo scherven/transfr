@@ -1,47 +1,46 @@
 import SwiftUI
 import TransfrCore
 
-/// The walk between two platforms — the prototype's `#s-walk`. Section / Levels
-/// tabs render with SwiftUI `Canvas` (DESIGN.md §13.3, "one contract, four
-/// renderers"). This first cut draws a **schematic** from the transfer's own
-/// fields; when `/walk` returns real `viz_export` geometry the same views project
-/// `export.path.points` instead (the hook is `loadGeometry()` below). 3D and AR
-/// are documented follow-ups.
+/// The walk between two platforms of a journey's change — the prototype's `#s-walk`.
+/// The surface itself is `WalkDetail`, shared with the verdict-free "Walk only" door
+/// (`WalkLookupView`), so the two can't drift again; this screen supplies the
+/// transfer's own fetch, its title, and the schematic it falls back to when `/walk`
+/// returns no geometry for the station.
 struct WalkView: View {
     @Environment(TripModel.self) private var model
     @Environment(SettingsStore.self) private var settings
     let transferIndex: Int
 
-    @State private var mode: Mode = .section
-    @State private var level: Int = 0
     @State private var scene: WalkScene?      // real geometry once /walk returns it
     @State private var boarding: BoardingGuidance?   // step-off guidance from the same /walk
     @State private var loading = true         // fetching that geometry (first load)
-
-    enum Mode: String, CaseIterable, Identifiable { case section, levels, threeD
-        var id: String { rawValue }
-        var label: String { self == .threeD ? "3D" : rawValue.capitalized }
-        var icon: String {
-            switch self { case .section: "chart.bar.xaxis"; case .levels: "square.stack.3d.up"; case .threeD: "cube" }
-        }
-    }
 
     private var transfer: Transfer? { model.transfers[safe: transferIndex] }
     private var hasLevelChange: Bool { (transfer?.verdictKind ?? .feasible) != .feasible }
     private var imperial: Bool { settings.units == .imperial }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                modePicker
-                stage
-                statsRow
-                guidanceBox
-                steps
+        WalkDetail(
+            scene: scene,
+            loading: loading,
+            fromRef: transfer?.shownArrivalPlatform ?? "?",
+            toRef: transfer?.shownDeparturePlatform ?? "?",
+            // The journey already measured this walk, so the facts stand before — and
+            // without — any geometry. The lookup door has only the export.
+            walkTimeS: transfer?.walkTimeS,
+            walkDistanceM: transfer?.walkDistanceM,
+            boarding: boarding,
+            schematicLevels: hasLevelChange
+                ? [WalkSchematicLevel(level: 0, label: "L0 · Platforms"),
+                   WalkSchematicLevel(level: -1, label: "L−1 · Underpass")]
+                : []
+        ) { mode, level in
+            switch mode {
+            case .section: SectionCanvas(transfer: transfer, hasLevelChange: hasLevelChange)
+            case .levels:  LevelCanvas(level: level, transfer: transfer, hasLevelChange: hasLevelChange)
+            case .threeD:  threeDPlaceholder
             }
-            .padding(20)
         }
-        .background(Theme.paper.ignoresSafeArea())
         .navigationTitle(transfer?.atStation ?? "Walk")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement: .principal) { principal } }
@@ -54,103 +53,10 @@ struct WalkView: View {
         VStack(spacing: 1) {
             Text(transfer?.atStation ?? "Walk").font(.system(size: 16, weight: .semibold))
             if let t = transfer {
-                Text("Platform \(t.arrivalPlatform ?? "?") → \(t.departurePlatform ?? "?") · \(Fmt.distance(t.walkDistanceM, imperial: imperial)) · \(Fmt.walkTime(t.walkTimeS))")
+                Text("Platform \(t.shownArrivalPlatform ?? "?") → \(t.shownDeparturePlatform ?? "?") · \(Fmt.distance(t.walkDistanceM, imperial: imperial)) · \(Fmt.walkTime(t.walkTimeS))")
                     .font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.ink3)
             }
         }
-    }
-
-    private var modePicker: some View {
-        HStack(spacing: 6) {
-            ForEach(Mode.allCases) { m in
-                Button { withAnimation(.snappy) { mode = m } } label: {
-                    Label(m.label, systemImage: m.icon)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(mode == m ? .white : Theme.ink2)
-                        .frame(maxWidth: .infinity).padding(.vertical, 9)
-                        .background(RoundedRectangle(cornerRadius: 11)
-                            .fill(mode == m ? Theme.accent : Theme.panel2))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var stage: some View {
-        switch mode {
-        case .section:
-            Panel(padding: 12, tint: Theme.panel) {
-                VStack(spacing: 10) {
-                    stageBox {
-                        if let scene { SectionGeometryCanvas(scene: scene) }
-                        else { SectionCanvas(transfer: transfer, hasLevelChange: hasLevelChange) }
-                    }
-                    legend([("Your path", Theme.accent), ("Stairs", Theme.stair),
-                            ("Escalator", Theme.esc), ("Elevator", Theme.elev)])
-                }
-            }
-        case .levels:
-            VStack(spacing: 10) {
-                levelPicker
-                Panel(padding: 12) {
-                    VStack(spacing: 10) {
-                        stageBox {
-                            if let scene { PlanGeometryCanvas(scene: scene, level: level) }
-                            else { LevelCanvas(level: level, transfer: transfer, hasLevelChange: hasLevelChange) }
-                        }
-                        legend([("Path", Theme.accent), ("Platform", Theme.panel3), ("Connector", Theme.stair)])
-                    }
-                }
-            }
-        case .threeD:
-            Panel(padding: 12) {
-                stageBox(height: 260) {
-                    if let scene { IsoGeometryCanvas(scene: scene) }
-                    else { threeDPlaceholder }
-                }
-            }
-        }
-    }
-
-    /// Fixed-height stage that shows a spinner over the first geometry fetch, so a
-    /// live walk never flashes the schematic before its real drawing arrives.
-    @ViewBuilder
-    private func stageBox<Content: View>(height: CGFloat = 210, @ViewBuilder _ content: () -> Content) -> some View {
-        ZStack {
-            content().frame(height: height).frame(maxWidth: .infinity)
-            if scene == nil && loading {
-                RoundedRectangle(cornerRadius: 12).fill(Theme.panel2).frame(height: height)
-                    .overlay(ProgressView())
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var levelPicker: some View {
-        // `pathLevels`, not `levelsAsc`: the canvas draws the path, so the picker
-        // must offer the floors the path visits. `levelsAsc` is the union over every
-        // context way the search touched and tabs floors the walk never reaches —
-        // Dortmund 11→4 offered L−2, which drew a floor with no route on it (#53).
-        if let scene, scene.pathLevels.count > 1 {
-            Picker("Level", selection: $level) {
-                ForEach(scene.pathLevels.reversed(), id: \.self) { lvl in
-                    Text(levelPickerLabel(lvl, scene)).tag(lvl)
-                }
-            }.pickerStyle(.segmented)
-        } else if scene == nil && hasLevelChange {
-            Picker("Level", selection: $level) {
-                Text("L0 · Platforms").tag(0)
-                Text("L−1 · Underpass").tag(-1)
-            }.pickerStyle(.segmented)
-        }
-    }
-
-    private func levelPickerLabel(_ lvl: Int, _ scene: WalkScene) -> String {
-        var s = WalkScene.label(forLevel: lvl)
-        if lvl == scene.startLevel { s += " · off" }
-        else if lvl == scene.endLevel { s += " · board" }
-        return s
     }
 
     private var threeDPlaceholder: some View {
@@ -166,122 +72,16 @@ struct WalkView: View {
         }
     }
 
-    private func legend(_ items: [(String, Color)]) -> some View {
-        HStack(spacing: 14) {
-            ForEach(items, id: \.0) { name, color in
-                HStack(spacing: 5) {
-                    Circle().fill(color).frame(width: 8, height: 8)
-                    Text(name).font(.system(size: 11)).foregroundStyle(Theme.ink3)
-                }
-            }
-            Spacer()
-        }
-    }
-
-    private var statsRow: some View {
-        HStack {
-            StatCell(key: "Walk time", value: Fmt.walkTime(transfer?.walkTimeS))
-            StatCell(key: "Distance", value: Fmt.distance(transfer?.walkDistanceM, imperial: imperial))
-            StatCell(key: "Levels", value: levelsStat)
-        }
-    }
-
-    /// The deepest level the path drops to relative to where you step off — real
-    /// when geometry is loaded, the `hasLevelChange` proxy otherwise.
-    private var levelsStat: String {
-        guard let scene else { return hasLevelChange ? "−1" : "0" }
-        let levels = scene.pathLevels
-        guard let lo = levels.min(), let hi = levels.max(), lo != hi else { return "0" }
-        let deepest = abs(lo - scene.startLevel) >= abs(hi - scene.startLevel) ? lo : hi
-        let d = deepest - scene.startLevel
-        return d == 0 ? "0" : (d > 0 ? "+\(d)" : "−\(abs(d))")
-    }
-
-    /// Turn-by-turn is shown ONLY when we have real `viz_export` geometry — never a
-    /// fabricated walkthrough. When `/walk` returns no geometry we say so in
-    /// `guidanceBox` instead of inventing "sector C / underpass" directions, which
-    /// would read as real wayfinding for a station we haven't actually mapped.
-    @ViewBuilder
-    private var steps: some View {
-        if let scene {
-            VStack(alignment: .leading, spacing: 10) {
-                Eyebrow(text: "Turn by turn")
-                ForEach(scene.turnByTurn(imperial: imperial, boarding: boarding)) { step in
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: step.icon).font(.system(size: 12, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 26, height: 26)
-                            .background(Circle().fill(step.color))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(step.title).font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.ink)
-                            Text(step.sub).font(.system(size: 12)).foregroundStyle(Theme.ink3)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    /// Honest narration from the REAL geometry, or an honest "no drawable geometry"
-    /// state when `/walk` returned none — mirrors `WalkLookupView.guidanceBox`. The
-    /// schematic stage above is a diagram; this box makes clear it isn't the real path.
-    @ViewBuilder
-    private var guidanceBox: some View {
-        if let scene {
-            if !scene.found {
-                infoBox(icon: "exclamationmark.triangle.fill", tint: Theme.miss, bg: Theme.missSoft,
-                        lead: "These platforms aren't connected on the map.",
-                        body: " The change may still be walkable — the detailed indoor route just isn't mapped.")
-            } else if scene.transitions.isEmpty {
-                infoBox(icon: "figure.walk", tint: Theme.go, bg: Theme.goSoft,
-                        lead: "One level, step-free.",
-                        body: " Walk straight across between the platforms — no stairs.")
-            } else {
-                infoBox(icon: settings.avoidElevators ? "figure.stairs" : "figure.walk", tint: Theme.go, bg: Theme.goSoft,
-                        lead: connectorSummary(scene.transitions) + ".",
-                        body: settings.avoidElevators
-                            ? " Routed without lifts (Avoid lifts is on in Settings)."
-                            : " \(WalkScene.label(forLevel: scene.startLevel)) → \(WalkScene.label(forLevel: scene.endLevel)).")
-            }
-        } else if !loading {
-            infoBox(icon: "map", tint: Theme.ink2, bg: Theme.panel2,
-                    lead: "No drawable walk for this transfer yet.",
-                    body: " The platforms and timing are correct; this station just isn't mapped in enough detail to draw the indoor route. The diagram above is a schematic, not the real path.")
-        }
-    }
-
-    /// Distinct connector kinds along the path, e.g. "Escalator + lift".
-    private func connectorSummary(_ transitions: [VizExport.Transition]) -> String {
-        var seen: [String] = []
-        for t in transitions where !seen.contains(WalkConnector.verb(t.kind)) {
-            seen.append(WalkConnector.verb(t.kind))
-        }
-        return seen.joined(separator: " + ")
-    }
-
-    private func infoBox(icon: String, tint: Color, bg: Color, lead: String, body: String) -> some View {
-        HStack(spacing: 10) {
-            SetIcon(icon, tint: tint, bg: bg)
-            (Text(lead).font(.system(size: 13, weight: .semibold)).foregroundColor(Theme.ink)
-             + Text(body).font(.system(size: 13)).foregroundColor(Theme.ink2))
-            Spacer(minLength: 0)
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(bg))
-    }
-
     /// The keystone hook. Asks the repository for real `viz_export` geometry and
-    /// builds a `WalkScene` the Canvas views project. The sample tier returns
+    /// builds the `WalkScene` the Canvas views project. The sample tier returns
     /// `ok == false`, so `scene` stays nil and the schematic stands.
     private func loadGeometry() async {
         defer { loading = false }
         guard let t = transfer,
               let key = WalkKey(transfer: t, stepFree: settings.avoidElevators) else { return }
-        if let result = await model.walk(for: key), result.ok, let export = result.export {
-            let s = WalkScene(export)
-            scene = s
+        if let result = await model.walkScene(for: key) {
+            scene = result.scene
             boarding = result.boarding
-            level = s.pathLevels.contains(s.startLevel) ? s.startLevel : (s.pathLevels.first ?? 0)
         }
     }
 }
@@ -307,8 +107,10 @@ private struct SectionCanvas: View {
                 ctx.stroke(p, with: .color(Theme.line), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
             }
 
-            let from = transfer?.arrivalPlatform ?? "?"
-            let to = transfer?.departurePlatform ?? "?"
+            // The recovered public sign, like every other screen — a feed's internal
+            // code drawn here would contradict the header right above it.
+            let from = transfer?.shownArrivalPlatform ?? "?"
+            let to = transfer?.shownDeparturePlatform ?? "?"
 
             if hasLevelChange {
                 // Two upper platform slabs + one lower underpass slab
@@ -376,8 +178,8 @@ private struct LevelCanvas: View {
     var body: some View {
         Canvas { ctx, size in
             let w = size.width, h = size.height
-            let from = transfer?.arrivalPlatform ?? "?"
-            let to = transfer?.departurePlatform ?? "?"
+            let from = transfer?.shownArrivalPlatform ?? "?"
+            let to = transfer?.shownDeparturePlatform ?? "?"
 
             if level == 0 || !hasLevelChange {
                 platformBar(&ctx, CGRect(x: 16, y: h * 0.18, width: w - 32, height: h * 0.22), "PLATFORM \(from)")

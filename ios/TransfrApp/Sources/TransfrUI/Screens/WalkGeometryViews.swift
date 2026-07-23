@@ -76,6 +76,29 @@ struct WalkScene {
 
     func level(of z: Float) -> Int { Int((CGFloat(z) / floorHeight).rounded()) }
 
+    /// The height change between two consecutive path points at which the section
+    /// renderer stops drawing a flat segment and draws a **riser**. One constant, so
+    /// "the drawing shows a level change" and "the copy says there's a level change"
+    /// can't be answered by two different rules.
+    static let riserThresholdM: Float = 0.4
+
+    /// Does the drawn path change level anywhere? Read straight off the geometry —
+    /// the same consecutive-point test the section makes, not the `transitions` list.
+    ///
+    /// The two disagree, and that gap is exactly what the honesty of the step-free
+    /// banner turns on: the Section renderer derives its risers from the polyline and
+    /// only *looks up* the kind in `transitions`, falling back to `vertical` when
+    /// there's no match. So a level change present in the geometry but missing from
+    /// `transitions` gets drawn as a grey riser while `transitions.isEmpty` still
+    /// reads true — which is how "One level, step-free. Walk straight across — no
+    /// stairs." came to sit in green above a picture of the path dropping a floor.
+    var pathChangesLevel: Bool {
+        guard pathPoints.count >= 2 else { return false }
+        return zip(pathPoints, pathPoints.dropFirst()).contains {
+            abs($1.z - $0.z) > Self.riserThresholdM
+        }
+    }
+
     /// The deepest/highest levels the *path* actually visits (drives the section
     /// bands, the level picker, and the "Levels" stat).
     ///
@@ -401,7 +424,7 @@ struct SectionGeometryCanvas: View {
                 let a = CGPoint(x: mapX(cum[i-1]), y: mapY(CGFloat(pts[i-1].z)))
                 let b = CGPoint(x: mapX(cum[i]),   y: mapY(CGFloat(pts[i].z)))
                 var seg = Path(); seg.move(to: a); seg.addLine(to: b)
-                let riser = abs(pts[i].z - pts[i-1].z) > 0.4
+                let riser = abs(pts[i].z - pts[i-1].z) > WalkScene.riserThresholdM
                 if riser {
                     let kind = riserKinds[riserKey(pts[i-1], pts[i])] ?? "vertical"
                     ctx.stroke(seg, with: .color(WalkConnector.color(kind)),

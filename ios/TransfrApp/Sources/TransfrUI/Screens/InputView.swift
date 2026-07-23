@@ -89,7 +89,6 @@ struct InputView: View {
         .sheet(isPresented: $showDepartPicker) { departureSheet }
         .navigationBarBackButtonHidden(true)
         .task {
-            if ProcessInfo.processInfo.environment["TRANSFR_OPEN_SETTINGS"] == "1" { model.path = [.settings] } // TEMP verify
             // First launch: default "From" to the user's location (design §3). Asks
             // permission once; the fix applies in onChange the moment it lands.
             if !didDefaultLocation && !AppConfig.autoplanOnLaunch {
@@ -284,6 +283,7 @@ struct InputView: View {
                     .textInputAutocapitalization(.words).autocorrectionDisabled()
                     .focused($focused, equals: field)
                     .submitLabel(.search)
+                    .onSubmit { submit(field) }
                     .onChange(of: text.wrappedValue) { _, new in
                         if focused == field { scheduleSearch(new) }
                     }
@@ -482,6 +482,29 @@ struct InputView: View {
         }
     }
 
+    /// The keyboard's Search key, which the fields advertised (`.submitLabel`) and
+    /// then ignored. Submitting commits the suggestion list's top hit — the list is
+    /// a ranked lookup, so that's the one the return key is offering — through the
+    /// SAME `pick` path as tapping the row, and then does what the field is for:
+    /// "From" hands off to "To", "To" runs the search. With no list showing nothing
+    /// is committed and the typed text stands.
+    ///
+    /// Submitting "To" never fires a search the CTA wouldn't: `canSubmit` is the
+    /// same gate, re-read after the commit so a just-picked destination counts.
+    private func submit(_ field: Field) {
+        if !suggestions.isEmpty, let top = suggestions.first { pick(top) }
+        switch field {
+        case .from:
+            focused = .to
+        case .to:
+            focused = nil
+            guard canSubmit else { return }
+            Task { await model.plan(avoidElevators: settings.avoidElevators) }
+        case .station, .link:
+            focused = nil   // walk-only: committing the station is the whole action
+        }
+    }
+
     /// Commit a suggestion to whichever field is focused, then dismiss the list.
     /// Picking the walk-only station also resolves its platforms so the pickers
     /// adapt to it.
@@ -614,8 +637,9 @@ struct InputView: View {
         return "\(d.string(from: model.departure)) · \(time)"
     }
 
-    /// Date + time editor. Departure is unrestricted (past allowed) so the
-    /// prototype's default 08:34-today anchor stays valid even after that time.
+    /// Date + time editor. Departure is unrestricted: a time in the past is still a
+    /// valid thing to ask about (the connection you just missed), so the picker
+    /// doesn't fence it off.
     private var departureSheet: some View {
         @Bindable var model = model
         return NavigationStack {

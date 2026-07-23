@@ -58,6 +58,52 @@ struct WalkSceneTests {
         #expect(s.turnByTurn().count >= 3)
     }
 
+    // MARK: - The step-free claim must agree with the geometry it sits over
+
+    /// A synthetic walk whose path runs along +x at the given heights (metres), with
+    /// NO transitions — the shape that exposes the disagreement between the drawing
+    /// and the banner.
+    static func straightWalk(z: [Float]) -> WalkScene {
+        let pts = z.enumerated().map { Point3(x: Float($0.offset) * 10, y: 0, z: $0.element) }
+        let meta = VizExport.Meta(
+            relationId: 1, ref1: "1", ref2: "2", algorithm: "test", contextMode: "test",
+            stitched: false, nStitches: 0, floorHeightM: 4, zIsLevelNotElevation: true,
+            originLat: 52, originLon: 13, levelsPresent: [], nContextWays: 0,
+            hasDetails: false, detailRadiusM: 0, nDetails: 0)
+        let path = VizExport.Path(found: true, points: pts, transitions: [],
+                                  walkingTimeSeconds: 60, walkingDistanceMeters: 80)
+        return WalkScene(VizExport(meta: meta, ways: [], path: path, details: []))
+    }
+
+    /// "One level, step-free. Walk straight across — no stairs." may only be said when
+    /// the **geometry** is flat too, not merely when `transitions` is empty.
+    ///
+    /// The Section renderer derives its risers from the path polyline and only looks
+    /// the *kind* up in `transitions`, falling back to `vertical`. So a level change
+    /// the geometry contains but `transitions` doesn't describe is drawn as a grey
+    /// riser while `transitions.isEmpty` still reads true — a green step-free claim
+    /// directly above a picture of the path changing floors.
+    @Test func stepFreeClaimRequiresFlatGeometryNotJustEmptyTransitions() throws {
+        // Genuinely flat: nothing describes a change, and nothing is drawn.
+        let flat = Self.straightWalk(z: [0, 0, 0])
+        #expect(flat.transitions.isEmpty)
+        #expect(!flat.pathChangesLevel, "a flat path is the one honest step-free case")
+
+        // The bug's shape: the path drops a floor, `transitions` says nothing.
+        let undescribed = Self.straightWalk(z: [0, 0, -4, -4])
+        #expect(undescribed.transitions.isEmpty, "nothing describes the change…")
+        #expect(undescribed.pathChangesLevel, "…but the drawn path changes level")
+
+        // The threshold is the renderer's own, so the copy and the drawing agree on
+        // what counts: a sub-threshold wobble is not a level change, just over is.
+        #expect(!Self.straightWalk(z: [0, 0.39, 0]).pathChangesLevel)
+        #expect(Self.straightWalk(z: [0, 0.41, 0]).pathChangesLevel)
+
+        // Real fixtures whose paths really do change floors report it.
+        #expect(try Self.scene("viz_berlin_1_16").pathChangesLevel)
+        #expect(try Self.scene("viz_dortmund_11_4").pathChangesLevel)
+    }
+
     // MARK: - Issue #53: the level view's framing, picker and honesty
 
     /// The picker must offer exactly the floors the path visits — no blank tabs.
@@ -83,6 +129,39 @@ struct WalkSceneTests {
         let berlin = try Self.scene("viz_berlin_1_16")
         #expect(berlin.pathLevels == [-2, -1, 0, 1, 2])
         for lvl in berlin.pathLevels { #expect(berlin.routeBounds(level: lvl) != nil) }
+    }
+
+    /// The "Level changes" stat is a COUNT of crossings, not the net delta.
+    ///
+    /// Both walk doors used to report `end − start`, which reads a route that drops to
+    /// an underpass and climbs back out as no level change at all: Dortmund 11→4
+    /// crosses four floors and nets 0. The facility fixture is the mirror image — two
+    /// crossings, net −4. The count is read off the path's own level sequence (the
+    /// geometry the section strokes its risers from), so it also sees a change that
+    /// `transitions` never described.
+    @Test func levelChangesCountsCrossingsNotTheNetDelta() throws {
+        let dortmund = try Self.scene("viz_dortmund_11_4")
+        #expect(dortmund.endLevel - dortmund.startLevel == 0, "the net delta is the bug")
+        #expect(dortmund.levelChangeCount == 4)
+
+        let facility = try Self.scene("viz_berlin_facility")
+        #expect(facility.endLevel - facility.startLevel == -4)
+        #expect(facility.levelChangeCount == 2)
+
+        // Where the map classified every change, the count agrees with the list the
+        // turn-by-turn prints — the stat and the steps can never contradict.
+        for name in ["viz_berlin_1_16", "viz_dortmund_11_4", "viz_essen_10_6"] {
+            let s = try Self.scene(name)
+            #expect(s.levelChangeCount == s.transitions.count, "\(name)")
+        }
+
+        // A flat walk changes level zero times. An undescribed drop still counts:
+        // the section draws that riser, so a stat of 0 beside it would be the same
+        // contradiction the step-free banner used to make.
+        #expect(Self.straightWalk(z: [0, 0, 0]).levelChangeCount == 0)
+        let undescribed = Self.straightWalk(z: [0, 0, -4, -4])
+        #expect(undescribed.transitions.isEmpty)
+        #expect(undescribed.levelChangeCount == 1)
     }
 
     /// Each floor is framed on its OWN route, not the whole scene's box.

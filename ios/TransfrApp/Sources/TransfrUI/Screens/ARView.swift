@@ -99,10 +99,12 @@ struct ARView: View {
         return "Follow the path"
     }
     private var bannerSub: String {
-        "your line to Platform \(transfer?.departurePlatform ?? "?")"
+        "your line to Platform \(transfer?.shownDeparturePlatform ?? "?")"
     }
     private var destinationPill: String {
-        let dep = transfer?.departurePlatform ?? "?"
+        // The recovered public sign: the pill is what you match against the real
+        // platform sign in front of you, so it can't be a feed's internal code.
+        let dep = transfer?.shownDeparturePlatform ?? "?"
         if let train = boardingTrain { return "▼ Platform \(dep) · \(train)" }
         return "▼ Platform \(dep)"
     }
