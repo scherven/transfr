@@ -56,6 +56,14 @@ class Transfer(BaseModel):
     # operator lists it as N" hint.
     arrival_platform_actual: Optional[str] = None
     departure_platform_actual: Optional[str] = None
+    # Accessibility fact for this change of train, from DB InfraGO's CC0 OpenStation
+    # (NeTEx) crosswalk (api/openstation.py): `step_free` is True only when BOTH
+    # platforms are step-free, `has_lift` True when a lift serves either. Null where
+    # the overlay doesn't cover the platforms (outside Germany, or an
+    # ungeoreferenced/unrated quay) -- an honest unknown, not a claim of "no". A
+    # true `step_free` is the cue to show a small step-free / lift badge.
+    step_free: Optional[bool] = None
+    has_lift: Optional[bool] = None
     # The two platforms' real coordinates (the journey stops). Carried so the
     # client's /walk request can forward them (WalkKey), letting the drawn walk
     # snap to the real platform when the feed's code isn't in OSM (see WalkKey).

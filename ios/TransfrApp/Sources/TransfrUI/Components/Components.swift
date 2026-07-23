@@ -35,6 +35,25 @@ struct PlatformChip: View {
     }
 }
 
+/// A small step-free badge — shown when DB InfraGO's OpenStation crosswalk reports
+/// this change of train is step-free (both platforms reachable without steps). A
+/// served lift is noted too. Absence means "unknown", never "not step-free", so the
+/// badge only ever appears as a positive.
+struct StepFreeChip: View {
+    var lift: Bool = false
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "figure.roll").font(.system(size: 10, weight: .semibold))
+            Text(lift ? "Step-free · lift" : "Step-free").font(.system(size: 11, weight: .semibold))
+        }
+        .foregroundStyle(Theme.go)
+        .padding(.horizontal, 7).padding(.vertical, 3)
+        .background(Capsule().fill(Theme.goSoft))
+        .accessibilityElement()
+        .accessibilityLabel(lift ? "Step-free, with a lift" : "Step-free")
+    }
+}
+
 /// Hint treatment C: a small muted pill reconciling the real platform shown beside
 /// it with the operator timetable's own code, for a platform the feed labels with
 /// an internal number the station signs don't use (Köln Hbf "89" vs Gleis 7). Info

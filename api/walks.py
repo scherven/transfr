@@ -29,14 +29,43 @@ from viz_export import export  # resolved via api/__init__ sys.path setup
 
 from typing import Callable, Optional
 
-from api import config, schemas
+from api import config, platform_labels, schemas
 from api.boarding import compute_boarding, stepoff_node_of
+from api.bridge import relation_coord
 
 # Match assess_transfer's pathfind so geometry and verdict never disagree.
 _ALGORITHM = "astar"
 
 WALK_BUILD_FAILED = "walk_build_failed"
 NO_GEOMETRY = "no_geometry_for_platforms"
+
+
+def _overlay_coords(conn, key: schemas.WalkKey):
+    """(from_coord, to_coord) for this key's platforms from the harvested overlay,
+    or (None, None).
+
+    Why: OSM labels only a fraction of a big station's platforms (Zürich HB: 3 of
+    ~40), but the overlay -- the same data the station map draws its track markers
+    from -- has a coordinate for every track. A browse-mode caller knows only a
+    track LABEL ("8"), so without this the ref matches no OSM platform and the walk
+    dies as `platform_not_found` even though the map just offered that platform.
+    Feeding the marker's own coordinate in as core/'s Tier-3 anchor keeps the map
+    and the router in agreement: anything we draw, we can route.
+
+    Best-effort by construction -- any failure yields (None, None) and the walk
+    proceeds exactly as before. Costs one indexed lookup, and Tier-3 only consults
+    these when the ref matches no OSM platform, so refs that DO resolve are
+    byte-for-byte unchanged."""
+    try:
+        with conn.cursor() as cur:
+            station = relation_coord(cur, key.relation_id)
+        if station is None:
+            return None, None
+        lat, lon = station
+        return (platform_labels.track_coord(lat, lon, key.from_platform),
+                platform_labels.track_coord(lat, lon, key.to_platform))
+    except Exception:  # noqa: BLE001 -- an overlay miss must never fail a walk
+        return None, None
 
 
 def _boarding_for(
@@ -85,6 +114,14 @@ def build_walk(
             "name": key.poi.name, "category": key.poi.category,
             "subtype": key.poi.subtype, "level_raw": key.poi.level,
         }]
+    # Anchor coordinates: the caller's own (a journey stop forwards them on the
+    # Transfer) win; otherwise fall back to the harvested overlay so a browse-mode
+    # walk between two map-visible-but-OSM-unlabelled tracks still routes.
+    from_coord, to_coord = key.from_coord, key.to_coord
+    if from_coord is None or to_coord is None:
+        overlay_from, overlay_to = _overlay_coords(conn, key)
+        from_coord = from_coord or overlay_from
+        to_coord = to_coord or overlay_to
     try:
         doc = export(
             conn,
@@ -99,8 +136,8 @@ def build_walk(
             # Draw the same walk the verdict resolved: when the feed's platform
             # code isn't in OSM (e.g. Köln Hbf "89"/"88"), these coordinates let
             # viz_export snap to the real platform instead of failing to geometry.
-            from_coord=key.from_coord,
-            to_coord=key.to_coord,
+            from_coord=from_coord,
+            to_coord=to_coord,
             attach_pois=attach_pois,
         )
     except SystemExit:

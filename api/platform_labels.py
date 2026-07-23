@@ -123,3 +123,26 @@ def platform_markers(lat: float, lon: float,
         if len(plats) > disp_count:
             disp_name, disp_count = name, len(plats)
     return disp_name, list(merged.values())
+
+
+def track_coord(lat: float, lon: float, track: str,
+                max_distance_m: float = DEFAULT_MAX_DISTANCE_M,
+                merge_radius_m: float = MERGE_RADIUS_M) -> Optional[Tuple[float, float]]:
+    """The harvested coordinate of platform `track` at the station nearest
+    (lat, lon), or None (no overlay here / no such track / it carries no coord).
+
+    This is the seam that lets a walk be ROUTED to a platform OSM does not label.
+    The station map draws a track's marker at this coordinate; handing the SAME
+    coordinate to core/'s Tier-3 snap means anything we can draw, we can also
+    route to -- otherwise the map advertises platforms `/walk` then rejects with
+    `platform_not_found` (Zürich HB labels only 3 of ~40 platforms in OSM, so
+    tracks like 8 and 10 exist on the map but nowhere in the routing graph)."""
+    found = platform_markers(lat, lon, max_distance_m, merge_radius_m)
+    if found is None:
+        return None
+    _, plats = found
+    want = str(track)
+    for p in plats:
+        if str(p.get("track")) == want and p.get("lat") is not None and p.get("lon") is not None:
+            return (p["lat"], p["lon"])
+    return None

@@ -19,7 +19,7 @@ from typing import Optional
 from graph import haversine_meters
 from ground_truth import find_shortest_path
 
-from api import config
+from api import config, openstation
 from api.bridge import map_track_to_ref, nearest_platform_label, resolve_station_candidates
 
 # Safety margin on top of the raw walk: a transfer that is walkable only with
@@ -98,6 +98,13 @@ class TransferAssessment:
     # the signal to show "platform <actual>" with the feed's code as a hint.
     arrival_platform_actual: Optional[str] = None
     departure_platform_actual: Optional[str] = None
+    # Accessibility fact for this change of train, from the DB OpenStation (NeTEx)
+    # overlay: step_free is True only when BOTH platforms are step-free, has_lift
+    # True when a lift serves either. None where the overlay doesn't cover the
+    # platforms (outside DE, or an ungeoreferenced/unrated quay) -- degrade, never
+    # guess. See api/openstation.py.
+    step_free: Optional[bool] = None
+    has_lift: Optional[bool] = None
 
 
 @dataclass
@@ -120,6 +127,10 @@ class WalkResolution:
     # internal code (see TransferAssessment). None unless it differs from the feed.
     arrival_platform_actual: Optional[str] = None
     departure_platform_actual: Optional[str] = None
+    # Step-free / lift accessibility fact from the DB OpenStation overlay (see
+    # TransferAssessment). Delay-invariant, so it rides the memoized resolution.
+    step_free: Optional[bool] = None
+    has_lift: Optional[bool] = None
 
 
 def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
@@ -152,25 +163,83 @@ def classify(walk_time_s: Optional[float], layover_s: Optional[float],
     return FEASIBLE
 
 
+def _split_compound(label: Optional[str]) -> set:
+    """The tracks a (possibly island) label covers: "6/7" -> {"6","7"}, "7" -> {"7"}."""
+    return {p.strip() for p in label.split("/")} if label else set()
+
+
+def _reconcile_label(osm: Optional[str], netex: Optional[str], feed_ref: str) -> Optional[str]:
+    """Pick the platform sign to display for a coordinate-resolved end, from the
+    OSM stop-node label (per-track, e.g. "7") and the DB OpenStation NeTEx label
+    (the operator's own sign, often an island compound "6/7"). NeTEx is the higher
+    authority, so it wins a genuine disagreement and fills where OSM has nothing;
+    but when OSM's track is a component of the NeTEx island the two AGREE, and the
+    more specific OSM sign ("7" within "6/7") is the better one to show. Returns
+    the chosen label only when it differs from the feed's own code -- otherwise
+    there is nothing to hint."""
+    if netex is None:
+        chosen = osm
+    elif osm is not None and osm in _split_compound(netex):
+        chosen = osm            # agree -> keep the specific track
+    else:
+        chosen = netex          # NeTEx wins (OSM absent, or a real conflict)
+    return chosen if chosen and chosen != feed_ref else None
+
+
 def _recover_display_labels(conn, res: "WalkResolution", result: dict,
                             arr_lat, arr_lon, arr_ref, dep_lat, dep_lon, dep_ref) -> None:
     """Fill res.{arrival,departure}_platform_actual with the real platform sign
     for any end the pathfinder resolved by coordinate (result['source_by_coord'] /
-    ['target_by_coord']) -- i.e. where the feed's label is an internal code. A
-    recovered label identical to the feed ref is dropped (nothing to hint).
-    Best-effort: a failed lookup leaves the field None, so the UI just shows the
-    feed's label as today."""
+    ['target_by_coord']) -- i.e. where the feed's label is an internal code. The
+    sign is reconciled from two coordinate lookups: the CC0 DB OpenStation NeTEx
+    crosswalk (higher authority, DE-wide, works even where OSM lacks the label) and
+    the OSM stop node (per-track precision). A recovered label identical to the
+    feed ref is dropped (nothing to hint). Best-effort: a failed lookup leaves the
+    field None, so the UI just shows the feed's label as today."""
     if not (result.get("source_by_coord") or result.get("target_by_coord")):
         return
     with conn.cursor() as cur:
         if result.get("source_by_coord"):
-            actual = nearest_platform_label(cur, arr_lat, arr_lon)
-            if actual and actual != arr_ref:
-                res.arrival_platform_actual = actual
+            res.arrival_platform_actual = _reconcile_label(
+                nearest_platform_label(cur, arr_lat, arr_lon),
+                openstation.nearest_label(arr_lat, arr_lon), arr_ref)
         if result.get("target_by_coord"):
-            actual = nearest_platform_label(cur, dep_lat, dep_lon)
-            if actual and actual != dep_ref:
-                res.departure_platform_actual = actual
+            res.departure_platform_actual = _reconcile_label(
+                nearest_platform_label(cur, dep_lat, dep_lon),
+                openstation.nearest_label(dep_lat, dep_lon), dep_ref)
+
+
+def _combine_step_free(arr: Optional[dict], dep: Optional[dict]) -> Optional[bool]:
+    """Step-free verdict for the whole change of train: True only when BOTH
+    platforms are step-free, False when either is known not to be, None when either
+    end is unrated / uncovered by the overlay (honest 'unknown')."""
+    a = arr.get("step_free") if arr else None
+    b = dep.get("step_free") if dep else None
+    if a is None or b is None:
+        return None
+    return a and b
+
+
+def _combine_has_lift(arr: Optional[dict], dep: Optional[dict]) -> Optional[bool]:
+    """A lift serves the change of train if either platform has one; None only when
+    neither end is covered by the overlay."""
+    a = arr.get("has_lift") if arr else None
+    b = dep.get("has_lift") if dep else None
+    if a is None and b is None:
+        return None
+    return bool(a) or bool(b)
+
+
+def _recover_accessibility(res: "WalkResolution", arr_lat, arr_lon, dep_lat, dep_lon) -> None:
+    """Fill res.step_free / res.has_lift from the DB OpenStation overlay for the two
+    resolved platforms (nearest georeferenced NeTEx quay to each). Unlike the label
+    recovery this is NOT gated on a coordinate resolution -- accessibility is a fact
+    about the platforms whether or not the feed's label was renumbered. None-safe:
+    no overlay / no nearby quay leaves the fields None."""
+    arr_acc = openstation.accessibility_at(arr_lat, arr_lon)
+    dep_acc = openstation.accessibility_at(dep_lat, dep_lon)
+    res.step_free = _combine_step_free(arr_acc, dep_acc)
+    res.has_lift = _combine_has_lift(arr_acc, dep_acc)
 
 
 def resolve_walk(
@@ -268,6 +337,9 @@ def resolve_walk(
             # routing and as the hint. Only set when it actually differs.
             _recover_display_labels(conn, res, result,
                                     arr_lat, arr_lon, arr_ref, dep_lat, dep_lon, dep_ref)
+            # Accessibility is a platform fact independent of the renumbering, so it
+            # runs for every resolved transfer (not just coordinate-resolved ends).
+            _recover_accessibility(res, arr_lat, arr_lon, dep_lat, dep_lon)
             return res
         if first_reason is None:
             first_reason = result.get("reason", "not_found")
@@ -346,6 +418,7 @@ def assess_transfer(
         arrival_platform=r.arrival_platform, departure_platform=r.departure_platform,
         arrival_platform_actual=r.arrival_platform_actual,
         departure_platform_actual=r.departure_platform_actual,
+        step_free=r.step_free, has_lift=r.has_lift,
         walk_time_s=r.walk_time_s, walk_distance_m=r.walk_distance_m,
     )
     if r.walk_time_s is None:

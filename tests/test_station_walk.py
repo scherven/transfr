@@ -57,9 +57,28 @@ class _FakeConn:
 # Offline: build_station_walk shaping (primitives stubbed)
 # ---------------------------------------------------------------------------
 
+class _NoOverlay:
+    """Neutralises the harvested platform overlay.
+
+    build_station_walk folds overlay tracks in alongside the OSM refs (so the tool
+    covers the platforms OSM doesn't label). These offline tests use REAL station
+    coordinates, so without this they'd pull in that station's real overlay and stop
+    isolating the ref-list -> rows shaping they exist to check. The union itself is
+    covered by test_overlay_tracks_are_offered_alongside_osm_refs."""
+
+    @staticmethod
+    def platform_markers(lat, lon, *a, **k):
+        return None
+
+    @staticmethod
+    def track_coord(lat, lon, track, *a, **k):
+        return None
+
+
 def _stub_station(monkeypatch, relation_id=5688517, name="Berlin Hauptbahnhof"):
     monkeypatch.setattr(station_walk, "resolve_station",
                         lambda cur, lat, lon: StationMatch(relation_id, name, lat, lon, 4.0))
+    monkeypatch.setattr(station_walk, "platform_labels", _NoOverlay)
 
 
 def test_unresolved_station_is_top_level_not_found(monkeypatch):
@@ -83,6 +102,40 @@ def test_skips_the_source_platform(monkeypatch):
     assert resp.relation_id == 5688517 and resp.station == "Berlin Hauptbahnhof"
     # Row for every ref EXCEPT the source itself.
     assert [r.to_platform for r in resp.results] == ["2", "3"]
+
+
+def test_overlay_tracks_are_offered_alongside_osm_refs(monkeypatch):
+    """The tool must cover the same platform set the station map shows. OSM labels
+    only a handful at a big station (Zürich HB: 5 of ~25), so overlay-only tracks
+    are folded in -- deduped against the OSM refs and anchored by their overlay
+    coordinate so they can actually route."""
+    _stub_station(monkeypatch)
+    monkeypatch.setattr(station_walk, "list_platform_refs", lambda cur, rel: ["1", "2"])
+
+    class _Overlay:
+        @staticmethod
+        def platform_markers(lat, lon, *a, **k):
+            return ("Berlin Hauptbahnhof", [{"track": "2"}, {"track": "8"}, {"track": "10"}])
+
+        @staticmethod
+        def track_coord(lat, lon, track, *a, **k):
+            return (52.5, 13.4) if track in ("8", "10") else None
+
+    monkeypatch.setattr(station_walk, "platform_labels", _Overlay)
+    seen = {}
+
+    def _fake_path(conn, rel, src, dst, **kw):
+        seen[dst] = kw.get("to_coord")
+        return {"found": True, "walking_time_seconds": 30.0, "walking_distance_meters": 20.0}
+
+    monkeypatch.setattr(station_walk, "find_shortest_path", _fake_path)
+    resp = build_station_walk(_FakeConn(), *BERLIN_HBF, "1")
+
+    # OSM ref "2" appears once (deduped); overlay-only "8"/"10" are now offered.
+    assert [r.to_platform for r in resp.results] == ["2", "8", "10"]
+    # ...and the overlay-only ones carry their coordinate as the routing anchor.
+    assert seen["8"] == (52.5, 13.4) and seen["10"] == (52.5, 13.4)
+    assert seen["2"] is None
 
 
 def test_unreachable_platform_is_a_found_false_row_with_reason(monkeypatch):

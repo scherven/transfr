@@ -83,6 +83,58 @@ struct VizExportDecodeTests {
         #expect(map.facilities.allSatisfy { $0.nearestPlatform != nil })
     }
 
+    /// A station-map export carries the GTFS-overlay track markers: one label per
+    /// track, already projected to the export's ENU metres and lifted to its floor,
+    /// so the client draws them without re-projecting. `level` is `nil` for a track
+    /// the data can't place (then `z == 0`, the ground plane).
+    @Test func decodesStationMapPlatformMarkers() throws {
+        let json = """
+        {
+          "meta": {"relation_id": 1532513, "station_name": "Zürich HB", "ref_1": "3", "ref_2": "21",
+            "algorithm": "astar", "context_mode": "touched", "stitched": false, "n_stitches": 0,
+            "floor_height_m": 4.0, "z_is_level_not_elevation": true,
+            "origin_lat": 47.3779, "origin_lon": 8.5403, "levels_present": [-2.0, 0.0],
+            "bbox": {"min_x": -150.0, "max_x": 120.0, "min_y": -120.0, "max_y": 140.0},
+            "n_context_ways": 1, "has_details": false, "detail_radius_m": 0.0, "n_details": 0,
+            "all_platforms": true, "n_platform_markers": 3},
+          "ways": [{"id": 1, "kind": "platform", "is_connector": false, "level_raw": "0",
+            "points": [[-140.0, 10.0, 0.0], [-120.0, 30.0, 0.0]], "ref": "3", "level": 0}],
+          "path": {"found": true, "points": [[-140.0, 10.0, 0.0], [108.0, -106.0, -8.0]],
+            "walking_time_seconds": 120.0, "walking_distance_meters": 90.0},
+          "details": [],
+          "platform_markers": [
+            {"track": "3", "x": -140.0, "y": 12.0, "z": 0.0, "level": 0},
+            {"track": "21", "x": 108.0, "y": -106.0, "z": -8.0, "level": -2},
+            {"track": "18", "x": -93.0, "y": 131.0, "z": 0.0, "level": null}
+          ]
+        }
+        """
+        let viz = try TransfrJSON.decode(VizExport.self, from: Data(json.utf8))
+        #expect(viz.meta.allPlatforms == true)
+        #expect(viz.meta.nPlatformMarkers == 3)
+
+        let markers = try #require(viz.platformMarkers)
+        #expect(markers.count == 3)
+        #expect(Set(markers.map(\.track)) == ["3", "21", "18"])
+
+        let t3 = try #require(markers.first { $0.track == "3" })
+        #expect(t3.x == -140.0 && t3.y == 12.0 && t3.z == 0.0 && t3.level == 0)
+        let t21 = try #require(markers.first { $0.track == "21" })
+        #expect(t21.level == -2 && t21.z == -8.0)          // lifted to its floor
+        // A deep/unplaceable track defaults to the ground plane with a nil level.
+        let t18 = try #require(markers.first { $0.track == "18" })
+        #expect(t18.level == nil && t18.z == 0.0)
+    }
+
+    /// A plain walk export has no station-map layer: `platformMarkers` and the two
+    /// `meta` flags decode to `nil`, so older exports and walk views keep working.
+    @Test func walkExportHasNoPlatformMarkers() throws {
+        let viz = try TransfrJSON.decode(VizExport.self, from: Self.fixture("viz_berlin_1_16"))
+        #expect(viz.platformMarkers == nil)
+        #expect(viz.meta.allPlatforms == nil)
+        #expect(viz.meta.nPlatformMarkers == nil)
+    }
+
     /// A `Point3` round-trips through our unkeyed [x,y,z] coding.
     @Test func point3RoundTrips() throws {
         let p = Point3(x: -59.9, y: 65.8, z: -8.0)

@@ -274,10 +274,17 @@ struct JourneyCard: View {
 
     private func transferNode(_ t: Transfer) -> some View {
         let v = t.verdictKind
-        let plat = "\(t.arrivalPlatform ?? "?")→\(t.departurePlatform ?? "?")"
+        // Prefer the recovered public platform sign over the feed's internal code,
+        // so a renumbered change (Köln "89→88") reads as the real "7→6".
+        let arr = t.arrivalPlatformActual ?? t.arrivalPlatform ?? "?"
+        let dep = t.departurePlatformActual ?? t.departurePlatform ?? "?"
         return HStack(spacing: 4) {
             Text(shortStation(t.atStation ?? "")).font(.system(size: 12, weight: .semibold)).lineLimit(1)
-            Text(plat).font(.system(size: 11, weight: .medium, design: .monospaced)).opacity(0.7).lineLimit(1)
+            Text("\(arr)→\(dep)").font(.system(size: 11, weight: .medium, design: .monospaced)).opacity(0.7).lineLimit(1)
+            if t.stepFree == true {
+                Image(systemName: "figure.roll").font(.system(size: 9, weight: .semibold))
+                    .opacity(0.75).accessibilityLabel("step-free")
+            }
         }
         .foregroundStyle(v.color)
         .padding(.horizontal, 8).padding(.vertical, 5)

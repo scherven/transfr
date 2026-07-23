@@ -29,6 +29,8 @@ struct AttributionsView: View {
                        link: "https://transitous.org/sources/")
                 source("Deutsche Bahn · IRIS", "Real-time platform and track changes for German stations, from DB's public IRIS feed, served through derf's db-infoscreen (finalrewind.org).",
                        link: "https://dbf.finalrewind.org")
+                source("DB InfraGO · OpenStation", "German public platform labels — correcting renumbered timetable codes — and step-free / lift accessibility, from DB InfraGO's OpenStation NeTEx export. CC0 1.0.",
+                       link: "https://bahnhof.de/daten/netex")
                 source("Coach-formation providers", "Train coach order & sector maps from the operators' formation feeds — DB Wagenreihung and ÖBB — where published.")
                 source("trainline-eu/stations", "Station names, and the English city aliases (info:en) that let you search stations in English. © trainline-eu/stations contributors, ODbL.",
                        link: "https://github.com/trainline-eu/stations")

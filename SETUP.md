@@ -90,11 +90,13 @@ psql -d transfr_eu -v ON_ERROR_STOP=1 -f core/dbgen/schema.sql
 PGDATABASE=transfr_eu .venv/bin/python core/dbgen/etl.py core/data/europe-railway-pedestrian.pbf
 ```
 
-**2d. Build the derived tables — in this order** (`build_stitch_bridges` depends
-on `node_way_ids` and on the coordinate index that `build_platform_index`
-creates), then finalise:
+**2d. Build the derived tables — in this order** (`propagate_multipolygon_tags`
+runs first because it corrects `osm_ways.tags` that every later step reads;
+`build_stitch_bridges` depends on `node_way_ids` and on the coordinate index that
+`build_platform_index` creates), then finalise:
 
 ```bash
+PGDATABASE=transfr_eu .venv/bin/python -m core.dbgen.propagate_multipolygon_tags  # relation tags -> untagged member ways
 PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_node_way_ids.py     # node->way adjacency
 PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_station_index.py    # station_points (centroids, ~333k rows)
 PGDATABASE=transfr_eu .venv/bin/python core/dbgen/build_platform_index.py   # station_stops + osm_nodes coord index

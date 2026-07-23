@@ -56,6 +56,7 @@ _FAVICON = "data:image/svg+xml," + quote(_FAVICON_SVG)
 PATH_COLOR = "#ff8800"
 START_COLOR = "#2f9e44"
 END_COLOR = "#e03131"
+PLATFORM_MARKER_COLOR = "#c2255c"   # station-map track labels (from the GTFS overlay)
 # Synthetic stitch segments (core/build_stitch_bridges.py): the one part of a
 # route we INFERRED -- a short hop onto a platform whose polygon a connector ends
 # inside without a shared node -- rather than read off a mapped footpath. Drawn
@@ -491,6 +492,20 @@ def build_figure(data, exag: float, margin: float) -> go.Figure:
             x=[None], y=[None], z=[None], mode="markers",
             marker=dict(size=8, color=LANDMARK_COLOR.get(c, "#868e96"), symbol="square"),
             name=c, hoverinfo="skip"))
+
+    # Station-map mode: label every platform TRACK at its true position (the GTFS
+    # overlay carried in the export's `platform_markers`; OSM tags only a few with a
+    # `ref`). Drawn whether or not a walk was found, so a bare station map still
+    # shows all its tracks.
+    if meta.get("all_platforms") and data.get("platform_markers"):
+        pm = data["platform_markers"]
+        fig.add_trace(go.Scatter3d(
+            x=[m["x"] for m in pm], y=[m["y"] for m in pm],
+            z=[m["z"] * exag for m in pm], mode="markers+text",
+            marker=dict(size=3.5, color=PLATFORM_MARKER_COLOR, symbol="square"),
+            text=[str(m["track"]) for m in pm], textposition="top center",
+            textfont=dict(size=10, color=PLATFORM_MARKER_COLOR), hoverinfo="skip",
+            name=f"tracks ({len(pm)})"))
 
     # Title/caveat live in a responsive HTML overlay (see write_html), not a
     # Plotly title -- Plotly titles do not wrap and clip on a phone viewport.

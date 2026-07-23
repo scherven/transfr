@@ -281,8 +281,15 @@ struct TransferCard: View {
                             walkItem("Left", Fmt.duration(Int(spare)), color: v == .tight ? Theme.tight : Theme.ink)
                         }
                     }
-                    if let note = feedNote {
-                        FeedCodeChip(text: note, accessibility: "The timetable lists \(feedNoteSpoken)")
+                    if feedNote != nil || transfer.stepFree == true {
+                        HStack(spacing: 6) {
+                            if let note = feedNote {
+                                FeedCodeChip(text: note, accessibility: "The timetable lists \(feedNoteSpoken)")
+                            }
+                            if transfer.stepFree == true {
+                                StepFreeChip(lift: transfer.hasLift == true)
+                            }
+                        }
                     }
                 }
             }

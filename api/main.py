@@ -196,8 +196,13 @@ def get_transfer(
             lat=lat, lon=lon, from_platform=from_platform, to_platform=to_platform,
             found=False, reason=STATION_UNRESOLVED,
         )
+    # Anchor each end on its overlay coordinate (the same one the station map draws
+    # its track marker at) so a platform OSM doesn't label still routes instead of
+    # returning platform_not_found. No effect where the ref already resolves.
     result = find_shortest_path(conn, match.relation_id, from_platform, to_platform,
-                                algorithm="astar", use_stitch_bridges=config.STITCH_BRIDGES)
+                                algorithm="astar", use_stitch_bridges=config.STITCH_BRIDGES,
+                                from_coord=platform_labels.track_coord(lat, lon, from_platform),
+                                to_coord=platform_labels.track_coord(lat, lon, to_platform))
     found = bool(result.get("found"))
     return schemas.PlatformWalkResponse(
         lat=lat, lon=lon,
@@ -333,6 +338,12 @@ def get_walk(
     to_platform: str = Query(min_length=1, description="departure platform ref"),
     step_free: bool = Query(default=False, description="route without elevators"),
     all_platforms: bool = Query(default=False, description="station-map mode: include every platform"),
+    from_lat: Optional[float] = Query(default=None, description="arrival platform's real latitude (from a "
+                                      "Transfer, or /station-platforms feed_platforms) -- anchors a platform "
+                                      "OSM doesn't label; omitted, the server falls back to the overlay"),
+    from_lon: Optional[float] = Query(default=None, description="arrival platform's real longitude"),
+    to_lat: Optional[float] = Query(default=None, description="departure platform's real latitude"),
+    to_lon: Optional[float] = Query(default=None, description="departure platform's real longitude"),
     poi_lat: Optional[float] = Query(default=None, description="'walk to nearest' focus facility latitude"),
     poi_lon: Optional[float] = Query(default=None, description="'walk to nearest' focus facility longitude"),
     poi_category: Optional[str] = Query(default=None, description="focus facility OSM category (amenity/shop/...)"),
@@ -354,7 +365,9 @@ def get_walk(
                               category=poi_category, subtype=poi_subtype, level=poi_level)
     key = schemas.WalkKey(relation_id=relation_id, from_platform=from_platform,
                           to_platform=to_platform, step_free=step_free,
-                          all_platforms=all_platforms, poi=poi)
+                          all_platforms=all_platforms, poi=poi,
+                          from_lat=from_lat, from_lon=from_lon,
+                          to_lat=to_lat, to_lon=to_lon)
     result = build_walk(conn, key)
     if result.ok:
         response.headers["Cache-Control"] = _WALK_CACHE_CONTROL
